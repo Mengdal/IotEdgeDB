@@ -16,7 +16,7 @@ permissions:
 
 env:
   REGISTRY_GHCR: ghcr.io
-  IMAGE_NAME: Mengdal/iedb
+  IMAGE_NAME: mengdal/iedb
 
 jobs:
   # Extract version from branch name or input
@@ -769,7 +769,7 @@ jobs:
           docker run -d \
             -p 8000:8000 \
             -v iedb-data:/app/data \
-            ghcr.io/Mengdal/IotEdgeDB:${{ needs.prepare.outputs.version }}
+            ghcr.io/mengdal/iedb:${{ needs.prepare.outputs.version }}
           ```
 
           ### Debian/Ubuntu (amd64, arm64)
@@ -809,7 +809,7 @@ jobs:
 
           | Platform | Architecture | Package |
           |----------|--------------|---------|
-          | Docker | amd64, arm64 | `ghcr.io/Mengdal/IotEdgeDB:${{ needs.prepare.outputs.version }}` |
+          | Docker | amd64, arm64 | `ghcr.io/mengdal/iedb:${{ needs.prepare.outputs.version }}` |
           | Debian/Ubuntu | amd64 | `arc_${{ needs.prepare.outputs.version }}_amd64.deb` |
           | Debian/Ubuntu | arm64 | `arc_${{ needs.prepare.outputs.version }}_arm64.deb` |
           | RHEL/Fedora | x86_64 | `iedb-${{ needs.prepare.outputs.version }}-1.x86_64.rpm` |
@@ -871,7 +871,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Type | Package |" >> $GITHUB_STEP_SUMMARY
           echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker | \`ghcr.io/Mengdal/IotEdgeDB:${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker | \`ghcr.io/mengdal/iedb:${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Helm | \`iedb-${VERSION}.tgz\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Debian amd64 | \`arc_${VERSION}_amd64.deb\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Debian arm64 | \`arc_${VERSION}_arm64.deb\` |" >> $GITHUB_STEP_SUMMARY
