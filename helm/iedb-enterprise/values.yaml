@@ -16,7 +16,7 @@
 # Image
 # -----------------------------------------------------------------------------
 image:
-  repository: ghcr.io/Mengdal/IotEdgeDB
+  repository: ghcr.io/mengdal/iedb
   tag: ""                          # defaults to Chart.appVersion
   pullPolicy: IfNotPresent
 
