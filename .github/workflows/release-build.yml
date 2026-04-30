@@ -419,7 +419,7 @@ jobs:
           systemctl disable iedb.service || true
 
           %changelog
-          * $(date "+%a %b %d %Y") LMGateway <contact@luomigateway@vip.qq.com> - ${VERSION}-1
+          * $(date "+%a %b %d %Y") LMGateway <luomigateway@vip.qq.com> - ${VERSION}-1
           - Release ${VERSION}
           EOF
 

@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "iedb-enterprise.readerName" . }}
+  labels:
+    {{- include "iedb-enterprise.roleLabels" (dict "ctx" . "role" "reader") | nindent 4 }}
+spec:
+  serviceName: {{ include "iedb-enterprise.readerHeadlessName" . }}
+  replicas: {{ .Values.reader.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "iedb-enterprise.roleSelectorLabels" (dict "ctx" . "role" "reader") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "iedb-enterprise.roleLabels" (dict "ctx" . "role" "reader") | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: iedb
+          image: {{ include "iedb-enterprise.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: coordinator
+              containerPort: 9100
+          env:
+            {{- include "iedb-enterprise.commonClusterEnv" . | nindent 12 }}
+            - name: IEDB_CLUSTER_ROLE
+              value: "reader"
+            - name: IEDB_CLUSTER_ADVERTISE_ADDR
+              value: "$(POD_NAME).{{ include "iedb-enterprise.readerHeadlessName" . }}.{{ .Release.Namespace }}.svc.cluster.local:9100"
+            - name: IEDB_CLUSTER_SEEDS
+              value: {{ include "iedb-enterprise.writerSeeds" . | quote }}
+            {{- include "iedb-enterprise.storageEnv" . | nindent 12 }}
+            {{- with .Values.reader.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            {{- if .Values.cluster.tls.enabled }}
+            - name: tls
+              mountPath: /etc/iedb/tls
+              readOnly: true
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.reader.resources | nindent 12 }}
+      volumes:
+        {{- if eq .Values.storage.mode "shared" }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.cluster.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.cluster.tls.existingSecret | quote }}
+        {{- end }}
+      {{- include "iedb-enterprise.roleScheduling" (dict "ctx" . "role" "reader") | nindent 6 }}
+  {{- if eq .Values.storage.mode "local" }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- $sc := .Values.reader.persistence.storageClass | default .Values.storage.local.storageClass }}
+        {{- if $sc }}
+        storageClassName: {{ $sc | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.reader.persistence.size | quote }}
+  {{- end }}
