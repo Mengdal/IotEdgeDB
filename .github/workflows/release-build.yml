@@ -1,0 +1,888 @@
+name: Release Build
+
+on:
+  push:
+    branches:
+      - 'release/*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  REGISTRY_GHCR: ghcr.io
+  IMAGE_NAME: Mengdal/iedb
+
+jobs:
+  # Extract version from branch name or input
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      short_version: ${{ steps.version.outputs.short_version }}
+    steps:
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # Extract from branch name: release/25.11.1 -> 25.11.1
+            VERSION="${GITHUB_REF#refs/heads/release/}"
+          fi
+
+          # Validate version format (YY.MM.PATCH)
+          if ! [[ "$VERSION" =~ ^[0-9]{2}\.[0-9]{1,2}\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format: $VERSION (expected: YY.MM.PATCH)"
+            exit 1
+          fi
+
+          # Extract short version (25.11)
+          SHORT_VERSION="${VERSION%.*}"
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "short_version=$SHORT_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Building version: $VERSION" >> $GITHUB_STEP_SUMMARY
+
+  # Build and push Docker multi-arch images
+  docker-build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: prepare
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_GHCR }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.short_version }}
+            type=raw,value=latest
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=build-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Build Go binaries using native runners (CGO required for SQLite)
+  build-binaries:
+    name: Build Binaries
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            suffix: linux-amd64
+          - runner: ubuntu-24.04-arm
+            suffix: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: 1
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+
+          go build -tags=duckdb_arrow \
+            -ldflags "-s -w -X main.Version=${VERSION}" \
+            -o iedb-${{ matrix.suffix }} \
+            ./cmd/iedb
+
+          chmod +x iedb-${{ matrix.suffix }}
+
+          # Show binary info
+          file iedb-${{ matrix.suffix }}
+          ls -lh iedb-${{ matrix.suffix }}
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: iedb-binary-${{ matrix.suffix }}
+          path: iedb-${{ matrix.suffix }}
+          retention-days: 7
+
+  # Build Debian packages
+  debian-build:
+    name: Build Debian Package
+    runs-on: ubuntu-latest
+    needs: [prepare, build-binaries]
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            binary_suffix: linux-amd64
+          - arch: arm64
+            binary_suffix: linux-arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: iedb-binary-${{ matrix.binary_suffix }}
+
+      - name: Build Debian package
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+          ARCH=${{ matrix.arch }}
+
+          # Create package directory structure
+          PKG_DIR="iedb_${VERSION}_${ARCH}"
+          mkdir -p ${PKG_DIR}/DEBIAN
+          mkdir -p ${PKG_DIR}/usr/bin
+          mkdir -p ${PKG_DIR}/etc/iedb
+          mkdir -p ${PKG_DIR}/lib/systemd/system
+          mkdir -p ${PKG_DIR}/var/lib/iedb
+
+          # Copy binary
+          cp iedb-${{ matrix.binary_suffix }} ${PKG_DIR}/usr/bin/iedb
+          chmod +x ${PKG_DIR}/usr/bin/iedb
+
+          # Copy config
+          cp iedb.toml ${PKG_DIR}/etc/iedb/iedb.toml
+
+          # Create systemd service
+          cat > ${PKG_DIR}/lib/systemd/system/iedb.service << 'SERVICE'
+          [Unit]
+          Description=iedb Time-Series Database
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=iedb
+          Group=iedb
+          ExecStart=/usr/bin/iedb
+          WorkingDirectory=/var/lib/iedb
+          Restart=on-failure
+          RestartSec=5
+          LimitNOFILE=65535
+
+          # Environment
+          Environment="ARC_STORAGE_LOCAL_PATH=/var/lib/iedb/data"
+
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE
+
+          # Create control file
+          cat > ${PKG_DIR}/DEBIAN/control << EOF
+          Package: iedb
+          Version: ${VERSION}
+          Section: database
+          Priority: optional
+          Architecture: ${ARCH}
+          Depends: libc6
+          Maintainer: LMGateway
+          Description: iedb - High-performance columnar analytics DB,
+           optimized for IoT, observability, and analytics workloads.
+           .
+           Features: 9.47M records/sec ingestion, DuckDB SQL queries,
+           Parquet storage, S3/MinIO support.
+          Homepage: https://www.lmgateway.com/
+          EOF
+
+          # Create postinst script
+          cat > ${PKG_DIR}/DEBIAN/postinst << 'POSTINST'
+          #!/bin/bash
+          set -e
+
+          # Create iedb user if not exists
+          if ! id -u iedb > /dev/null 2>&1; then
+            useradd --system --home-dir /var/lib/iedb --no-create-home --shell /bin/false iedb
+          fi
+
+          # Set ownership
+          chown -R iedb:iedb /var/lib/iedb
+          chown iedb:iedb /etc/iedb/iedb.toml
+
+          # Reload systemd
+          if command -v systemctl >/dev/null 2>&1; then
+            systemctl daemon-reload
+            echo ""
+            echo "iedb installed successfully!"
+            echo "  Start:  sudo systemctl start iedb"
+            echo "  Enable: sudo systemctl enable iedb"
+            echo "  Logs:   sudo journalctl -u iedb -f"
+          fi
+          POSTINST
+          chmod +x ${PKG_DIR}/DEBIAN/postinst
+
+          # Create prerm script
+          cat > ${PKG_DIR}/DEBIAN/prerm << 'PRERM'
+          #!/bin/bash
+          set -e
+          if command -v systemctl >/dev/null 2>&1; then
+            systemctl stop iedb.service || true
+            systemctl disable iedb.service || true
+          fi
+          PRERM
+          chmod +x ${PKG_DIR}/DEBIAN/prerm
+
+          # Build package
+          dpkg-deb --build ${PKG_DIR}
+
+          # Create checksum
+          sha256sum ${PKG_DIR}.deb > ${PKG_DIR}.deb.sha256
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: iedb-debian-${{ matrix.arch }}-${{ needs.prepare.outputs.version }}
+          path: |
+            *.deb
+            *.deb.sha256
+          retention-days: 7
+
+  # Build RPM packages
+  rpm-build:
+    name: Build RPM Package
+    runs-on: ubuntu-latest
+    needs: [prepare, build-binaries]
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            binary_suffix: linux-amd64
+          - arch: aarch64
+            binary_suffix: linux-arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install RPM tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: iedb-binary-${{ matrix.binary_suffix }}
+
+      - name: Build RPM package
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+          ARCH=${{ matrix.arch }}
+
+          # Create RPM build structure
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          # Create source tarball
+          mkdir -p iedb-${VERSION}
+          cp iedb-${{ matrix.binary_suffix }} iedb-${VERSION}/iedb
+          chmod +x iedb-${VERSION}/iedb
+          cp iedb.toml iedb-${VERSION}/
+          tar -czf ~/rpmbuild/SOURCES/iedb-${VERSION}.tar.gz iedb-${VERSION}
+
+          # Create systemd service in SOURCES
+          cat > ~/rpmbuild/SOURCES/iedb.service << 'SERVICE'
+          [Unit]
+          Description=iedb Time-Series Database
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=iedb
+          Group=iedb
+          ExecStart=/usr/bin/iedb
+          WorkingDirectory=/var/lib/iedb
+          Restart=on-failure
+          RestartSec=5
+          LimitNOFILE=65535
+          Environment="ARC_STORAGE_LOCAL_PATH=/var/lib/iedb/data"
+
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE
+
+          # Create spec file
+          cat > ~/rpmbuild/SPECS/iedb.spec << EOF
+          %define debug_package %{nil}
+          %define _build_id_links none
+
+          Name:           iedb
+          Version:        ${VERSION}
+          Release:        1%{?dist}
+          Summary:        High-performance columnar analytical Database
+          License:        AGPL-3.0
+          URL:            https://github.com/Mengdal/IotEdgeDB
+          Source0:        iedb-${VERSION}.tar.gz
+          Source1:        iedb.service
+
+          %description
+          iedb is a high-performance time-series database built on DuckDB,
+          optimized for IoT, observability, and analytics workloads.
+
+          Features: 9.47M records/sec ingestion, DuckDB SQL queries,
+          Parquet storage, S3/MinIO support.
+
+          %prep
+          %setup -q
+
+          %install
+          rm -rf %{buildroot}
+          mkdir -p %{buildroot}/usr/bin
+          mkdir -p %{buildroot}/etc/iedb
+          mkdir -p %{buildroot}/lib/systemd/system
+          mkdir -p %{buildroot}/var/lib/iedb
+
+          install -m 755 iedb %{buildroot}/usr/bin/iedb
+          install -m 644 iedb.toml %{buildroot}/etc/iedb/iedb.toml
+          install -m 644 %{SOURCE1} %{buildroot}/lib/systemd/system/iedb.service
+
+          %files
+          %attr(755, root, root) /usr/bin/iedb
+          %config(noreplace) /etc/iedb/iedb.toml
+          /lib/systemd/system/iedb.service
+          %dir %attr(755, iedb, iedb) /var/lib/iedb
+
+          %pre
+          # Create iedb user
+          if ! id -u iedb > /dev/null 2>&1; then
+            useradd --system --home-dir /var/lib/iedb --no-create-home --shell /sbin/nologin iedb
+          fi
+
+          %post
+          systemctl daemon-reload
+          echo ""
+          echo "iedb installed successfully!"
+          echo "  Start:  sudo systemctl start iedb"
+          echo "  Enable: sudo systemctl enable iedb"
+          echo "  Logs:   sudo journalctl -u iedb -f"
+
+          %preun
+          systemctl stop iedb.service || true
+          systemctl disable iedb.service || true
+
+          %changelog
+          * $(date "+%a %b %d %Y") LMGateway <contact@luomigateway@vip.qq.com> - ${VERSION}-1
+          - Release ${VERSION}
+          EOF
+
+          # Build RPM
+          rpmbuild -ba --target ${ARCH} ~/rpmbuild/SPECS/iedb.spec
+
+          # Copy to current directory
+          cp ~/rpmbuild/RPMS/${ARCH}/iedb-${VERSION}-1.*.rpm .
+
+          # Create checksum
+          sha256sum iedb-${VERSION}-1.*.rpm > iedb-${VERSION}-1.${ARCH}.rpm.sha256
+
+      - name: Upload RPM package
+        uses: actions/upload-artifact@v4
+        with:
+          name: iedb-rpm-${{ matrix.arch }}-${{ needs.prepare.outputs.version }}
+          path: |
+            *.rpm
+            *.rpm.sha256
+          retention-days: 7
+
+  # Merge multi-arch manifests
+  docker-merge:
+    name: Merge Docker Manifests
+    runs-on: ubuntu-latest
+    needs: [prepare, docker-build]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_GHCR }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          # Create multi-arch manifest with version, short_version, and latest tags
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }} \
+            -t ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.short_version }} \
+            -t ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}:latest \
+            $(printf '${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+          echo "✅ Multi-arch manifest created and pushed" >> $GITHUB_STEP_SUMMARY
+          echo "Tags: ${{ needs.prepare.outputs.version }}, ${{ needs.prepare.outputs.short_version }}, latest" >> $GITHUB_STEP_SUMMARY
+
+  # Test Docker image health
+  test-docker:
+    name: Test Docker Image
+    runs-on: ubuntu-latest
+    needs: [prepare, docker-merge]
+    steps:
+      - name: Pull and run Docker image
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+          IMAGE="${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}:${VERSION}"
+
+          echo "Pulling image: ${IMAGE}"
+          docker pull ${IMAGE}
+
+          echo "Starting iedb container..."
+          docker run -d --name iedb-test -p 8000:8000 ${IMAGE}
+
+          # Wait for startup
+          echo "Waiting for iedb to start..."
+          sleep 10
+
+          # Test health endpoint
+          echo "Testing health endpoint..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:8000/health; then
+              echo ""
+              echo "✅ Health check passed!"
+              docker logs iedb-test
+              exit 0
+            fi
+            echo "Attempt $i/30 - waiting..."
+            sleep 2
+          done
+
+          echo "❌ Health check failed after 60 seconds"
+          docker logs iedb-test
+          exit 1
+
+      - name: Test version endpoint
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+
+          # Check if version endpoint returns expected version
+          RESPONSE=$(curl -sf http://localhost:8000/health || echo "{}")
+          echo "Health response: ${RESPONSE}"
+
+          # Verify version is not "dev"
+          if echo "${RESPONSE}" | grep -q '"version"'; then
+            echo "✅ Version info present in health response"
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop iedb-test || true
+          docker rm iedb-test || true
+
+  # Test binary execution
+  test-binary:
+    name: Test Binary
+    runs-on: ubuntu-latest
+    needs: [prepare, build-binaries]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download amd64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: iedb-binary-linux-amd64
+
+      - name: Test binary execution
+        run: |
+          chmod +x iedb-linux-amd64
+
+          # Test --version or basic startup
+          echo "Testing binary execution..."
+
+          # Start iedb in background
+          ./iedb-linux-amd64 &
+          ARC_PID=$!
+
+          # Wait for startup
+          sleep 5
+
+          # Test health endpoint
+          echo "Testing health endpoint..."
+          for i in {1..20}; do
+            if curl -sf http://localhost:8000/health; then
+              echo ""
+              echo "✅ Binary health check passed!"
+              kill $ARC_PID || true
+              exit 0
+            fi
+            echo "Attempt $i/20 - waiting..."
+            sleep 2
+          done
+
+          echo "❌ Binary health check failed"
+          kill $ARC_PID || true
+          exit 1
+
+  # Package Helm chart
+  helm-package:
+    name: Package Helm Chart
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: '3.13.0'
+
+      - name: Package Helm chart
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+
+          # Update Chart.yaml version
+          sed -i "s/^version:.*/version: ${VERSION}/" helm/iedb/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" helm/iedb/Chart.yaml
+
+          # Package the chart
+          helm package helm/iedb --destination dist/
+
+          # Create checksum
+          cd dist
+          sha256sum iedb-${VERSION}.tgz > iedb-${VERSION}.tgz.sha256
+
+      - name: Upload Helm chart
+        uses: actions/upload-artifact@v4
+        with:
+          name: iedb-helm-${{ needs.prepare.outputs.version }}
+          path: |
+            dist/*.tgz
+            dist/*.tgz.sha256
+          retention-days: 7
+
+  # Test Helm chart installation
+  test-helm:
+    name: Test Helm Chart
+    runs-on: ubuntu-latest
+    needs: [prepare, helm-package]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Helm chart
+        uses: actions/download-artifact@v4
+        with:
+          name: iedb-helm-${{ needs.prepare.outputs.version }}
+          path: dist/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: local/iedb:${{ needs.prepare.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: '3.13.0'
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: iedb-test
+
+      - name: Load image into kind
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+          kind load docker-image local/iedb:${VERSION} --name iedb-test
+
+      - name: Test Helm chart
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+
+          # Install the chart with local image
+          helm install iedb-test dist/iedb-${VERSION}.tgz \
+            --set image.repository=local/iedb \
+            --set image.tag=${VERSION} \
+            --set image.pullPolicy=Never \
+            --set persistence.enabled=false \
+            --wait --timeout=2m
+
+          # Check if deployment is ready
+          kubectl rollout status deployment/iedb-test --timeout=2m
+
+          # Check if pod is running
+          kubectl get pods -l app.kubernetes.io/name=iedb
+
+          # Port forward and test health endpoint
+          kubectl port-forward svc/iedb-test 8000:8000 &
+          PF_PID=$!
+          sleep 5
+
+          # Test health endpoint
+          if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "✅ Helm chart deployed successfully and iedb is healthy!"
+          else
+            echo "❌ iedb health check failed"
+            kubectl logs -l app.kubernetes.io/name=iedb --tail=50
+            exit 1
+          fi
+
+          kill $PF_PID || true
+
+          # Cleanup
+          helm uninstall iedb-test
+
+  # Create draft release
+  create-draft-release:
+    name: Create Draft Release
+    runs-on: ubuntu-latest
+    needs: [prepare, docker-merge, test-docker, test-binary, helm-package, test-helm, debian-build, rpm-build]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: iedb-*
+          merge-multiple: true
+          path: ./release-artifacts
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+
+          cat > release-notes.md << 'EOF'
+          # iedb v${{ needs.prepare.outputs.version }} - Go Implementation
+
+          **Major Release: Complete rewrite from Python to Go**
+
+          iedb is a high-performance time-series database built on DuckDB, optimized for IoT, observability, and analytics workloads.
+
+          ## 🚀 Migration Highlights
+
+          This release marks the complete migration from Python to Go, delivering:
+
+          ### Performance Improvements
+          - **9.47M records/sec** MessagePack ingestion (125% faster than Python's 4.21M)
+          - **1.92M records/sec** Line Protocol ingestion (76% faster than Python's 1.09M)
+          - **2.88M rows/sec** Arrow query throughput
+
+          ### Reliability
+          - **Memory stable**: No memory leaks (Python leaked 372MB per 500 queries)
+          - **Single binary**: No Python dependencies, pip, or virtual environments
+          - **Type-safe**: Strong typing catches bugs at compile time
+
+          ### Full Feature Parity
+          - ✅ Authentication (user/password)
+          - ✅ Automatic Compaction (Parquet optimization)
+          - ✅ Write-Ahead Log (WAL for durability)
+          - ✅ Retention Policies (automatic data expiration)
+          - ✅ Continuous Queries (real-time aggregations)
+          - ✅ Delete API (selective data removal)
+          - ✅ S3/MinIO storage backend
+          - ✅ Arrow IPC query responses
+
+          ## Quick Start
+
+          ### Docker
+
+          ```bash
+          docker run -d \
+            -p 8000:8000 \
+            -v iedb-data:/app/data \
+            ghcr.io/Mengdal/IotEdgeDB:${{ needs.prepare.outputs.version }}
+          ```
+
+          ### Debian/Ubuntu (amd64, arm64)
+
+          ```bash
+          # Download and install
+          wget https://github.com/Mengdal/IotEdgeDB/releases/download/v${{ needs.prepare.outputs.version }}/arc_${{ needs.prepare.outputs.version }}_amd64.deb
+          sudo dpkg -i arc_${{ needs.prepare.outputs.version }}_amd64.deb
+
+          # Start and enable
+          sudo systemctl enable iedb
+          sudo systemctl start iedb
+
+          # Check status
+          curl http://localhost:8000/health
+          ```
+
+          ### RHEL/Fedora/Rocky (x86_64, aarch64)
+
+          ```bash
+          # Download and install
+          wget https://github.com/Mengdal/IotEdgeDB/releases/download/v${{ needs.prepare.outputs.version }}/iedb-${{ needs.prepare.outputs.version }}-1.x86_64.rpm
+          sudo rpm -i iedb-${{ needs.prepare.outputs.version }}-1.x86_64.rpm
+
+          # Start and enable
+          sudo systemctl enable iedb
+          sudo systemctl start iedb
+          ```
+
+          ### Kubernetes (Helm)
+
+          ```bash
+          helm install iedb https://github.com/Mengdal/IotEdgeDB/releases/download/v${{ needs.prepare.outputs.version }}/iedb-${{ needs.prepare.outputs.version }}.tgz
+          ```
+
+          ## Download Artifacts
+
+          | Platform | Architecture | Package |
+          |----------|--------------|---------|
+          | Docker | amd64, arm64 | `ghcr.io/Mengdal/IotEdgeDB:${{ needs.prepare.outputs.version }}` |
+          | Debian/Ubuntu | amd64 | `arc_${{ needs.prepare.outputs.version }}_amd64.deb` |
+          | Debian/Ubuntu | arm64 | `arc_${{ needs.prepare.outputs.version }}_arm64.deb` |
+          | RHEL/Fedora | x86_64 | `iedb-${{ needs.prepare.outputs.version }}-1.x86_64.rpm` |
+          | RHEL/Fedora | aarch64 | `iedb-${{ needs.prepare.outputs.version }}-1.aarch64.rpm` |
+          | Kubernetes | - | `iedb-${{ needs.prepare.outputs.version }}.tgz` (Helm) |
+
+          ## Breaking Changes
+
+          - **Python version**: The Python implementation is preserved in the `python-legacy` branch
+          - **Configuration**: TOML config format (unchanged, but verify your `iedb.toml`)
+
+          ## Upgrading from Python
+
+          1. Stop existing iedb service
+          2. Backup your data directory
+          3. Install the new Go binary (same config format)
+          4. Start iedb - data is automatically migrated
+
+          ## Documentation
+
+          - [Full Documentation](http://docs.lmgateway.com/)
+          
+          ## Community
+
+          - **Discord**: [Join](https://discord.gg/ZxNNZM8PRb)
+          - **Issues**: [GitHub](https://github.com/Mengdal/IotEdgeDB/issues)
+          EOF
+
+          cat release-notes.md
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          prerelease: false
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: iedb ${{ needs.prepare.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            release-artifacts/**/iedb-*
+            release-artifacts/**/*.tgz
+            release-artifacts/**/*.tgz.sha256
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.deb.sha256
+            release-artifacts/**/*.rpm
+            release-artifacts/**/*.rpm.sha256
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+          echo "## 🎉 Draft Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Version: **${VERSION}**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Type | Package |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker | \`ghcr.io/Mengdal/IotEdgeDB:${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Helm | \`iedb-${VERSION}.tgz\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Debian amd64 | \`arc_${VERSION}_amd64.deb\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Debian arm64 | \`arc_${VERSION}_arm64.deb\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| RPM x86_64 | \`iedb-${VERSION}-1.x86_64.rpm\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| RPM aarch64 | \`iedb-${VERSION}-1.aarch64.rpm\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Tests Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Docker image health check" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Binary execution test" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Helm chart deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review release notes" >> $GITHUB_STEP_SUMMARY
+          echo "2. Publish when ready" >> $GITHUB_STEP_SUMMARY

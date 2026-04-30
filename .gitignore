@@ -41,7 +41,6 @@ go.work.sum
 *.swo
 *~
 .agent
-.github
 
 # Claude Code
 .claude/
