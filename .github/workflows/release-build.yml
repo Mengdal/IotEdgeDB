@@ -776,8 +776,8 @@ jobs:
 
           ```bash
           # Download and install
-          wget https://github.com/Mengdal/IotEdgeDB/releases/download/v${{ needs.prepare.outputs.version }}/arc_${{ needs.prepare.outputs.version }}_amd64.deb
-          sudo dpkg -i arc_${{ needs.prepare.outputs.version }}_amd64.deb
+          wget https://github.com/Mengdal/IotEdgeDB/releases/download/v${{ needs.prepare.outputs.version }}/iedb_${{ needs.prepare.outputs.version }}_amd64.deb
+          sudo dpkg -i iedb_${{ needs.prepare.outputs.version }}_amd64.deb
 
           # Start and enable
           sudo systemctl enable iedb
@@ -810,8 +810,8 @@ jobs:
           | Platform | Architecture | Package |
           |----------|--------------|---------|
           | Docker | amd64, arm64 | `ghcr.io/mengdal/iedb:${{ needs.prepare.outputs.version }}` |
-          | Debian/Ubuntu | amd64 | `arc_${{ needs.prepare.outputs.version }}_amd64.deb` |
-          | Debian/Ubuntu | arm64 | `arc_${{ needs.prepare.outputs.version }}_arm64.deb` |
+          | Debian/Ubuntu | amd64 | `iedb_${{ needs.prepare.outputs.version }}_amd64.deb` |
+          | Debian/Ubuntu | arm64 | `iedb_${{ needs.prepare.outputs.version }}_arm64.deb` |
           | RHEL/Fedora | x86_64 | `iedb-${{ needs.prepare.outputs.version }}-1.x86_64.rpm` |
           | RHEL/Fedora | aarch64 | `iedb-${{ needs.prepare.outputs.version }}-1.aarch64.rpm` |
           | Kubernetes | - | `iedb-${{ needs.prepare.outputs.version }}.tgz` (Helm) |
@@ -849,7 +849,7 @@ jobs:
           name: iedb ${{ needs.prepare.outputs.version }}
           body_path: release-notes.md
           files: |
-            release-artifacts/**/iedb-*
+            release-artifacts/**/iedb-linux-*
             release-artifacts/**/*.tgz
             release-artifacts/**/*.tgz.sha256
             release-artifacts/**/*.deb
@@ -873,8 +873,8 @@ jobs:
           echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
           echo "| Docker | \`ghcr.io/mengdal/iedb:${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Helm | \`iedb-${VERSION}.tgz\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Debian amd64 | \`arc_${VERSION}_amd64.deb\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Debian arm64 | \`arc_${VERSION}_arm64.deb\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Debian amd64 | \`iedb_${VERSION}_amd64.deb\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Debian arm64 | \`iedb_${VERSION}_arm64.deb\` |" >> $GITHUB_STEP_SUMMARY
           echo "| RPM x86_64 | \`iedb-${VERSION}-1.x86_64.rpm\` |" >> $GITHUB_STEP_SUMMARY
           echo "| RPM aarch64 | \`iedb-${VERSION}-1.aarch64.rpm\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
