@@ -1,0 +1,22 @@
+apiVersion: v2
+name: iedb-enterprise
+description: iedb Enterprise — multi-node clustered analytical database with role separation, automatic failover, and flexible storage patterns (shared object storage or peer-replicated local disks).
+type: application
+version: 0.1.0
+appVersion: "26.05.1"
+kubeVersion: ">=1.24.0-0"
+
+keywords:
+  - database
+  - analytical
+  - columnar
+  - duckdb
+  - parquet
+  - clustering
+  - enterprise
+home: https://github.com/Mengdal/IotEdgeDB
+sources:
+  - https://github.com/Mengdal/IotEdgeDB
+maintainers:
+  - name: LMGateway
+    email: luomigateway@vip.qq.com

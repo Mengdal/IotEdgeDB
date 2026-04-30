@@ -1,0 +1,16 @@
+{{- if eq (include "iedb-enterprise.minioBundled" .) "true" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "iedb-enterprise.minioName" . }}
+  labels:
+    {{- include "iedb-enterprise.roleLabels" (dict "ctx" . "role" "minio") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+  selector:
+    {{- include "iedb-enterprise.roleSelectorLabels" (dict "ctx" . "role" "minio") | nindent 4 }}
+{{- end }}

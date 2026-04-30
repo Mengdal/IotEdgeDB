@@ -1,6 +1,6 @@
 # Binaries
 /iedb
-iedb-*
+/iedb-*
 *.exe
 *.dll
 *.so
@@ -9,7 +9,6 @@ iedb-*
 # Test binary, built with `go test -c`
 *.test
 benchmarks
-helm
 
 # Output of the go coverage tool
 *.out

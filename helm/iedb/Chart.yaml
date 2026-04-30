@@ -1,0 +1,19 @@
+apiVersion: v2
+name: iedb
+description: High-performance time-series database built on DuckDB (Go implementation)
+type: application
+version: 0.0.1
+appVersion: "0.0.1"
+keywords:
+  - database
+  - timeseries
+  - observability
+  - duckdb
+  - analytics
+  - go
+home: https://github.com/Mengdal/IotEdgeDB
+sources:
+  - https://github.com/Mengdal/IotEdgeDB
+maintainers:
+  - name: LMGateway
+    email: luomigateway@vip.qq.com
