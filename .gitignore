@@ -1,0 +1,94 @@
+# Binaries
+/iedb
+iedb-*
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+benchmarks
+helm
+
+# Output of the go coverage tool
+*.out
+coverage.out
+coverage.html
+
+# Profiling
+profiles/
+*.pprof
+*.prof
+*.trace
+
+# Build output
+/dist/
+/bin/
+/out/
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.agent
+.github
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Data directories
+data/
+*.db
+*.duckdb
+*.parquet
+*.wal
+
+# Logs
+*.log
+logs/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Package artifacts (generated during CI)
+*.deb
+*.rpm
+*.tgz
+*.tar.gz
+*.sha256
+
+# docs
+docs/progress/
+
+# ohter
+/cmd/iedb/data/
+!cmd/iedb/main.go
+/LICENSE
+/.gocache
+/.cache
+/cmd/tools

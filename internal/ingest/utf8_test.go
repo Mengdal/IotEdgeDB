@@ -1,0 +1,269 @@
+package ingest
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestSanitizeUTF8_ValidString(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"empty string", ""},
+		{"ascii only", "Hello World"},
+		{"with unicode", "Hello, 世界! Привет мир!"},
+		{"with emojis", "Log message with emojis 🎉🚀💻"},
+		{"mixed content", "user=admin action=login status=success café résumé naïve"},
+		{"typical log", "2026-01-19T10:30:00Z INFO [server] Request processed in 42ms"},
+		{"json content", `{"level":"info","msg":"test","value":123}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, modified := SanitizeUTF8(tt.input)
+			if modified {
+				t.Errorf("Expected no modification for valid UTF-8, got modified=true")
+			}
+			if result != tt.input {
+				t.Errorf("Expected %q, got %q", tt.input, result)
+			}
+		})
+	}
+}
+
+func TestSanitizeUTF8_InvalidBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "single invalid byte",
+			input:    "Hello\x80World",
+			expected: "Hello\ufffdWorld",
+		},
+		{
+			name:     "multiple invalid bytes",
+			input:    "\x80\x81\x82",
+			expected: "\ufffd\ufffd\ufffd",
+		},
+		{
+			name:     "invalid at start",
+			input:    "\x80Hello",
+			expected: "\ufffdHello",
+		},
+		{
+			name:     "invalid at end",
+			input:    "Hello\x80",
+			expected: "Hello\ufffd",
+		},
+		{
+			name:     "mixed valid and invalid",
+			input:    "Hello\x80世界\x81Test",
+			expected: "Hello\ufffd世界\ufffdTest",
+		},
+		{
+			name:     "invalid in JSON-like content",
+			input:    "{\"msg\":\"test\x80value\"}",
+			expected: "{\"msg\":\"test\ufffdvalue\"}",
+		},
+		{
+			name:     "latin1 high bytes",
+			input:    "caf\xe9 r\xe9sum\xe9", // café résumé in Latin-1
+			expected: "caf\ufffd r\ufffdsum\ufffd",
+		},
+		{
+			name:     "truncated utf8 sequence",
+			input:    "test\xc3", // incomplete 2-byte sequence
+			expected: "test\ufffd",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, modified := SanitizeUTF8(tt.input)
+			if !modified {
+				t.Errorf("Expected modification for invalid UTF-8, got modified=false")
+			}
+			if result != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestSanitizeUTF8_EdgeCases(t *testing.T) {
+	// Ensure we don't break valid edge cases
+	tests := []struct {
+		name     string
+		input    string
+		modified bool
+	}{
+		{"null byte in string", "hello\x00world", false}, // \x00 is valid UTF-8
+		{"replacement char already present", "test\ufffdvalue", false},
+		{"BOM", "\xef\xbb\xbfHello", false}, // UTF-8 BOM is valid
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, modified := SanitizeUTF8(tt.input)
+			if modified != tt.modified {
+				t.Errorf("Expected modified=%v, got modified=%v", tt.modified, modified)
+			}
+			if !tt.modified && result != tt.input {
+				t.Errorf("Expected unchanged string, got %q instead of %q", result, tt.input)
+			}
+		})
+	}
+}
+
+// Benchmarks to verify fast path performance
+func BenchmarkSanitizeUTF8_ValidShort(b *testing.B) {
+	input := "user=admin action=login"
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+func BenchmarkSanitizeUTF8_ValidMedium(b *testing.B) {
+	input := "Normal log message with some data: user=admin action=login status=success timestamp=2026-01-19T10:30:00Z"
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+func BenchmarkSanitizeUTF8_ValidLong(b *testing.B) {
+	input := strings.Repeat("This is a typical log message with various content. ", 20)
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+func BenchmarkSanitizeUTF8_ValidUnicode(b *testing.B) {
+	input := "日志消息 with mixed 内容 and émojis 🎉"
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+func BenchmarkSanitizeUTF8_InvalidSingle(b *testing.B) {
+	input := "Log with \x80 single invalid byte"
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+func BenchmarkSanitizeUTF8_InvalidMultiple(b *testing.B) {
+	input := "Log \x80 with \x81 multiple \x82 invalid \x83 bytes"
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+// Benchmarks to compare different fast-path strategies
+
+func BenchmarkSanitizeUTF8_ASCIIOnly_Short(b *testing.B) {
+	// Pure ASCII - no high bytes at all
+	input := "user=admin action=login status=success"
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+func BenchmarkSanitizeUTF8_ASCIIOnly_Long(b *testing.B) {
+	// Long pure ASCII string
+	input := "2026-01-19T10:30:00Z INFO [api-gateway] Request processed successfully user=admin action=login status=success ip=192.168.1.100 duration=42ms"
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+// Test hasHighBit approach
+func hasHighBit(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return true
+		}
+	}
+	return false
+}
+
+func BenchmarkHasHighBit_ASCIIShort(b *testing.B) {
+	input := "user=admin action=login status=success"
+	for i := 0; i < b.N; i++ {
+		hasHighBit(input)
+	}
+}
+
+func BenchmarkHasHighBit_ASCIILong(b *testing.B) {
+	input := "2026-01-19T10:30:00Z INFO [api-gateway] Request processed successfully user=admin action=login status=success ip=192.168.1.100 duration=42ms"
+	for i := 0; i < b.N; i++ {
+		hasHighBit(input)
+	}
+}
+
+func BenchmarkHasHighBit_WithUnicode(b *testing.B) {
+	input := "日志消息 with mixed 内容 and émojis 🎉"
+	for i := 0; i < b.N; i++ {
+		hasHighBit(input)
+	}
+}
+
+// Large string benchmarks — where SIMD validation shines
+func BenchmarkSanitizeUTF8_Valid1KB(b *testing.B) {
+	input := strings.Repeat("2026-01-19T10:30:00Z INFO [api-gateway] Request processed user=admin ip=192.168.1.1 dur=42ms ", 11) // ~1KB
+	b.SetBytes(int64(len(input)))
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+func BenchmarkSanitizeUTF8_Valid4KB(b *testing.B) {
+	input := strings.Repeat("2026-01-19T10:30:00Z INFO [api-gateway] Request processed user=admin ip=192.168.1.1 dur=42ms ", 44) // ~4KB
+	b.SetBytes(int64(len(input)))
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+func BenchmarkSanitizeUTF8_Valid16KB(b *testing.B) {
+	input := strings.Repeat("2026-01-19T10:30:00Z INFO [api-gateway] Request processed user=admin ip=192.168.1.1 dur=42ms ", 176) // ~16KB
+	b.SetBytes(int64(len(input)))
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+func BenchmarkSanitizeUTF8_Valid64KB(b *testing.B) {
+	input := strings.Repeat("2026-01-19T10:30:00Z INFO [api-gateway] Request processed user=admin ip=192.168.1.1 dur=42ms ", 704) // ~64KB
+	b.SetBytes(int64(len(input)))
+	for i := 0; i < b.N; i++ {
+		SanitizeUTF8(input)
+	}
+}
+
+// ValidateUTF8Bytes benchmarks — simulates validating an entire HTTP payload
+func BenchmarkValidateUTF8Bytes_4KB(b *testing.B) {
+	input := []byte(strings.Repeat("2026-01-19T10:30:00Z INFO [api-gateway] Request processed user=admin ip=192.168.1.1 dur=42ms ", 44))
+	b.SetBytes(int64(len(input)))
+	for i := 0; i < b.N; i++ {
+		ValidateUTF8Bytes(input)
+	}
+}
+
+func BenchmarkValidateUTF8Bytes_64KB(b *testing.B) {
+	input := []byte(strings.Repeat("2026-01-19T10:30:00Z INFO [api-gateway] Request processed user=admin ip=192.168.1.1 dur=42ms ", 704))
+	b.SetBytes(int64(len(input)))
+	for i := 0; i < b.N; i++ {
+		ValidateUTF8Bytes(input)
+	}
+}
+
+func BenchmarkValidateUTF8Bytes_1MB(b *testing.B) {
+	input := []byte(strings.Repeat("2026-01-19T10:30:00Z INFO [api-gateway] Request processed user=admin ip=192.168.1.1 dur=42ms ", 11264))
+	b.SetBytes(int64(len(input)))
+	for i := 0; i < b.N; i++ {
+		ValidateUTF8Bytes(input)
+	}
+}
