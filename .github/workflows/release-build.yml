@@ -849,7 +849,6 @@ jobs:
           name: iedb ${{ needs.prepare.outputs.version }}
           body_path: release-notes.md
           files: |
-            release-artifacts/**/iedb-linux-*
             release-artifacts/**/*.tgz
             release-artifacts/**/*.tgz.sha256
             release-artifacts/**/*.deb
