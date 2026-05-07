@@ -18,7 +18,7 @@ import (
 
 const (
 	// DefaultEndpoint is the telemetry collection endpoint
-	DefaultEndpoint = "https://telemetry.lmgateway.com/api/v1/telemetry"
+	DefaultEndpoint = "http://113.250.188.137:8080"
 
 	// DefaultInterval is the telemetry reporting interval
 	DefaultInterval = 24 * time.Hour
@@ -65,7 +65,7 @@ type Collector struct {
 type TelemetryPayload struct {
 	InstanceID  string  `json:"instance_id"`
 	Timestamp   string  `json:"timestamp"`
-	iedbVersion string  `json:"iedb_version"`
+	IEDBVersion string  `json:"iedb_version"`
 	OS          OSInfo  `json:"os"`
 	CPU         CPUInfo `json:"cpu"`
 	Memory      MemInfo `json:"memory"`
@@ -225,7 +225,7 @@ func (c *Collector) collectPayload() *TelemetryPayload {
 	return &TelemetryPayload{
 		InstanceID:  c.instanceID,
 		Timestamp:   time.Now().UTC().Format("2006-01-02T15:04:05.000000") + "Z",
-		iedbVersion: c.version,
+		IEDBVersion: c.version,
 		OS: OSInfo{
 			Name:         runtime.GOOS,
 			Version:      runtime.Version(), // Go version as OS version proxy
@@ -245,7 +245,7 @@ func (c *Collector) collectPayload() *TelemetryPayload {
 
 func loadOrCreateInstanceID(dataDir string) (string, error) {
 	// Ensure data directory exists
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create data directory: %w", err)
 	}
 
