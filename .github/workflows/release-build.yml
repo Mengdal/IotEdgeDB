@@ -146,10 +146,7 @@ jobs:
         run: |
           VERSION=${{ needs.prepare.outputs.version }}
 
-          go build -tags=duckdb_arrow \
-            -ldflags "-s -w -X main.Version=${VERSION}" \ 
-            -o iedb-${{ matrix.suffix }} \
-            ./cmd/iedb
+          go build -tags=duckdb_arrow -ldflags="-s -w -X main.Version=${VERSION}" -o iedb-${{ matrix.suffix }} ./cmd/iedb
 
           chmod +x iedb-${{ matrix.suffix }}
 
