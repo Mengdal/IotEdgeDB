@@ -147,7 +147,7 @@ jobs:
           VERSION=${{ needs.prepare.outputs.version }}
 
           go build -tags=duckdb_arrow \
-            -ldflags "-s -w -X main.Version=${VERSION}" \
+            -ldflags "-s -w -X main.Version=${VERSION}" \ 
             -o iedb-${{ matrix.suffix }} \
             ./cmd/iedb
 
@@ -731,15 +731,11 @@ jobs:
           VERSION=${{ needs.prepare.outputs.version }}
 
           cat > release-notes.md << 'EOF'
-          # iedb v${{ needs.prepare.outputs.version }} - Go Implementation
+          # IotEdgeDB v${{ needs.prepare.outputs.version }}
 
-          **Major Release: Complete rewrite from Python to Go**
+          IotEdgeDB is a high-performance time-series database built on DuckDB, optimized for IoT, observability, and analytics workloads.
 
-          iedb is a high-performance time-series database built on DuckDB, optimized for IoT, observability, and analytics workloads.
-
-          ## 🚀 Migration Highlights
-
-          This release marks the complete migration from Python to Go, delivering:
+          ## 🚀 Using Highlights
 
           ### Performance Improvements
           - **9.47M records/sec** MessagePack ingestion (125% faster than Python's 4.21M)
@@ -747,8 +743,8 @@ jobs:
           - **2.88M rows/sec** Arrow query throughput
 
           ### Reliability
-          - **Memory stable**: No memory leaks (Python leaked 372MB per 500 queries)
-          - **Single binary**: No Python dependencies, pip, or virtual environments
+          - **Memory stable**: No memory leaks
+          - **Single binary**: No dependencies, pip, or virtual environments
           - **Type-safe**: Strong typing catches bugs at compile time
 
           ### Full Feature Parity
@@ -815,18 +811,6 @@ jobs:
           | RHEL/Fedora | x86_64 | `iedb-${{ needs.prepare.outputs.version }}-1.x86_64.rpm` |
           | RHEL/Fedora | aarch64 | `iedb-${{ needs.prepare.outputs.version }}-1.aarch64.rpm` |
           | Kubernetes | - | `iedb-${{ needs.prepare.outputs.version }}.tgz` (Helm) |
-
-          ## Breaking Changes
-
-          - **Python version**: The Python implementation is preserved in the `python-legacy` branch
-          - **Configuration**: TOML config format (unchanged, but verify your `iedb.toml`)
-
-          ## Upgrading from Python
-
-          1. Stop existing iedb service
-          2. Backup your data directory
-          3. Install the new Go binary (same config format)
-          4. Start iedb - data is automatically migrated
 
           ## Documentation
 
