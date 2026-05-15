@@ -90,3 +90,4 @@ docs/progress/
 /.gocache
 /.cache
 /cmd/tools
+front/
