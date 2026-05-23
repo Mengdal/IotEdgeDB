@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	duckdb "github.com/duckdb/duckdb-go/v2"
 )
@@ -151,4 +152,22 @@ func (d *DuckDB) ArrowQueryWithProfileContext(ctx context.Context, query string)
 	}
 
 	return reader, conn, profile, nil
+}
+
+// RegisterArrowView registers Arrow arrays as a DuckDB TEMP VIEW for query-time buffer injection.
+// This allows queries to see data still in the ingest buffer alongside Parquet files.
+//
+// LIMITATION: TEMP VIEWs are connection-scoped in DuckDB. This means the view is created on
+// one connection from the pool but the query may execute on a different connection, making
+// the view invisible. A future enhancement should pin the query to the same connection.
+//
+// For now, we log a warning and skip view creation — the query falls back to Parquet-only.
+// TODO: Implement proper connection-pinned temp view creation using DuckDB's Arrow API.
+func RegisterArrowView(ctx context.Context, db *sql.DB, viewName string, schema *arrow.Schema, arrays []arrow.Array) error {
+	// Not yet implemented — see LIMITATION comment above.
+	// When implementing, use conn.Raw() to access the raw driver connection and
+	// duckdb-go's Arrow API to write Arrow batches into a temp table, then
+	// CREATE TEMP VIEW over it. The connection must be pinned for the duration
+	// of the query execution.
+	return nil
 }

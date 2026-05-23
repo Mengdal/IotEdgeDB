@@ -2922,3 +2922,135 @@ func (b *ArrowBuffer) GetStats() map[string]interface{} {
 		"memory_limit_bytes":     b.maxMemoryBytes,
 	}
 }
+
+// GetEntry returns a snapshot of the batches for a given measurement name.
+// Searches all shards for an entry whose key ends with "/measurement".
+// Returns nil, 0, false if no matching entry exists.
+func (b *ArrowBuffer) GetEntry(measurement string) ([]*TypedColumnBatch, int, bool) {
+	for _, shard := range b.shards {
+		shard.mu.RLock()
+		for key, entry := range shard.entries {
+			if strings.HasSuffix(key, "/"+measurement) || key == measurement {
+				batches := make([]*TypedColumnBatch, len(*entry.batches))
+				copy(batches, *entry.batches)
+				count := entry.count
+				shard.mu.RUnlock()
+				return batches, count, true
+			}
+		}
+		shard.mu.RUnlock()
+	}
+	return nil, 0, false
+}
+
+// BatchesToArrow merges typed batches and builds Arrow arrays for DuckDB TEMP VIEW.
+func (b *ArrowBuffer) BatchesToArrow(batches []*TypedColumnBatch) ([]arrow.Array, *arrow.Schema, error) {
+	if len(batches) == 0 {
+		return nil, nil, fmt.Errorf("empty batches")
+	}
+
+	// Convert to []interface{} for mergeBatches
+	iface := make([]interface{}, len(batches))
+	for i, batch := range batches {
+		iface[i] = batch
+	}
+
+	merged, err := b.mergeBatches(iface)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Extract column names and types from merged data
+	var fields []arrow.Field
+	var arrays []arrow.Array
+	colNames := make([]string, 0, len(merged.Data))
+
+	for colName := range merged.Data {
+		colNames = append(colNames, colName)
+	}
+	sort.Strings(colNames)
+
+	for _, colName := range colNames {
+		colData := merged.Data[colName]
+		validity := merged.Validity[colName]
+
+		field, arr, err := b.buildSingleArrowArray(colName, colData, validity)
+		if err != nil {
+			// Release already-built arrays on error
+			for _, a := range arrays {
+				a.Release()
+			}
+			return nil, nil, fmt.Errorf("failed to build arrow array for column %s: %w", colName, err)
+		}
+		fields = append(fields, field)
+		arrays = append(arrays, arr)
+	}
+
+	schema := arrow.NewSchema(fields, nil)
+	return arrays, schema, nil
+}
+
+// buildSingleArrowArray constructs an Arrow array and field from a single typed column.
+// Handles int64, float64, string, bool, and decimal128 types. The "time" column is
+// always converted to Arrow Timestamp type. The validity bitmap tracks null values
+// (nil = all valid, []bool with false entries = null).
+func (b *ArrowBuffer) buildSingleArrowArray(colName string, colData interface{}, validity []bool) (arrow.Field, arrow.Array, error) {
+	mem := sharedArrowAllocator
+
+	// Handle time column specially — stored as []int64, but Arrow type is Timestamp
+	if colName == "time" {
+		intCol, ok := colData.([]int64)
+		if !ok {
+			return arrow.Field{}, nil, fmt.Errorf("time column expected []int64, got %T", colData)
+		}
+		builder := array.NewTimestampBuilder(mem, arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType))
+		tsValues := int64SliceToTimestamps(intCol)
+		builder.AppendValues(tsValues, validity)
+		arr := builder.NewArray()
+		builder.Release()
+		return arrow.Field{Name: colName, Type: arrow.FixedWidthTypes.Timestamp_us, Nullable: true}, arr, nil
+	}
+
+	switch data := colData.(type) {
+	case []int64:
+		builder := array.NewInt64Builder(mem)
+		builder.AppendValues(data, validity)
+		arr := builder.NewArray()
+		builder.Release()
+		return arrow.Field{Name: colName, Type: arrow.PrimitiveTypes.Int64, Nullable: true}, arr, nil
+
+	case []float64:
+		builder := array.NewFloat64Builder(mem)
+		builder.AppendValues(data, validity)
+		arr := builder.NewArray()
+		builder.Release()
+		return arrow.Field{Name: colName, Type: arrow.PrimitiveTypes.Float64, Nullable: true}, arr, nil
+
+	case []string:
+		builder := array.NewStringBuilder(mem)
+		builder.AppendValues(data, validity)
+		arr := builder.NewArray()
+		builder.Release()
+		return arrow.Field{Name: colName, Type: arrow.BinaryTypes.String, Nullable: true}, arr, nil
+
+	case []bool:
+		builder := array.NewBooleanBuilder(mem)
+		builder.AppendValues(data, validity)
+		arr := builder.NewArray()
+		builder.Release()
+		return arrow.Field{Name: colName, Type: arrow.FixedWidthTypes.Boolean, Nullable: true}, arr, nil
+
+	case []decimal128.Num:
+		// Use default precision/scale for buffer views; DuckDB UNION ALL will
+		// handle type coercion with the Parquet-side decimal columns.
+		dt := &arrow.Decimal128Type{Precision: 38, Scale: 18}
+		builder := array.NewDecimal128Builder(mem, dt)
+		builder.AppendValues(data, validity)
+		arr := builder.NewArray()
+		builder.Release()
+		return arrow.Field{Name: colName, Type: dt, Nullable: true}, arr, nil
+
+	default:
+		return arrow.Field{}, nil, fmt.Errorf("unsupported type for column %s: %T", colName, colData)
+	}
+}

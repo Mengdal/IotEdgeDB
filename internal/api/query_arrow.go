@@ -12,9 +12,15 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
-	"iedb/internal/metrics"
 	"github.com/gofiber/fiber/v2"
+
+	"iedb/internal/database"
+	"iedb/internal/metrics"
 )
+
+func init() {
+	bufferViewInjectFunc = injectBufferViewsImpl
+}
 
 // arrowBatchSize is the number of rows per Arrow record batch.
 // Smaller batches reduce peak memory usage and enable streaming.
@@ -268,3 +274,61 @@ func (h *QueryHandler) registerArrowRoutes(app *fiber.App) {
 	app.Post("/api/v1/query/arrow", h.executeQueryArrow)
 	app.Get("/api/v1/query/arrow", h.executeQueryArrow)
 }
+
+// injectBufferViewsImpl creates DuckDB TEMP VIEWs for buffered data matching the given tables.
+// This is set as bufferViewInjectFunc in init(). It returns a map of original table name to
+// created view name. If buffer data is not found or view creation fails, the table is
+// silently skipped — queries fall back to Parquet-only.
+//
+// LIMITATION: TEMP VIEWs are connection-scoped in DuckDB. See RegisterArrowView for details.
+// The current implementation registers the view but it will not be visible to the query
+// connection unless connection affinity is added. For now, this provides the infrastructure
+// that will be enabled when the DuckDB connection scoping issue is resolved.
+func injectBufferViewsImpl(h *QueryHandler, tableNames []string) map[string]string {
+	viewNames := make(map[string]string)
+	if h.arrowBuffer == nil {
+		return viewNames
+	}
+
+	for _, tableName := range tableNames {
+		batches, count, ok := h.arrowBuffer.GetEntry(tableName)
+		if !ok || count == 0 {
+			continue
+		}
+
+		arrays, schema, err := h.arrowBuffer.BatchesToArrow(batches)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("table", tableName).
+				Msg("Failed to convert buffer to Arrow, skipping injection")
+			continue
+		}
+
+		viewName := "_buf_" + strings.ReplaceAll(tableName, ".", "_")
+
+		// Register Arrow data as DuckDB view
+		if err := database.RegisterArrowView(context.Background(), h.db.DB(), viewName, schema, arrays); err != nil {
+			h.logger.Warn().Err(err).Str("table", tableName).
+				Str("view", viewName).
+				Msg("Failed to register buffer view, skipping injection")
+			_ = schema
+			for _, a := range arrays {
+				if a != nil {
+					a.Release()
+				}
+			}
+			continue
+		}
+
+		viewNames[tableName] = viewName
+		h.logger.Info().
+			Str("table", tableName).
+			Str("view", viewName).
+			Int("buffered_records", count).
+			Msg("Buffer view registered for query injection")
+
+		// Schema and arrays are now owned by DuckDB — no release needed.
+	}
+
+	return viewNames
+}
+

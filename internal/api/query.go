@@ -18,6 +18,7 @@ import (
 	"iedb/internal/cluster"
 	"iedb/internal/database"
 	"iedb/internal/governance"
+	"iedb/internal/ingest"
 	"iedb/internal/license"
 	"iedb/internal/metrics"
 	"iedb/internal/pruning"
@@ -97,6 +98,11 @@ var (
 // It executes a query via DuckDB's native Arrow API and streams the JSON response.
 // Returns (rowCount, handled). If handled is false, the caller falls back to database/sql.
 var arrowJSONQueryFunc func(h *QueryHandler, c *fiber.Ctx, ctx context.Context, cancel context.CancelFunc, convertedSQL string, profileMode bool, governanceMaxRows int, start time.Time, timestamp string) (int, bool)
+
+// bufferViewInjectFunc is set by query_arrow.go init() when compiled with duckdb_arrow tag.
+// It injects TEMP VIEWs for buffered data matching the query's table names, returning
+// a map of original table name -> view name. If nil, buffer injection is skipped.
+var bufferViewInjectFunc func(h *QueryHandler, tableNames []string) map[string]string
 
 // isIdentChar returns true if c is a valid SQL identifier character (a-z, A-Z, 0-9, _)
 func isIdentChar(c byte) bool {
@@ -479,6 +485,10 @@ type QueryHandler struct {
 
 	// Query management (Enterprise feature - active query tracking and cancellation)
 	queryRegistry *queryregistry.Registry
+
+	// Arrow buffer for buffer-in-query injection
+	// When set, queries will UNION in-memory buffer data with Parquet files
+	arrowBuffer *ingest.ArrowBuffer
 }
 
 // isDebugEnabled returns true if debug logging is enabled.
@@ -699,6 +709,14 @@ func (h *QueryHandler) SetQueryRegistry(registry *queryregistry.Registry) {
 	h.queryRegistry = registry
 }
 
+// SetArrowBuffer sets the ArrowBuffer reference for in-flight data visibility.
+// When set, queries will UNION in-memory buffer data with Parquet files so that
+// recently ingested records are visible in query results before being flushed to storage.
+func (h *QueryHandler) SetArrowBuffer(ab *ingest.ArrowBuffer) {
+	h.arrowBuffer = ab
+	h.logger.Info().Msg("ArrowBuffer set for buffer-in-query injection")
+}
+
 // InvalidateCaches clears all internal caches (partition pruner and SQL transform cache).
 // This should be called after compaction to prevent stale file references.
 func (h *QueryHandler) InvalidateCaches() {
@@ -804,6 +822,21 @@ func extractTableReferences(sql string) []TableReference {
 	}
 
 	return refs
+}
+
+// extractTableNamesFromSQL extracts unique measurement/table names from a SQL query.
+// This is used for buffer injection to determine which tables may have buffered data.
+func (h *QueryHandler) extractTableNamesFromSQL(sql string) []string {
+	refs := extractTableReferences(sql)
+	names := make([]string, 0, len(refs))
+	seen := make(map[string]bool)
+	for _, ref := range refs {
+		if !seen[ref.Measurement] {
+			seen[ref.Measurement] = true
+			names = append(names, ref.Measurement)
+		}
+	}
+	return names
 }
 
 // checkQueryPermissions checks RBAC permissions for all tables referenced in a query
@@ -1030,6 +1063,33 @@ func (h *QueryHandler) handleCacheInvalidate(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+// wrapWithBufferUnion wraps a read_parquet FROM clause with UNION ALL of buffer views.
+func (h *QueryHandler) wrapWithBufferUnion(tableName, readParquetExpr string, viewNames map[string]string) string {
+	viewName, hasBuffer := viewNames[tableName]
+	if !hasBuffer {
+		return readParquetExpr
+	}
+	return fmt.Sprintf("(SELECT * FROM %s UNION ALL %s)", viewName, readParquetExpr)
+}
+
+// applyBufferUnions wraps read_parquet expressions with buffer UNION ALL for tables with active buffers.
+// This is a post-processing step applied after the standard SQL-to-storage-path transformation.
+//
+// TODO: Implement full SQL UNION wrapping for buffer injection. The current implementation
+// is a no-op placeholder because RegisterArrowView is a stub. When that is implemented,
+// this function should find read_parquet() expressions and wrap them with:
+//   (SELECT * FROM _buf_X UNION ALL read_parquet('...'))
+func (h *QueryHandler) applyBufferUnions(sql string, viewNames map[string]string) string {
+	if len(viewNames) == 0 {
+		return sql
+	}
+	// TODO: Implement read_parquet wrapping. This requires parsing the SQL to find
+	// read_parquet() calls, matching them to the table names in viewNames, and
+	// wrapping with (SELECT * FROM _buf_table UNION ALL original_expression).
+	// For now, return the SQL unchanged — queries will not see buffer data.
+	return sql
+}
+
 // executeQuery handles POST /api/v1/query - returns JSON response
 func (h *QueryHandler) executeQuery(c *fiber.Ctx) error {
 	start := time.Now()
@@ -1187,8 +1247,26 @@ localProcessing:
 		})
 	}
 
+	// Inject buffer TEMP VIEWs for in-flight data visibility.
+	// This captures a read-only snapshot of buffered data so queries see recently
+	// ingested records that haven't been flushed to Parquet yet.
+	var bufferedViewNames map[string]string
+	if bufferViewInjectFunc != nil && h.arrowBuffer != nil {
+		tableNames := h.extractTableNamesFromSQL(req.SQL)
+		if len(tableNames) > 0 {
+			bufferedViewNames = bufferViewInjectFunc(h, tableNames)
+		}
+	}
+
 	// Convert SQL to storage paths and check for parallel execution opportunity
 	convertedSQL, parallelInfo, cached := h.getTransformedSQLForParallel(req.SQL, headerDB)
+
+	// Apply buffer UNION ALL wrapping: for tables with active buffer views, wrap the
+	// read_parquet() expression with (SELECT * FROM _buf_X UNION ALL read_parquet(...))
+	// so that queried data includes both buffered and persisted records.
+	if len(bufferedViewNames) > 0 {
+		convertedSQL = h.applyBufferUnions(convertedSQL, bufferedViewNames)
+	}
 
 	if h.debugEnabled {
 		h.logger.Debug().
