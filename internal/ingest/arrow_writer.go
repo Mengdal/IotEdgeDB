@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -715,7 +716,7 @@ type WALWriter interface {
 	Close() error
 }
 
-// ArrowBuffer manages buffering and periodic flushing of Arrow data
+// ArrowBuffer manages buffering and size-based flushing of Arrow data
 // Uses lock sharding to reduce contention across concurrent writes
 type ArrowBuffer struct {
 	config  *config.IngestConfig
@@ -729,47 +730,44 @@ type ArrowBuffer struct {
 	tieringManager *tiering.Manager
 
 	// OPTIMIZATION: Shard buffers to reduce lock contention
-	// Configurable via ingest.shard_count (default 32)
-	// Each shard handles ~1/N of measurements where N = shard count
-	// This allows N concurrent writes to different measurements
 	shards     []*bufferShard
 	shardCount uint32
 
-	// Background flush
-	ctx         context.Context
-	cancel      context.CancelFunc
-	flushTimer  *time.Timer   // self-adjusting: fires when the oldest buffer is due to expire
-	newBufferCh chan struct{} // signals periodicFlush to recompute the next wakeup time
-	wg          sync.WaitGroup
-
-	// OPTIMIZATION: Worker pool for bounded flush concurrency
-	// Prevents goroutine explosion under sustained load
+	// Worker pool for bounded flush concurrency
 	flushQueue   chan flushTask
 	flushWorkers int
 
-	// Sort key configuration (for multi-column sorting)
-	sortKeysConfig  map[string][]string // measurement -> sort keys
-	defaultSortKeys []string            // default sort keys
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
-	// Decimal column configuration (for Decimal128 precision support)
-	decimalConfig        map[string]map[string]config.DecimalSpec // measurement -> column -> spec
-	defaultDecimalConfig map[string]config.DecimalSpec            // default decimal columns
+	flushTimeout       time.Duration
+	maxBufferSize      int
+	minFlushRecords    int
+	minFlushAgeSeconds int
 
-	// Flush timeout for storage writes (prevents workers from blocking forever on S3 hangs)
-	flushTimeout time.Duration
-	maxBufferAge time.Duration // pre-calculated from cfg.MaxBufferAgeMS
+	// Sort key configuration
+	sortKeysConfig  map[string][]string
+	defaultSortKeys []string
 
-	// Metrics (using atomic operations to avoid lock contention)
+	// Decimal column configuration
+	decimalConfig        map[string]map[string]config.DecimalSpec
+	defaultDecimalConfig map[string]config.DecimalSpec
+
+	// Global memory management
+	totalMemoryBytes atomic.Int64
+	maxMemoryBytes   int64
+
+	// Metrics
 	totalRecordsBuffered atomic.Int64
 	totalRecordsWritten  atomic.Int64
 	totalFlushes         atomic.Int64
 	totalErrors          atomic.Int64
-	queueDepth           atomic.Int64 // Current flush queue depth
+	queueDepth           atomic.Int64
+	hasFlushFailure      atomic.Bool
 
-	// Flush failure tracking for WAL maintenance.
-	// Set when a storage write fails (S3 outage etc.), cleared after successful recovery.
-	// The periodic WAL goroutine checks this to decide whether WAL replay is needed.
-	hasFlushFailure atomic.Bool
+	// Recovery mode flag — memory limit relaxed during WAL replay
+	inRecovery atomic.Bool
 
 	logger zerolog.Logger
 }
@@ -846,27 +844,25 @@ func (b *ArrowBuffer) getDecimalColumns(measurement string) map[string]config.De
 	return b.defaultDecimalConfig
 }
 
-// NewArrowBuffer creates a new Arrow buffer with automatic flushing
+// NewArrowBuffer creates a new Arrow buffer with size-only flushing and memory reuse
 func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger zerolog.Logger) *ArrowBuffer {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Use configured values with sensible fallbacks
 	flushWorkers := cfg.FlushWorkers
 	if flushWorkers <= 0 {
-		flushWorkers = 16 // Fallback if not configured
+		flushWorkers = 16
 	}
 
 	queueSize := cfg.FlushQueueSize
 	if queueSize <= 0 {
-		queueSize = 100 // Fallback if not configured
+		queueSize = 100
 	}
 
 	shardCount := cfg.ShardCount
 	if shardCount <= 0 {
-		shardCount = 32 // Fallback if not configured
+		shardCount = 32
 	}
 
-	// Parse sort keys config using shared function
 	sortKeysConfig, defaultSortKeys, err := config.ParseSortKeys(*cfg)
 	if err != nil {
 		logger.Warn().Err(err).Msg("Invalid sort keys config, using defaults")
@@ -874,7 +870,6 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		defaultSortKeys = []string{"time"}
 	}
 
-	// Parse decimal column config
 	decimalConfig, defaultDecimalConfig, err := config.ParseDecimalColumns(*cfg)
 	if err != nil {
 		logger.Warn().Err(err).Msg("Invalid decimal columns config, decimal support disabled")
@@ -882,10 +877,27 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		defaultDecimalConfig = nil
 	}
 
-	// Parse flush timeout (default 30s)
 	flushTimeout := time.Duration(cfg.FlushTimeoutSeconds) * time.Second
 	if cfg.FlushTimeoutSeconds <= 0 {
 		flushTimeout = 30 * time.Second
+	}
+
+	maxMemoryBytes := int64(cfg.GlobalMemoryLimitMB) * 1024 * 1024
+	if maxMemoryBytes <= 0 {
+		// Default: 50% of system memory
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		maxMemoryBytes = int64(m.Sys) / 2
+	}
+
+	minFlushRecords := cfg.MinFlushRecords
+	if minFlushRecords <= 0 {
+		minFlushRecords = 1000
+	}
+
+	minFlushAgeSeconds := cfg.MinFlushAgeSeconds
+	if minFlushAgeSeconds <= 0 {
+		minFlushAgeSeconds = 300
 	}
 
 	buffer := &ArrowBuffer{
@@ -896,12 +908,13 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		shardCount:           uint32(shardCount),
 		ctx:                  ctx,
 		cancel:               cancel,
-		flushTimer:           time.NewTimer(time.Duration(cfg.MaxBufferAgeMS) * time.Millisecond),
-		newBufferCh:          make(chan struct{}, 1),
 		flushQueue:           make(chan flushTask, queueSize),
 		flushWorkers:         flushWorkers,
 		flushTimeout:         flushTimeout,
-		maxBufferAge:         time.Duration(cfg.MaxBufferAgeMS) * time.Millisecond,
+		maxBufferSize:        cfg.MaxBufferSize,
+		maxMemoryBytes:       maxMemoryBytes,
+		minFlushRecords:      minFlushRecords,
+		minFlushAgeSeconds:   minFlushAgeSeconds,
 		sortKeysConfig:       sortKeysConfig,
 		defaultSortKeys:      defaultSortKeys,
 		decimalConfig:        decimalConfig,
@@ -909,13 +922,10 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		logger:               logger.With().Str("component", "arrow-buffer").Logger(),
 	}
 
-	// Initialize shards
+	// Initialize shards with new bufferEntry-based design
 	for i := 0; i < shardCount; i++ {
 		buffer.shards[i] = &bufferShard{
-			buffers:            make(map[string][]interface{}),
-			bufferStartTimes:   make(map[string]time.Time),
-			bufferRecordCounts: make(map[string]int),
-			bufferSchemas:      make(map[string]string),
+			entries: make(map[string]*bufferEntry),
 		}
 	}
 
@@ -925,19 +935,21 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		go buffer.flushWorker(i)
 	}
 
-	// Start background flush
+	// Start min-age safety net goroutine (replaces old periodicFlush)
 	buffer.wg.Add(1)
-	go buffer.periodicFlush()
+	go buffer.minAgeFlushLoop()
 
 	buffer.logger.Info().
 		Int("max_buffer_size", cfg.MaxBufferSize).
-		Int("max_buffer_age_ms", cfg.MaxBufferAgeMS).
 		Str("compression", cfg.Compression).
 		Int("shards", shardCount).
 		Int("flush_workers", flushWorkers).
 		Int("queue_size", queueSize).
 		Dur("flush_timeout", flushTimeout).
-		Msg("ArrowBuffer initialized with lock sharding and worker pool")
+		Int64("max_memory_mb", maxMemoryBytes/(1024*1024)).
+		Int("min_flush_records", minFlushRecords).
+		Int("min_flush_age_seconds", minFlushAgeSeconds).
+		Msg("ArrowBuffer initialized with size-only flush and memory reuse")
 
 	return buffer
 }
