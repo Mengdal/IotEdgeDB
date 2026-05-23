@@ -1905,21 +1905,7 @@ func (b *ArrowBuffer) flushAgedEntries() {
 	}
 }
 
-// splitBufferKey splits "database/measurement" into [database, measurement]
-func splitBufferKey(key string) []string {
-	// Find first slash to split database/measurement
-	for i, c := range key {
-		if c == '/' {
-			return []string{key[:i], key[i+1:]}
-		}
-	}
-	return []string{key}
-}
-
-// flushRecordsAsync performs fire-and-forget flush in background goroutine
-// OPTIMIZATION: This is launched as a goroutine and doesn't block the write path
 // flushWorker processes flush tasks from the queue
-// OPTIMIZATION: Bounded worker pool prevents goroutine explosion
 func (b *ArrowBuffer) flushWorker(workerID int) {
 	defer b.wg.Done()
 
@@ -1932,21 +1918,13 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 			return
 		case task, ok := <-b.flushQueue:
 			if !ok {
-				// Channel closed during shutdown
 				return
 			}
 			b.queueDepth.Add(-1)
 
-			b.logger.Debug().
-				Int("worker_id", workerID).
-				Str("buffer_key", task.bufferKey).
-				Int("records", task.recordCount).
-				Int64("queue_depth", b.queueDepth.Load()).
-				Msg("Worker processing flush task")
-
-			// Execute flush
 			b.flushRecordsAsync(task.ctx, task.bufferKey, task.database, task.measurement, task.records, task.recordCount)
-			// Release timeout context resources
+
+			// task.records is a temporary copy from extractAndEnqueue — GC handles cleanup
 			task.cancel()
 		}
 	}
@@ -1997,7 +1975,7 @@ func (b *ArrowBuffer) flushWithDataTimePartitioning(ctx context.Context, bufferK
 }
 
 // flushPartitionedData is the shared core logic for partitioning and writing data by hour boundaries
-// Called by both async (flushWithDataTimePartitioning) and sync (flushBufferLockedDataTime) paths
+// Called by both async (flushWithDataTimePartitioning) and sync (flushEntrySync via flushPartitionedData) paths
 // Uses hash-based grouping to partition by hour, then sorts each hour independently
 func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, database, measurement string, merged *TypedColumnBatch, recordCount int, flushType string, startTime time.Time) error {
 	// Get sort keys for this measurement (guaranteed to include "time")
@@ -2137,66 +2115,6 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 		Msgf("%s completed (multi-hour split, data_time)", msgType)
 
 	return nil
-}
-
-// flushBufferLocked writes buffered data to Parquet and storage (synchronous version for periodic flush)
-// Note: Caller must hold shard.mu lock
-func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard, bufferKey, database, measurement string) error {
-	batches, exists := shard.buffers[bufferKey]
-	if !exists || len(batches) == 0 {
-		// Clean up stale tracking entries even if buffer is empty
-		delete(shard.bufferStartTimes, bufferKey)
-		delete(shard.bufferRecordCounts, bufferKey)
-		delete(shard.bufferSchemas, bufferKey)
-		return nil
-	}
-
-	// Get record count before clearing buffer
-	recordCount := shard.bufferRecordCounts[bufferKey]
-
-	// Extract records to flush (hold lock for minimal time)
-	recordsToFlush := make([]interface{}, len(batches))
-	copy(recordsToFlush, batches)
-
-	// Clear buffer immediately
-	delete(shard.buffers, bufferKey)
-	delete(shard.bufferStartTimes, bufferKey)
-	delete(shard.bufferRecordCounts, bufferKey)
-	delete(shard.bufferSchemas, bufferKey)
-
-	// Release lock before expensive operations
-	shard.mu.Unlock()
-
-	// Merge typed column batches
-	merged, err := b.mergeBatches(recordsToFlush)
-	if err != nil {
-		shard.mu.Lock() // Re-acquire lock for caller
-		return fmt.Errorf("failed to merge batches: %w", err)
-	}
-
-	// Flush with data timestamp partitioning
-	startTime := time.Now().UTC()
-	if err := b.flushBufferLockedDataTime(ctx, bufferKey, database, measurement, merged, recordCount, startTime); err != nil {
-		shard.mu.Lock() // Re-acquire lock for caller
-		b.logger.Warn().
-			Err(err).
-			Str("buffer_key", bufferKey).
-			Int("records", recordCount).
-			Msg("Flush failed - data preserved in WAL for recovery")
-		// Data is already in WAL (written at ingest time) - no need to restore to buffer
-		// This prevents memory growth during prolonged S3 outages
-		// WAL will be replayed on restart or via periodic recovery
-		return err
-	}
-
-	// Re-acquire lock for caller
-	shard.mu.Lock()
-	return nil
-}
-
-// flushBufferLockedDataTime flushes with data_time partitioning (sync path)
-func (b *ArrowBuffer) flushBufferLockedDataTime(ctx context.Context, bufferKey, database, measurement string, merged *TypedColumnBatch, recordCount int, startTime time.Time) error {
-	return b.flushPartitionedData(ctx, bufferKey, database, measurement, merged, recordCount, flushTypeSync, startTime)
 }
 
 // mergeBatches merges multiple column batches into a single TypedColumnBatch.
@@ -2923,35 +2841,19 @@ func (b *ArrowBuffer) generateStoragePath(database, measurement string, partitio
 // FlushAll flushes all buffered data to storage
 func (b *ArrowBuffer) FlushAll(ctx context.Context) error {
 	b.logger.Info().Msg("Flushing all buffers...")
-
 	var lastErr error
 
-	// Flush all buffers in all shards
-	for shardIdx := range b.shards {
-		shard := b.shards[shardIdx]
-
+	for _, shard := range b.shards {
 		shard.mu.Lock()
-
-		// Copy keys to avoid modifying map while iterating
-		keys := make([]string, 0, len(shard.buffers))
-		for key := range shard.buffers {
-			keys = append(keys, key)
-		}
-
-		for _, key := range keys {
-			parts := splitBufferKey(key)
-			if len(parts) != 2 {
-				b.logger.Error().Str("buffer_key", key).Msg("Invalid buffer key format during flush")
-				continue
-			}
-
-			if err := b.flushBufferLocked(ctx, shard, key, parts[0], parts[1]); err != nil {
-				b.logger.Error().Err(err).Str("buffer_key", key).Msg("Failed to flush buffer")
+		for key, entry := range shard.entries {
+			delete(shard.entries, key)
+			if err := b.flushEntrySync(entry); err != nil {
+				b.logger.Error().Err(err).
+					Str("buffer_key", key).
+					Msg("Failed to flush buffer during FlushAll")
 				lastErr = err
 			}
-			// flushBufferLocked returns with the lock held (re-acquires after I/O)
 		}
-
 		shard.mu.Unlock()
 	}
 
@@ -2963,46 +2865,26 @@ func (b *ArrowBuffer) FlushAll(ctx context.Context) error {
 func (b *ArrowBuffer) Close() error {
 	b.logger.Info().Msg("Closing ArrowBuffer...")
 
-	// Stop periodic flush
+	// Stop background goroutines (minAgeFlushLoop will exit)
 	b.cancel()
-	b.flushTimer.Stop()
 
 	// Close flush queue (workers will exit when queue is drained)
 	close(b.flushQueue)
-
-	// Wait for all workers to finish
 	b.wg.Wait()
 
 	b.logger.Info().Msg("All flush workers stopped, flushing remaining buffers")
 
 	// Flush all remaining buffers in all shards
-	for shardIdx := range b.shards {
-		shard := b.shards[shardIdx]
-
+	for _, shard := range b.shards {
 		shard.mu.Lock()
-
-		// Copy keys to avoid modifying map while iterating
-		// (flushBufferLocked releases and re-acquires the lock during I/O)
-		keys := make([]string, 0, len(shard.buffers))
-		for key := range shard.buffers {
-			keys = append(keys, key)
-		}
-
-		for _, key := range keys {
-			parts := splitBufferKey(key)
-			if len(parts) != 2 {
-				b.logger.Error().Str("buffer_key", key).Msg("Invalid buffer key format during close")
-				continue
+		for key, entry := range shard.entries {
+			delete(shard.entries, key)
+			if err := b.flushEntrySync(entry); err != nil {
+				b.logger.Error().Err(err).
+					Str("buffer_key", key).
+					Msg("Failed to flush buffer during close")
 			}
-
-			flushCtx, flushCancel := context.WithTimeout(context.Background(), b.flushTimeout)
-			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
-				b.logger.Error().Err(err).Str("buffer_key", key).Msg("Failed to flush buffer during close")
-			}
-			flushCancel()
-			// flushBufferLocked returns with the lock held (re-acquires after I/O)
 		}
-
 		shard.mu.Unlock()
 	}
 
@@ -3016,23 +2898,27 @@ func (b *ArrowBuffer) Close() error {
 
 // GetStats returns buffer statistics
 func (b *ArrowBuffer) GetStats() map[string]interface{} {
-	// Count active buffers across all shards
 	activeBuffers := 0
-	for shardIdx := range b.shards {
-		shard := b.shards[shardIdx]
+	totalBuffered := int64(0)
+	for _, shard := range b.shards {
 		shard.mu.RLock()
-		activeBuffers += len(shard.buffers)
+		activeBuffers += len(shard.entries)
+		for _, entry := range shard.entries {
+			totalBuffered += int64(entry.count)
+		}
 		shard.mu.RUnlock()
 	}
 
-	// Read atomic values (lock-free!)
 	return map[string]interface{}{
 		"total_records_buffered": b.totalRecordsBuffered.Load(),
 		"total_records_written":  b.totalRecordsWritten.Load(),
 		"total_flushes":          b.totalFlushes.Load(),
 		"total_errors":           b.totalErrors.Load(),
 		"active_buffers":         activeBuffers,
+		"current_buffer_records": totalBuffered,
 		"flush_queue_depth":      b.queueDepth.Load(),
 		"flush_workers":          b.flushWorkers,
+		"memory_bytes":           b.totalMemoryBytes.Load(),
+		"memory_limit_bytes":     b.maxMemoryBytes,
 	}
 }
