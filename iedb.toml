@@ -51,7 +51,10 @@ s3_secret_key = "password123"
 # -----------------------------------------------------------------------------
 [ingest]
 max_buffer_size = 5000000   # Records before flush (default: 50000)
-max_buffer_age_ms = 100   # Max buffer age before flush
+# max_buffer_age_ms removed — age-based flush eliminated
+global_memory_limit_mb = 8192     # Hard memory ceiling in MB (0 = auto: 50% system memory)
+min_flush_records = 1000          # Minimum records before eviction can flush a buffer
+min_flush_age_seconds = 300      # Safety net: flush even below min records
 
 # Sort keys for compression/query performance: "measurement:col1,col2"
 # Time column is always appended automatically
@@ -65,7 +68,7 @@ default_sort_keys = ""
 enabled = true
 
 # Hourly
-hourly_enabled = true
+hourly_enabled = false            # no longer needed with size-only flush
 hourly_schedule = "5 * * * *"
 hourly_min_age_hours = 1
 hourly_min_files = 10
