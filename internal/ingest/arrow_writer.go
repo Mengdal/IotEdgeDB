@@ -678,12 +678,20 @@ type TypedColumnBatch struct {
 	TagColumns []string               // tag column names (for Parquet metadata, enables auto-dedup)
 }
 
+// bufferEntry holds all buffered data for one measurement in one shard.
+// Replaces the four separate maps that previously tracked buffers, start times, counts, and schemas.
+type bufferEntry struct {
+	batches   *[]*TypedColumnBatch // pool-allocated slice of typed column batches
+	count     int                  // total records across all batches
+	startTime time.Time            // when this entry was first created (for eviction priority)
+	signature string               // column signature for schema evolution detection
+}
+
+// bufferShard represents a single shard with its own lock.
+// entries map is the single source of truth — replaces the old 4-map design.
 type bufferShard struct {
-	buffers            map[string][]interface{}
-	bufferStartTimes   map[string]time.Time
-	bufferRecordCounts map[string]int
-	bufferSchemas      map[string]string // Column signature for schema evolution detection
-	mu                 sync.RWMutex
+	entries map[string]*bufferEntry // key: "database/measurement"
+	mu      sync.RWMutex
 }
 
 // flushTask represents a flush operation to be executed by workers
@@ -695,6 +703,7 @@ type flushTask struct {
 	measurement string
 	records     []interface{}
 	recordCount int
+	startTime   time.Time // for WAL purge after successful flush
 }
 
 // WALWriter interface for Write-Ahead Log support
