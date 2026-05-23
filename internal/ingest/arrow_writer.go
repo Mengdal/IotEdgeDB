@@ -682,10 +682,12 @@ type TypedColumnBatch struct {
 // bufferEntry holds all buffered data for one measurement in one shard.
 // Replaces the four separate maps that previously tracked buffers, start times, counts, and schemas.
 type bufferEntry struct {
-	batches   *[]*TypedColumnBatch // pool-allocated slice of typed column batches
-	count     int                  // total records across all batches
-	startTime time.Time            // when this entry was first created (for eviction priority)
-	signature string               // column signature for schema evolution detection
+	batches     *[]*TypedColumnBatch // pool-allocated slice of typed column batches
+	count       int                  // total records across all batches
+	startTime   time.Time            // when this entry was first created (for eviction priority)
+	signature   string               // column signature for schema evolution detection
+	database    string               // database name for this entry
+	measurement string               // measurement name for this entry
 }
 
 // bufferShard represents a single shard with its own lock.
@@ -1224,26 +1226,19 @@ func (b *ArrowBuffer) writeColumnar(ctx context.Context, database string, record
 }
 
 func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string, record *models.ColumnarRecord, skipWAL bool) error {
-	// Create buffer key: database/measurement
-	// OPTIMIZATION: String concatenation is faster than fmt.Sprintf (no reflection)
 	bufferKey := database + "/" + record.Measurement
 
-	// WAL: Write to WAL before buffering (if enabled)
-	// Skip WAL during recovery to avoid re-writing recovered data
+	// WAL: Write to WAL before buffering
 	if b.wal != nil && !skipWAL {
-		// ZERO-COPY PATH: Use raw msgpack bytes if available (avoids re-serialization)
 		if len(record.RawPayload) > 0 {
 			if err := b.wal.AppendRawWithMeta(database, record.RawPayload); err != nil {
-				// Log error but don't fail the write - WAL is for durability, not correctness
 				b.logger.Error().Err(err).
 					Str("database", database).
 					Str("measurement", record.Measurement).
 					Int("payload_size", len(record.RawPayload)).
-					Msg("WAL write failed (zero-copy) - data may be lost on crash")
+					Msg("WAL write failed - data may be lost on crash")
 			}
 		} else {
-			// FALLBACK: Convert columnar to row format for WAL storage
-			// This path is used for LineProtocol or when raw bytes aren't available
 			walRecords := b.columnarToWALRecords(database, record)
 			if len(walRecords) > 0 {
 				if err := b.wal.Append(walRecords); err != nil {
@@ -1257,145 +1252,60 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		}
 	}
 
-	// Convert []interface{} columns to typed arrays (optimized with zero-copy fast paths)
+	// Convert []interface{} columns to typed arrays
 	typedColumns, numRecords, err := b.convertColumnsToTyped(record.Measurement, record.Columns)
 	if err != nil {
 		return fmt.Errorf("failed to convert columns: %w", err)
 	}
-
-	// Propagate tag column names for Parquet metadata (enables auto-dedup in compaction)
 	typedColumns.TagColumns = record.TagColumns
 
-	// Get column signature for schema evolution detection
 	newSignature := getColumnSignature(typedColumns.Data)
 
-	// OPTIMIZATION: Get shard for this buffer key (lock sharding)
 	shard := b.getShard(bufferKey)
-
-	// OPTIMIZATION: Extract-then-flush pattern
-	// Hold lock ONLY to extract records, flush outside lock
-	var recordsToFlush []interface{}
-	var shouldFlush bool
-
 	shard.mu.Lock()
 
-	// Schema evolution detection: flush buffer if columns changed
-	if existingSignature, exists := shard.bufferSchemas[bufferKey]; exists {
-		if existingSignature != newSignature {
-			// Schema changed - flush existing buffer first to avoid column mismatch
-			b.logger.Debug().
-				Str("buffer_key", bufferKey).
-				Str("old_schema", existingSignature).
-				Str("new_schema", newSignature).
-				Msg("Schema evolution detected, flushing buffer")
-
-			if err := b.flushBufferLocked(ctx, shard, bufferKey, database, record.Measurement); err != nil {
-				b.logger.Error().Err(err).
-					Str("buffer_key", bufferKey).
-					Msg("Failed to flush buffer on schema change")
-				// Continue anyway - the buffer is cleared by flushBufferLocked
-			}
-			// Buffer is now empty, will be re-initialized below
-		}
-	}
-
-	// Initialize buffer and record count if needed
-	if _, exists := shard.buffers[bufferKey]; !exists {
-		shard.bufferStartTimes[bufferKey] = time.Now().UTC()
-		shard.bufferRecordCounts[bufferKey] = 0
-		shard.bufferSchemas[bufferKey] = newSignature // Store schema for evolution detection
-		// Tell periodicFlush to recompute its wakeup time for this new buffer.
-		select {
-		case b.newBufferCh <- struct{}{}:
-		default:
-		}
-	}
-
-	// Add typed columns to buffer (already converted via zero-copy fast paths)
-	shard.buffers[bufferKey] = append(shard.buffers[bufferKey], typedColumns)
-
-	// CRITICAL FIX: Track count incrementally instead of O(n) loop
-	shard.bufferRecordCounts[bufferKey] += numRecords
-	totalBuffered := shard.bufferRecordCounts[bufferKey]
-
-	// Check if buffer needs flush (size-based)
-	if totalBuffered >= b.config.MaxBufferSize {
-		// Extract records to flush (hold lock for microseconds only)
-		recordsToFlush = make([]interface{}, len(shard.buffers[bufferKey]))
-		copy(recordsToFlush, shard.buffers[bufferKey])
-
-		// Clear buffer completely so next write re-initializes bufferStartTimes
-		// Using delete() instead of = nil ensures the key doesn't exist,
-		// so the next WriteColumnar properly sets a fresh start time
-		delete(shard.buffers, bufferKey)
-		delete(shard.bufferStartTimes, bufferKey)
-		delete(shard.bufferRecordCounts, bufferKey)
-		delete(shard.bufferSchemas, bufferKey)
-
-		shouldFlush = true
-
-		b.logger.Debug().
-			Str("buffer_key", bufferKey).
-			Int("total_records", totalBuffered).
-			Msg("Extracted records for flush (fire-and-forget)")
-	}
-
-	// Release lock IMMEDIATELY (lock held for <1ms)
-	shard.mu.Unlock()
-
-	// OPTIMIZATION: Update metrics with atomic operations (lock-free!)
-	b.totalRecordsBuffered.Add(int64(numRecords))
-
-	b.logger.Debug().
-		Str("buffer_key", bufferKey).
-		Int("num_records", numRecords).
-		Int("total_buffered", totalBuffered).
-		Bool("flushing", shouldFlush).
-		Msg("Added columnar data to buffer")
-
-	// OPTIMIZATION: Queue flush to worker pool (bounded concurrency)
-	// This prevents goroutine explosion under sustained load
-	if shouldFlush {
-		// Use buffer ctx as parent so Close() cancels in-flight writes,
-		// with a timeout to prevent workers from blocking forever on slow storage
-		flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-		task := flushTask{
-			ctx:         flushCtx,
-			cancel:      flushCancel,
-			bufferKey:   bufferKey,
+	entry, exists := shard.entries[bufferKey]
+	if !exists {
+		batchesPtr := GetBatchSlice()
+		entry = &bufferEntry{
+			batches:     batchesPtr,
+			count:       0,
+			startTime:   time.Now().UTC(),
+			signature:   newSignature,
 			database:    database,
 			measurement: record.Measurement,
-			records:     recordsToFlush,
-			recordCount: totalBuffered,
 		}
-
-		// Non-blocking send to queue
-		select {
-		case b.flushQueue <- task:
-			b.queueDepth.Add(1)
-			b.logger.Info().
-				Str("buffer_key", bufferKey).
-				Int("total_records", totalBuffered).
-				Int64("queue_depth", b.queueDepth.Load()).
-				Msg("Buffer size exceeded, queued flush to worker pool")
-		default:
-			// Queue full - cancel the unused context to avoid leak
-			flushCancel()
-			// Queue full - data is already in WAL, don't grow memory
-			b.logger.Warn().
-				Str("buffer_key", bufferKey).
-				Int("records", totalBuffered).
-				Int64("queue_depth", b.queueDepth.Load()).
-				Msg("Flush queue full - data preserved in WAL for recovery")
-			b.totalErrors.Add(1)
-			// Track records preserved in WAL for operator visibility
-			metrics.Get().IncWALRecordsPreserved(int64(totalBuffered))
-			// Data is already in WAL (written at ingest time) - no memory growth
-			// WAL will be replayed on restart or via periodic recovery
+		shard.entries[bufferKey] = entry
+		b.totalMemoryBytes.Add(estimateEntryMemory(batchesPtr))
+	} else {
+		// Schema changed — update signature, do NOT flush
+		if entry.signature != newSignature {
+			entry.signature = newSignature
 		}
 	}
 
-	// Return immediately (don't wait for flush to complete!)
+	*entry.batches = append(*entry.batches, typedColumns)
+	entry.count += numRecords
+	totalBuffered := entry.count
+
+	var shouldFlush bool
+	var entriesToFlush *bufferEntry
+
+	if totalBuffered >= b.maxBufferSize {
+		entriesToFlush = entry
+		shouldFlush = true
+		delete(shard.entries, bufferKey)
+	}
+
+	shard.mu.Unlock()
+
+	b.totalRecordsBuffered.Add(int64(numRecords))
+
+	if shouldFlush {
+		b.extractAndEnqueue(bufferKey, database, record.Measurement, entriesToFlush, totalBuffered)
+		b.checkMemoryAndEvict()
+	}
+
 	return nil
 }
 
@@ -1420,115 +1330,91 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		}
 	}
 
-	// Column signature for schema evolution detection
 	newSignature := getColumnSignature(typedColumns.Data)
 
-	// Get shard for this buffer key (lock sharding)
 	shard := b.getShard(bufferKey)
-
-	var recordsToFlush []interface{}
-	var shouldFlush bool
-
 	shard.mu.Lock()
 
-	// Schema evolution detection: flush buffer if columns changed
-	if existingSignature, exists := shard.bufferSchemas[bufferKey]; exists {
-		if existingSignature != newSignature {
-			b.logger.Debug().
-				Str("buffer_key", bufferKey).
-				Str("old_schema", existingSignature).
-				Str("new_schema", newSignature).
-				Msg("Schema evolution detected, flushing buffer")
-
-			if err := b.flushBufferLocked(ctx, shard, bufferKey, database, measurement); err != nil {
-				b.logger.Error().Err(err).
-					Str("buffer_key", bufferKey).
-					Msg("Failed to flush buffer on schema change")
-			}
+	entry, exists := shard.entries[bufferKey]
+	if !exists {
+		batchesPtr := GetBatchSlice()
+		entry = &bufferEntry{
+			batches:     batchesPtr,
+			count:       0,
+			startTime:   time.Now().UTC(),
+			signature:   newSignature,
+			database:    database,
+			measurement: measurement,
+		}
+		shard.entries[bufferKey] = entry
+		b.totalMemoryBytes.Add(estimateEntryMemory(batchesPtr))
+	} else {
+		if entry.signature != newSignature {
+			entry.signature = newSignature
 		}
 	}
 
-	// Initialize buffer and record count if needed
-	if _, exists := shard.buffers[bufferKey]; !exists {
-		shard.bufferStartTimes[bufferKey] = time.Now().UTC()
-		shard.bufferRecordCounts[bufferKey] = 0
-		shard.bufferSchemas[bufferKey] = newSignature
-		// Tell periodicFlush to recompute its wakeup time for this new buffer.
-		select {
-		case b.newBufferCh <- struct{}{}:
-		default:
-		}
-	}
+	*entry.batches = append(*entry.batches, typedColumns)
+	entry.count += numRecords
+	totalBuffered := entry.count
 
-	// Add typed columns to buffer directly (no conversion needed)
-	shard.buffers[bufferKey] = append(shard.buffers[bufferKey], typedColumns)
+	var shouldFlush bool
+	var entriesToFlush *bufferEntry
 
-	shard.bufferRecordCounts[bufferKey] += numRecords
-	totalBuffered := shard.bufferRecordCounts[bufferKey]
-
-	// Check if buffer needs flush (size-based)
-	if totalBuffered >= b.config.MaxBufferSize {
-		recordsToFlush = make([]interface{}, len(shard.buffers[bufferKey]))
-		copy(recordsToFlush, shard.buffers[bufferKey])
-
-		delete(shard.buffers, bufferKey)
-		delete(shard.bufferStartTimes, bufferKey)
-		delete(shard.bufferRecordCounts, bufferKey)
-		delete(shard.bufferSchemas, bufferKey)
-
+	if totalBuffered >= b.maxBufferSize {
+		entriesToFlush = entry
 		shouldFlush = true
-
-		b.logger.Debug().
-			Str("buffer_key", bufferKey).
-			Int("total_records", totalBuffered).
-			Msg("Extracted records for flush (fire-and-forget)")
+		delete(shard.entries, bufferKey)
 	}
 
 	shard.mu.Unlock()
 
 	b.totalRecordsBuffered.Add(int64(numRecords))
 
-	b.logger.Debug().
-		Str("buffer_key", bufferKey).
-		Int("num_records", numRecords).
-		Int("total_buffered", totalBuffered).
-		Bool("flushing", shouldFlush).
-		Msg("Added typed columnar data to buffer")
-
-	// Queue flush to worker pool if needed
 	if shouldFlush {
-		flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-		task := flushTask{
-			ctx:         flushCtx,
-			cancel:      flushCancel,
-			bufferKey:   bufferKey,
-			database:    database,
-			measurement: measurement,
-			records:     recordsToFlush,
-			recordCount: totalBuffered,
-		}
-
-		select {
-		case b.flushQueue <- task:
-			b.queueDepth.Add(1)
-			b.logger.Info().
-				Str("buffer_key", bufferKey).
-				Int("total_records", totalBuffered).
-				Int64("queue_depth", b.queueDepth.Load()).
-				Msg("Buffer size exceeded, queued flush to worker pool")
-		default:
-			flushCancel()
-			b.logger.Warn().
-				Str("buffer_key", bufferKey).
-				Int("records", totalBuffered).
-				Int64("queue_depth", b.queueDepth.Load()).
-				Msg("Flush queue full - data preserved in WAL for recovery")
-			b.totalErrors.Add(1)
-			metrics.Get().IncWALRecordsPreserved(int64(totalBuffered))
-		}
+		b.extractAndEnqueue(bufferKey, database, measurement, entriesToFlush, totalBuffered)
+		b.checkMemoryAndEvict()
 	}
 
 	return nil
+}
+
+// extractAndEnqueue copies the entry's batches and enqueues a flush task.
+// The entry is already deleted from the shard map before this call.
+func (b *ArrowBuffer) extractAndEnqueue(bufferKey, database, measurement string, entry *bufferEntry, recordCount int) {
+	batchesCopy := make([]interface{}, len(*entry.batches))
+	for i, batch := range *entry.batches {
+		batchesCopy[i] = batch
+	}
+
+	// Reset entry for reuse
+	*entry.batches = (*entry.batches)[:0]
+	entry.count = 0
+
+	flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
+	task := flushTask{
+		ctx:         flushCtx,
+		cancel:      flushCancel,
+		bufferKey:   bufferKey,
+		database:    database,
+		measurement: measurement,
+		records:     batchesCopy,
+		recordCount: recordCount,
+		startTime:   entry.startTime,
+	}
+
+	select {
+	case b.flushQueue <- task:
+		b.queueDepth.Add(1)
+	default:
+		flushCancel()
+		b.logger.Warn().
+			Str("buffer_key", bufferKey).
+			Int("records", recordCount).
+			Msg("Flush queue full - data preserved in WAL for recovery")
+		b.totalErrors.Add(1)
+		metrics.Get().IncWALRecordsPreserved(int64(recordCount))
+	}
 }
 
 // typedBatchToWALRecords converts a TypedColumnBatch to row-format records for WAL storage.
