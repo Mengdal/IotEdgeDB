@@ -787,6 +787,16 @@ func getColumnSignature(columns map[string]interface{}) string {
 	return strings.Join(names, ",")
 }
 
+// estimateEntryMemory estimates the memory used by a bufferEntry in bytes.
+func estimateEntryMemory(batchesPtr *[]*TypedColumnBatch) int64 {
+	if batchesPtr == nil {
+		return 0
+	}
+	batches := *batchesPtr
+	const batchOverhead = 1024
+	return int64(cap(batches)*8) + int64(len(batches))*batchOverhead
+}
+
 // getShard returns the shard for a given buffer key using FNV-1a hash
 func (b *ArrowBuffer) getShard(bufferKey string) *bufferShard {
 	// FNV-1a hash (fast, good distribution)
@@ -1417,6 +1427,100 @@ func (b *ArrowBuffer) extractAndEnqueue(bufferKey, database, measurement string,
 	}
 }
 
+// findOldestEntry returns the oldest entry across all shards that is eligible for eviction.
+// An entry is eligible if it has >= minFlushRecords OR has exceeded minFlushAgeSeconds.
+// The entry is deleted from its shard map before returning. Returns nil if no eligible entry.
+func (b *ArrowBuffer) findOldestEntry() *bufferEntry {
+	now := time.Now().UTC()
+	minAge := time.Duration(b.minFlushAgeSeconds) * time.Second
+	var oldest *bufferEntry
+	var oldestKey string
+	var oldestShard *bufferShard
+
+	for _, shard := range b.shards {
+		shard.mu.RLock()
+		for key, entry := range shard.entries {
+			eligible := entry.count >= b.minFlushRecords
+			if !eligible && now.Sub(entry.startTime) >= minAge {
+				eligible = true
+			}
+			if !eligible {
+				continue
+			}
+			if oldest == nil || entry.startTime.Before(oldest.startTime) {
+				oldest = entry
+				oldestKey = key
+				oldestShard = shard
+			}
+		}
+		shard.mu.RUnlock()
+	}
+
+	if oldest != nil {
+		oldestShard.mu.Lock()
+		delete(oldestShard.entries, oldestKey)
+		oldestShard.mu.Unlock()
+	}
+	return oldest
+}
+
+// checkMemoryAndEvict checks if total memory exceeds the limit and evicts
+// the oldest entries, flushing them to Parquet synchronously.
+func (b *ArrowBuffer) checkMemoryAndEvict() {
+	if b.inRecovery.Load() {
+		return
+	}
+
+	for b.totalMemoryBytes.Load() >= b.maxMemoryBytes {
+		entry := b.findOldestEntry()
+		if entry == nil {
+			break
+		}
+		b.flushEntrySync(entry)
+	}
+}
+
+// flushEntrySync flushes a single entry to Parquet synchronously.
+// Used by memory eviction and Close/FlushAll. The entry must NOT be in any shard map.
+func (b *ArrowBuffer) flushEntrySync(entry *bufferEntry) error {
+	batches := *entry.batches
+	if len(batches) == 0 {
+		return nil
+	}
+
+	batchesCopy := make([]interface{}, len(batches))
+	for i, batch := range batches {
+		batchesCopy[i] = batch
+	}
+
+	merged, err := b.mergeBatches(batchesCopy)
+	if err != nil {
+		b.logger.Error().Err(err).
+			Str("database", entry.database).
+			Str("measurement", entry.measurement).
+			Msg("Failed to merge batches during eviction flush")
+		b.totalErrors.Add(1)
+		b.hasFlushFailure.Store(true)
+		return err
+	}
+
+	startTime := time.Now()
+	if err := b.flushPartitionedData(context.Background(), "", entry.database, entry.measurement, merged, entry.count, "eviction", startTime); err != nil {
+		b.logger.Error().Err(err).
+			Str("database", entry.database).
+			Str("measurement", entry.measurement).
+			Msg("Failed to flush during eviction")
+		b.hasFlushFailure.Store(true)
+		return err
+	}
+
+	// Recycle memory
+	PutBatchSlice(entry.batches)
+	b.totalMemoryBytes.Add(-estimateEntryMemory(entry.batches))
+
+	return nil
+}
+
 // typedBatchToWALRecords converts a TypedColumnBatch to row-format records for WAL storage.
 // This is the WAL fallback path for typed batches (e.g., TLE) that don't have raw msgpack bytes.
 func typedBatchToWALRecords(database, measurement string, batch *TypedColumnBatch, numRecords int, decimalCols map[string]config.DecimalSpec) []map[string]interface{} {
@@ -1758,100 +1862,45 @@ func (b *ArrowBuffer) tryBoolZeroCopy(col []interface{}) ([]bool, bool) {
 	return arr, true
 }
 
-// periodicFlush runs in the background and flushes old buffers.
-// It uses a self-adjusting timer that fires exactly when the oldest buffer is due
-// to expire, eliminating the phase-misalignment lag of a fixed-period ticker.
-func (b *ArrowBuffer) periodicFlush() {
+// minAgeFlushLoop periodically checks for entries that have exceeded the
+// minimum flush age even if they haven't reached maxBufferSize.
+// This is a safety net for low-throughput measurements — without it, a
+// measurement receiving 1 record/day would never be flushed to Parquet.
+func (b *ArrowBuffer) minAgeFlushLoop() {
 	defer b.wg.Done()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-b.ctx.Done():
 			return
-
-		case <-b.newBufferCh:
-			// A new buffer was created; recompute the next wakeup time so the
-			// timer fires at T+maxAge rather than at whatever the old interval was.
-			nextDelay := b.computeNextFlushDelay()
-			if !b.flushTimer.Stop() {
-				select {
-				case <-b.flushTimer.C:
-				default:
-				}
-			}
-			b.flushTimer.Reset(nextDelay)
-
-		case <-b.flushTimer.C:
-			b.flushAgedBuffers()
-			// Rearm the timer for the next oldest buffer expiry.
-			b.flushTimer.Reset(b.computeNextFlushDelay())
+		case <-ticker.C:
+			b.flushAgedEntries()
 		}
 	}
 }
 
-// computeNextFlushDelay returns the duration until the oldest buffered key is
-// due to be flushed.  If no buffers exist it returns the full maxAge so the
-// goroutine sleeps until a new buffer signals it via newBufferCh.
-func (b *ArrowBuffer) computeNextFlushDelay() time.Duration {
-	now := time.Now()
-	maxAge := b.maxBufferAge
-	earliest := now.Add(maxAge) // default when no buffers exist
+// flushAgedEntries finds entries that have exceeded minFlushAgeSeconds
+// and flushes them synchronously.
+func (b *ArrowBuffer) flushAgedEntries() {
+	now := time.Now().UTC()
+	minAge := time.Duration(b.minFlushAgeSeconds) * time.Second
 
 	for _, shard := range b.shards {
-		shard.mu.RLock()
-		for _, startTime := range shard.bufferStartTimes {
-			if expiry := startTime.Add(maxAge); expiry.Before(earliest) {
-				earliest = expiry
-			}
-		}
-		shard.mu.RUnlock()
-	}
-
-	if delay := earliest.Sub(now); delay > time.Millisecond {
-		return delay
-	}
-	return time.Millisecond
-}
-
-// flushAgedBuffers flushes buffers that have exceeded max age
-func (b *ArrowBuffer) flushAgedBuffers() {
-	now := time.Now().UTC()
-	maxAge := b.maxBufferAge
-
-	threshold := maxAge
-
-	// Iterate over all shards
-	for shardIdx := range b.shards {
-		shard := b.shards[shardIdx]
-
 		shard.mu.Lock()
-
-		// Check each buffer in this shard for age
-		for key, startTime := range shard.bufferStartTimes {
-			age := now.Sub(startTime)
-			if age >= threshold {
-				b.logger.Info().
-					Str("buffer_key", key).
-					Dur("age", age).
-					Dur("threshold", threshold).
-					Int("shard", shardIdx).
-					Msg("Flushing aged buffer")
-
-				// Parse buffer key to get database and measurement
-				parts := splitBufferKey(key)
-				if len(parts) != 2 {
-					b.logger.Error().Str("buffer_key", key).Msg("Invalid buffer key format")
-					continue
+		for key, entry := range shard.entries {
+			if now.Sub(entry.startTime) >= minAge {
+				delete(shard.entries, key)
+				// Sync flush for aged entries
+				if err := b.flushEntrySync(entry); err != nil {
+					b.logger.Error().Err(err).
+						Str("buffer_key", key).
+						Msg("Failed to flush aged entry")
 				}
-
-				flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-				if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
-					b.logger.Error().Err(err).Str("buffer_key", key).Msg("Failed to flush aged buffer")
-				}
-				flushCancel()
 			}
 		}
-
 		shard.mu.Unlock()
 	}
 }
