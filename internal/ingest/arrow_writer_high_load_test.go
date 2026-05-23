@@ -15,10 +15,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// TestBufferFlushTimingUnderLoad tests age-based flushing under high write load
+// TestBufferFlushTimingUnderLoad tests min-age safety net flushing under high write load
 // This simulates production conditions with:
 // - 4 high-volume measurements (frequently hit size limit)
-// - 4 low-volume measurements (rely on age-based flushing)
+// - 4 low-volume measurements (rely on min-age safety net)
 func TestBufferFlushTimingUnderLoad(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping load test in short mode")
@@ -32,10 +32,12 @@ func TestBufferFlushTimingUnderLoad(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Configure similar to production
-	maxBufferAgeMS := 5000
+	flushAgeSeconds := 5
 	cfg := &config.IngestConfig{
-		MaxBufferSize:  100000,         // Lower to trigger size flushes faster
-		MaxBufferAgeMS: maxBufferAgeMS, // 5 seconds
+		MaxBufferSize:       100000, // Lower to trigger size flushes faster
+		MinFlushAgeSeconds:  flushAgeSeconds,
+		MinFlushRecords:     1000,
+		GlobalMemoryLimitMB: 1024,
 		FlushWorkers:   8,              // More workers like production
 		FlushQueueSize: 20,
 		ShardCount:     32, // Full shard count
@@ -103,7 +105,7 @@ func TestBufferFlushTimingUnderLoad(t *testing.T) {
 		}(measurement)
 	}
 
-	// Low-volume measurements (will rely on age-based flushes)
+	// Low-volume measurements (will rely on min-age safety net)
 	lowVolumeMeasurements := []string{"alerts", "events", "status", "heartbeat"}
 	startTimes := make(map[string]time.Time)
 	actualFlushTimes := make(map[string]time.Time)
@@ -182,7 +184,7 @@ func TestBufferFlushTimingUnderLoad(t *testing.T) {
 		}
 	}()
 
-	// Run for 10 seconds to allow age-based flushes to trigger
+	// Run for 10 seconds to allow min-age safety net flushes to trigger
 	time.Sleep(10 * time.Second)
 
 	// Stop high-volume writers
@@ -190,7 +192,7 @@ func TestBufferFlushTimingUnderLoad(t *testing.T) {
 	wg.Wait()
 
 	// Analyze results
-	t.Log("\n=== Age-Based Flush Timing Results ===")
+	t.Log("\n=== Min-Age Safety Net Flush Results ===")
 	var totalDuration time.Duration
 	var maxDuration time.Duration
 	count := 0
@@ -217,7 +219,7 @@ func TestBufferFlushTimingUnderLoad(t *testing.T) {
 		}
 		count++
 
-		expectedMax := time.Duration(maxBufferAgeMS)*time.Millisecond + 1*time.Second // 5s + 1s tolerance
+		expectedMax := time.Duration(flushAgeSeconds)*time.Second + 1*time.Second // 5s + 1s tolerance
 		status := "✓"
 		if duration > expectedMax {
 			status = "⚠️"
@@ -231,10 +233,10 @@ func TestBufferFlushTimingUnderLoad(t *testing.T) {
 		avgDuration := totalDuration / time.Duration(count)
 		t.Logf("\nAverage flush time: %v", avgDuration)
 		t.Logf("Max flush time:     %v", maxDuration)
-		t.Logf("Expected:           ≤ %dms + tolerance", maxBufferAgeMS)
+		t.Logf("Expected:           ≤ %ds + tolerance", flushAgeSeconds)
 
 		// Under load, we expect some delay, but should not be excessive
-		maxAllowed := time.Duration(maxBufferAgeMS)*time.Millisecond + 2*time.Second
+		maxAllowed := time.Duration(flushAgeSeconds)*time.Second + 2*time.Second
 		if maxDuration > maxAllowed {
 			t.Errorf("Max flush time %v exceeded allowed threshold %v", maxDuration, maxAllowed)
 		}

@@ -107,15 +107,17 @@ func TestFlushWorkers_BlockForever_WhenStorageHangs(t *testing.T) {
 	store := newHangingStorage(1, 0) // 1 write succeeds, then hang forever
 
 	cfg := &config.IngestConfig{
-		MaxBufferSize:   2000,
-		MaxBufferAgeMS:  60000, // disable age-based flush
-		Compression:     "snappy",
-		UseDictionary:   true,
-		WriteStatistics: true,
-		DataPageVersion: "2.0",
-		FlushWorkers:    2,
-		FlushQueueSize:  5,
-		ShardCount:      4,
+		MaxBufferSize:       2000,
+		MinFlushAgeSeconds:  3600, // effectively disabled
+		MinFlushRecords:     1000,
+		GlobalMemoryLimitMB: 1024,
+		Compression:         "snappy",
+		UseDictionary:       true,
+		WriteStatistics:     true,
+		DataPageVersion:     "2.0",
+		FlushWorkers:        2,
+		FlushQueueSize:      5,
+		ShardCount:          4,
 	}
 
 	buf := NewArrowBuffer(cfg, store, logger)
@@ -155,38 +157,40 @@ func TestFlushWorkers_BlockForever_WhenStorageHangs(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Test: periodic flush goroutine blocks when storage hangs
+// Test: safety net goroutine blocks when storage hangs
 // -----------------------------------------------------------------------------
 
-func TestPeriodicFlush_BlocksOnStorageHang(t *testing.T) {
+func TestSafetyNetFlush_BlocksOnStorageHang(t *testing.T) {
 	logger := zerolog.Nop()
 	store := newHangingStorage(0, 0) // hang on ALL writes
 
 	cfg := &config.IngestConfig{
-		MaxBufferSize:   100000, // large — won't trigger size-based flush
-		MaxBufferAgeMS:  200,    // 200ms age threshold, ticker at 100ms
-		Compression:     "snappy",
-		UseDictionary:   true,
-		WriteStatistics: true,
-		DataPageVersion: "2.0",
-		FlushWorkers:    2,
-		FlushQueueSize:  10,
-		ShardCount:      4,
+		MaxBufferSize:       100000, // large — won't trigger size-based flush
+		MinFlushAgeSeconds:  0,      // flush immediately on next safety net tick (1s)
+		MinFlushRecords:     1,
+		GlobalMemoryLimitMB: 1024,
+		Compression:         "snappy",
+		UseDictionary:       true,
+		WriteStatistics:     true,
+		DataPageVersion:     "2.0",
+		FlushWorkers:        2,
+		FlushQueueSize:      10,
+		ShardCount:          4,
 	}
 
 	buf := NewArrowBuffer(cfg, store, logger)
 
-	// Write small batch — not enough for size flush, but periodic flush will pick it up
+	// Write small batch — not enough for size flush, but safety net flush will pick it up
 	buf.WriteColumnarDirect(context.Background(), "db", "sensor", makeColumns(100))
 
-	// Wait for periodic flush to fire and get stuck on S3
+	// Wait for safety net flush to fire and get stuck on S3
 	time.Sleep(1 * time.Second)
 
 	if store.stuck.Load() == 0 {
-		t.Fatal("expected periodic flush to be stuck on storage write, got 0 stuck")
+		t.Fatal("expected safety net flush to be stuck on storage write, got 0 stuck")
 	}
 
-	// The periodic flush goroutine is now blocked inside flushBufferLocked → storage.Write.
+	// The safety net flush goroutine is now blocked inside flushBufferLocked → storage.Write.
 	// Verify that it cannot flush OTHER buffers anymore.
 	buf.WriteColumnarDirect(context.Background(), "db", "other_measurement", makeColumns(100))
 	time.Sleep(1 * time.Second)
@@ -196,14 +200,14 @@ func TestPeriodicFlush_BlocksOnStorageHang(t *testing.T) {
 	if written != 0 {
 		t.Fatalf("expected 0 records written (all flushes should be stuck), got %d", written)
 	}
-	t.Log("CONFIRMED: periodic flush stuck — no measurements can flush via age-based path")
+	t.Log("CONFIRMED: safety net flush stuck — no measurements can flush via min-age path")
 
 	closeDone := make(chan struct{})
 	go func() { buf.Close(); close(closeDone) }()
 	select {
 	case <-closeDone:
 	case <-time.After(3 * time.Second):
-		t.Log("CONFIRMED: Close() hangs — periodic flush goroutine stuck on storage.Write")
+		t.Log("CONFIRMED: Close() hangs — safety net flush goroutine stuck on storage.Write")
 	}
 }
 
@@ -216,15 +220,17 @@ func TestAllFlushWorkers_Exhausted_QueueFills(t *testing.T) {
 	store := newHangingStorage(0, 0) // hang on ALL writes
 
 	cfg := &config.IngestConfig{
-		MaxBufferSize:   1000,
-		MaxBufferAgeMS:  60000, // disable age flush
-		Compression:     "snappy",
-		UseDictionary:   true,
-		WriteStatistics: true,
-		DataPageVersion: "2.0",
-		FlushWorkers:    2,
-		FlushQueueSize:  3, // tiny queue
-		ShardCount:      2,
+		MaxBufferSize:       1000,
+		MinFlushAgeSeconds:  3600, // effectively disabled
+		MinFlushRecords:     1000,
+		GlobalMemoryLimitMB: 1024,
+		Compression:         "snappy",
+		UseDictionary:       true,
+		WriteStatistics:     true,
+		DataPageVersion:     "2.0",
+		FlushWorkers:        2,
+		FlushQueueSize:      3, // tiny queue
+		ShardCount:          2,
 	}
 
 	buf := NewArrowBuffer(cfg, store, logger)
@@ -271,15 +277,17 @@ func TestFlushWorkers_RecoverWithTimeout(t *testing.T) {
 	store := newHangingStorage(1, 1*time.Second)
 
 	cfg := &config.IngestConfig{
-		MaxBufferSize:   2000,
-		MaxBufferAgeMS:  60000,
-		Compression:     "snappy",
-		UseDictionary:   true,
-		WriteStatistics: true,
-		DataPageVersion: "2.0",
-		FlushWorkers:    2,
-		FlushQueueSize:  5,
-		ShardCount:      4,
+		MaxBufferSize:       2000,
+		MinFlushAgeSeconds:  3600, // effectively disabled
+		MinFlushRecords:     1000,
+		GlobalMemoryLimitMB: 1024,
+		Compression:         "snappy",
+		UseDictionary:       true,
+		WriteStatistics:     true,
+		DataPageVersion:     "2.0",
+		FlushWorkers:        2,
+		FlushQueueSize:      5,
+		ShardCount:          4,
 	}
 
 	buf := NewArrowBuffer(cfg, store, logger)
@@ -322,15 +330,17 @@ func TestMemoryGrows_WhileFlushWorkersStuck(t *testing.T) {
 	store := newHangingStorage(1, 0) // 1 write then hang forever
 
 	cfg := &config.IngestConfig{
-		MaxBufferSize:   5000,
-		MaxBufferAgeMS:  60000,
-		Compression:     "snappy",
-		UseDictionary:   true,
-		WriteStatistics: true,
-		DataPageVersion: "2.0",
-		FlushWorkers:    2,
-		FlushQueueSize:  3,
-		ShardCount:      4,
+		MaxBufferSize:       5000,
+		MinFlushAgeSeconds:  3600, // effectively disabled
+		MinFlushRecords:     1000,
+		GlobalMemoryLimitMB: 1024,
+		Compression:         "snappy",
+		UseDictionary:       true,
+		WriteStatistics:     true,
+		DataPageVersion:     "2.0",
+		FlushWorkers:        2,
+		FlushQueueSize:      3,
+		ShardCount:          4,
 	}
 
 	buf := NewArrowBuffer(cfg, store, logger)

@@ -19,9 +19,11 @@ func createTestArrowBuffer(t *testing.T) *ArrowBuffer {
 	t.Helper()
 	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
 	cfg := &config.IngestConfig{
-		MaxBufferSize:  1000,
-		MaxBufferAgeMS: 60000,
-		Compression:    "snappy",
+		MaxBufferSize:       1000,
+		MinFlushAgeSeconds:  3600, // effectively disabled
+		MinFlushRecords:     1000,
+		GlobalMemoryLimitMB: 1024,
+		Compression:         "snappy",
 	}
 
 	// Create a mock storage backend for testing

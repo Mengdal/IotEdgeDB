@@ -13,10 +13,12 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// TestBufferFlushTiming verifies that buffers are flushed within the configured max_buffer_age_ms
-// This test is designed to catch the ticker phase misalignment bug where buffers can take
-// up to 2x the configured time to flush.
+// TestBufferFlushTimingSKIPPED — age-based flush removed.
+// This test verified buffers flush within max_buffer_age_ms (periodic ticker).
+// With the new min-age safety net, this timing guarantee no longer applies.
 func TestBufferFlushTiming(t *testing.T) {
+	t.Skip("age-based flush removed; min-age safety net does not provide same timing guarantees")
+
 	// Create temporary directory for test data
 	tmpDir, err := os.MkdirTemp("", "iedb-flush-timing-test-*")
 	if err != nil {
@@ -24,15 +26,17 @@ func TestBufferFlushTiming(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Configure with 5 second max buffer age
-	maxBufferAgeMS := 5000
+	// Configure with 5 second min age flush
+	flushAgeSeconds := 5
 	cfg := &config.IngestConfig{
-		MaxBufferSize:  1000000,        // 1MB - high enough to not trigger size-based flush
-		MaxBufferAgeMS: maxBufferAgeMS, // 5 seconds
-		FlushWorkers:   2,
-		FlushQueueSize: 10,
-		ShardCount:     4,
-		Compression:    "none",
+		MaxBufferSize:       1000000, // 1MB - high enough to not trigger size-based flush
+		MinFlushAgeSeconds:  flushAgeSeconds,
+		MinFlushRecords:     1000,
+		GlobalMemoryLimitMB: 1024,
+		FlushWorkers:        2,
+		FlushQueueSize:      10,
+		ShardCount:          4,
+		Compression:         "none",
 	}
 
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
@@ -71,8 +75,8 @@ func TestBufferFlushTiming(t *testing.T) {
 	t.Logf("Write completed at: %v (elapsed: %v)", time.Now(), time.Since(writeStartTime))
 
 	// Now we wait and monitor when the buffer gets flushed
-	// The buffer should be flushed within max_buffer_age_ms + some tolerance
-	expectedMaxFlushTime := time.Duration(maxBufferAgeMS) * time.Millisecond
+	// The buffer should be flushed within min_flush_age_seconds + some tolerance
+	expectedMaxFlushTime := time.Duration(flushAgeSeconds) * time.Second
 	tolerance := 1000 * time.Millisecond // 1 second tolerance for test timing
 
 	// Create a channel to detect when flush happens
@@ -112,7 +116,7 @@ func TestBufferFlushTiming(t *testing.T) {
 				actualFlushDuration, maxAllowedTime, expectedMaxFlushTime)
 			t.Errorf("This indicates the ticker phase misalignment bug is present")
 		} else {
-			t.Logf("✓ Buffer flushed within expected time: %v ≤ %v", actualFlushDuration, maxAllowedTime)
+			t.Logf("Buffer flushed within expected time: %v ≤ %v", actualFlushDuration, maxAllowedTime)
 		}
 
 		// Additional check: it should NOT take more than 1.5x the configured time
@@ -129,6 +133,7 @@ func TestBufferFlushTiming(t *testing.T) {
 
 // TestBufferFlushTimingMultiple runs the timing test multiple times to account for variance
 func TestBufferFlushTimingMultiple(t *testing.T) {
+	t.Skip("age-based flush removed; min-age safety net does not provide same timing guarantees")
 	if testing.Short() {
 		t.Skip("Skipping timing test in short mode")
 	}
@@ -138,8 +143,8 @@ func TestBufferFlushTimingMultiple(t *testing.T) {
 	var maxDuration time.Duration
 	var minDuration time.Duration = 1000 * time.Second
 
-	maxBufferAgeMS := 5000
-	expectedMaxFlushTime := time.Duration(maxBufferAgeMS) * time.Millisecond
+	flushAgeSeconds := 5
+	expectedMaxFlushTime := time.Duration(flushAgeSeconds) * time.Second
 	tolerance := 1000 * time.Millisecond
 
 	for i := 0; i < iterations; i++ {
@@ -152,12 +157,14 @@ func TestBufferFlushTimingMultiple(t *testing.T) {
 			defer os.RemoveAll(tmpDir)
 
 			cfg := &config.IngestConfig{
-				MaxBufferSize:  1000000,
-				MaxBufferAgeMS: maxBufferAgeMS,
-				FlushWorkers:   2,
-				FlushQueueSize: 10,
-				ShardCount:     4,
-				Compression:    "none",
+				MaxBufferSize:       1000000,
+				MinFlushAgeSeconds:  flushAgeSeconds,
+				MinFlushRecords:     1000,
+				GlobalMemoryLimitMB: 1024,
+				FlushWorkers:        2,
+				FlushQueueSize:      10,
+				ShardCount:          4,
+				Compression:         "none",
 			}
 
 			logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
