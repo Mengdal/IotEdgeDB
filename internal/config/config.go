@@ -81,20 +81,22 @@ type StorageConfig struct {
 }
 
 type IngestConfig struct {
-	MaxBufferSize         int      // Max records before flush
-	MaxBufferAgeMS        int      // Max age in milliseconds before flush
-	Compression           string   // Parquet compression: snappy, gzip, zstd
-	UseDictionary         bool     // Use dictionary encoding
-	WriteStatistics       bool     // Write Parquet statistics
-	DataPageVersion       string   // Parquet data page version: 1.0 or 2.0
-	FlushWorkers          int      // Number of workers for async flush (default: 2x CPU, min 8, max 64)
-	FlushQueueSize        int      // Capacity of flush task queue (default: 4x workers, min 100)
-	ShardCount            int      // Number of buffer shards for lock distribution (default: 32)
-	SortKeys              []string // Per-measurement sort keys: "measurement:col1,col2,time"
-	DefaultSortKeys       string   // Default sort keys for measurements not in SortKeys
-	FlushTimeoutSeconds   int      // Timeout for storage writes during flush (default: 30s, 0 = no timeout)
-	DecimalColumns        []string // Per-measurement decimal columns: "measurement:col=precision,scale;col2=p,s"
-	DefaultDecimalColumns string   // Default decimal columns for unmapped measurements
+	MaxBufferSize          int      // Max records before flush
+	GlobalMemoryLimitMB    int      // Hard memory ceiling in MB (0 = auto: 50% system)
+	MinFlushRecords        int      // Minimum records before eviction can flush a buffer
+	MinFlushAgeSeconds     int      // Safety net seconds — flush even below min records
+	Compression            string   // Parquet compression: snappy, gzip, zstd
+	UseDictionary          bool     // Use dictionary encoding
+	WriteStatistics        bool     // Write Parquet statistics
+	DataPageVersion        string   // Parquet data page version: 1.0 or 2.0
+	FlushWorkers           int      // Number of workers for async flush (default: 2x CPU, min 8, max 64)
+	FlushQueueSize         int      // Capacity of flush task queue (default: 4x workers, min 100)
+	ShardCount             int      // Number of buffer shards for lock distribution (default: 32)
+	SortKeys               []string // Per-measurement sort keys: "measurement:col1,col2,time"
+	DefaultSortKeys        string   // Default sort keys for measurements not in SortKeys
+	FlushTimeoutSeconds    int      // Timeout for storage writes during flush (default: 30s, 0 = no timeout)
+	DecimalColumns         []string // Per-measurement decimal columns: "measurement:col=precision,scale;col2=p,s"
+	DefaultDecimalColumns  string   // Default decimal columns for unmapped measurements
 }
 
 type CacheConfig struct {
@@ -419,20 +421,22 @@ func Load() (*Config, error) {
 			AzureUseManagedIdentity: v.GetBool("storage.azure_use_managed_identity"),
 		},
 		Ingest: IngestConfig{
-			MaxBufferSize:         v.GetInt("ingest.max_buffer_size"),
-			MaxBufferAgeMS:        v.GetInt("ingest.max_buffer_age_ms"),
-			Compression:           v.GetString("ingest.compression"),
-			UseDictionary:         v.GetBool("ingest.use_dictionary"),
-			WriteStatistics:       v.GetBool("ingest.write_statistics"),
-			DataPageVersion:       v.GetString("ingest.data_page_version"),
-			FlushWorkers:          v.GetInt("ingest.flush_workers"),
-			FlushQueueSize:        v.GetInt("ingest.flush_queue_size"),
-			FlushTimeoutSeconds:   v.GetInt("ingest.flush_timeout_seconds"),
-			ShardCount:            v.GetInt("ingest.shard_count"),
-			SortKeys:              v.GetStringSlice("ingest.sort_keys"),
-			DefaultSortKeys:       v.GetString("ingest.default_sort_keys"),
-			DecimalColumns:        v.GetStringSlice("ingest.decimal_columns"),
-			DefaultDecimalColumns: v.GetString("ingest.default_decimal_columns"),
+			MaxBufferSize:          v.GetInt("ingest.max_buffer_size"),
+			GlobalMemoryLimitMB:    v.GetInt("ingest.global_memory_limit_mb"),
+			MinFlushRecords:        v.GetInt("ingest.min_flush_records"),
+			MinFlushAgeSeconds:     v.GetInt("ingest.min_flush_age_seconds"),
+			Compression:            v.GetString("ingest.compression"),
+			UseDictionary:          v.GetBool("ingest.use_dictionary"),
+			WriteStatistics:        v.GetBool("ingest.write_statistics"),
+			DataPageVersion:        v.GetString("ingest.data_page_version"),
+			FlushWorkers:           v.GetInt("ingest.flush_workers"),
+			FlushQueueSize:         v.GetInt("ingest.flush_queue_size"),
+			FlushTimeoutSeconds:    v.GetInt("ingest.flush_timeout_seconds"),
+			ShardCount:             v.GetInt("ingest.shard_count"),
+			SortKeys:               v.GetStringSlice("ingest.sort_keys"),
+			DefaultSortKeys:        v.GetString("ingest.default_sort_keys"),
+			DecimalColumns:         v.GetStringSlice("ingest.decimal_columns"),
+			DefaultDecimalColumns:  v.GetString("ingest.default_decimal_columns"),
 		},
 		Cache: CacheConfig{
 			Enabled:    v.GetBool("cache.enabled"),
@@ -643,7 +647,9 @@ func setDefaults(v *viper.Viper) {
 
 	// Ingest defaults
 	v.SetDefault("ingest.max_buffer_size", 50000)
-	v.SetDefault("ingest.max_buffer_age_ms", 5000)
+	v.SetDefault("ingest.global_memory_limit_mb", 0) // 0 = auto
+	v.SetDefault("ingest.min_flush_records", 1000)
+	v.SetDefault("ingest.min_flush_age_seconds", 300)
 	v.SetDefault("ingest.compression", "snappy")
 	v.SetDefault("ingest.use_dictionary", true)
 	v.SetDefault("ingest.write_statistics", true)
