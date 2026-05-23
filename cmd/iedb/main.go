@@ -376,9 +376,9 @@ func main() {
 		}, shutdown.PriorityBuffer)
 
 		// Safe age threshold: after this duration, a rotated WAL file's data MUST have
-		// been flushed to parquet by the normal buffer flush cycle (MaxBufferAgeMS).
+		// been flushed to parquet by the normal buffer flush cycle (MinFlushAgeSeconds).
 		// We use 3x margin to account for flush worker delays and clock skew.
-		safeAge := time.Duration(cfg.Ingest.MaxBufferAgeMS) * time.Millisecond * 3
+		safeAge := time.Duration(cfg.Ingest.MinFlushAgeSeconds) * time.Second * 3
 		if safeAge < 30*time.Second {
 			safeAge = 30 * time.Second
 		}
@@ -926,6 +926,7 @@ func main() {
 
 	// Register Query handler with dedicated query timeout and slow query logging
 	queryHandler := api.NewQueryHandler(db, storageBackend, logger.Get("query"), cfg.Query.Timeout, cfg.Query.SlowQueryThresholdMs)
+	queryHandler.SetArrowBuffer(arrowBuffer)
 	if authManager != nil && rbacManager != nil {
 		queryHandler.SetAuthAndRBAC(authManager, rbacManager)
 	}
