@@ -1550,7 +1550,9 @@ func (b *ArrowBuffer) flushEntrySync(entry *bufferEntry) error {
 	}
 
 	startTime := time.Now()
-	if err := b.flushPartitionedData(context.Background(), "", entry.database, entry.measurement, merged, entry.count, "eviction", startTime); err != nil {
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), b.flushTimeout)
+	defer flushCancel()
+	if err := b.flushPartitionedData(flushCtx, "", entry.database, entry.measurement, merged, entry.count, "eviction", startTime); err != nil {
 		b.logger.Error().Err(err).
 			Str("database", entry.database).
 			Str("measurement", entry.measurement).
@@ -1933,20 +1935,31 @@ func (b *ArrowBuffer) flushAgedEntries() {
 	now := time.Now().UTC()
 	minAge := time.Duration(b.minFlushAgeSeconds) * time.Second
 
+	// Collect aged entries under lock, then flush outside lock to avoid
+	// holding the shard mutex during I/O.
+	type agedEntry struct {
+		key   string
+		entry *bufferEntry
+	}
+	var toFlush []agedEntry
+
 	for _, shard := range b.shards {
 		shard.mu.Lock()
 		for key, entry := range shard.entries {
 			if now.Sub(entry.startTime) >= minAge {
 				delete(shard.entries, key)
-				// Sync flush for aged entries
-				if err := b.flushEntrySync(entry); err != nil {
-					b.logger.Error().Err(err).
-						Str("buffer_key", key).
-						Msg("Failed to flush aged entry")
-				}
+				toFlush = append(toFlush, agedEntry{key, entry})
 			}
 		}
 		shard.mu.Unlock()
+	}
+
+	for _, ae := range toFlush {
+		if err := b.flushEntrySync(ae.entry); err != nil {
+			b.logger.Error().Err(err).
+				Str("buffer_key", ae.key).
+				Msg("Failed to flush aged entry")
+		}
 	}
 }
 
@@ -2888,18 +2901,30 @@ func (b *ArrowBuffer) FlushAll(ctx context.Context) error {
 	b.logger.Info().Msg("Flushing all buffers...")
 	var lastErr error
 
+	// Collect entries under lock, then flush outside lock to avoid
+	// holding the shard mutex during I/O.
+	type flushEntry struct {
+		key   string
+		entry *bufferEntry
+	}
+	var toFlush []flushEntry
+
 	for _, shard := range b.shards {
 		shard.mu.Lock()
 		for key, entry := range shard.entries {
 			delete(shard.entries, key)
-			if err := b.flushEntrySync(entry); err != nil {
-				b.logger.Error().Err(err).
-					Str("buffer_key", key).
-					Msg("Failed to flush buffer during FlushAll")
-				lastErr = err
-			}
+			toFlush = append(toFlush, flushEntry{key, entry})
 		}
 		shard.mu.Unlock()
+	}
+
+	for _, fe := range toFlush {
+		if err := b.flushEntrySync(fe.entry); err != nil {
+			b.logger.Error().Err(err).
+				Str("buffer_key", fe.key).
+				Msg("Failed to flush buffer during FlushAll")
+			lastErr = err
+		}
 	}
 
 	b.logger.Info().Msg("All buffers flushed")
@@ -2920,17 +2945,29 @@ func (b *ArrowBuffer) Close() error {
 	b.logger.Info().Msg("All flush workers stopped, flushing remaining buffers")
 
 	// Flush all remaining buffers in all shards
+	// Collect entries under lock, then flush outside lock to avoid
+	// holding the shard mutex during I/O.
+	type closeEntry struct {
+		key   string
+		entry *bufferEntry
+	}
+	var toFlush []closeEntry
+
 	for _, shard := range b.shards {
 		shard.mu.Lock()
 		for key, entry := range shard.entries {
 			delete(shard.entries, key)
-			if err := b.flushEntrySync(entry); err != nil {
-				b.logger.Error().Err(err).
-					Str("buffer_key", key).
-					Msg("Failed to flush buffer during close")
-			}
+			toFlush = append(toFlush, closeEntry{key, entry})
 		}
 		shard.mu.Unlock()
+	}
+
+	for _, ce := range toFlush {
+		if err := b.flushEntrySync(ce.entry); err != nil {
+			b.logger.Error().Err(err).
+				Str("buffer_key", ce.key).
+				Msg("Failed to flush buffer during close")
+		}
 	}
 
 	b.logger.Info().
