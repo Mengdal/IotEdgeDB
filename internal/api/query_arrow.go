@@ -5,6 +5,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -104,10 +105,44 @@ func (h *QueryHandler) executeQueryArrow(c *fiber.Ctx) error {
 		ctx, cancel = context.WithTimeout(ctx, h.queryTimeout)
 	}
 
+	// Acquire connection and inject buffer TEMP VIEWs for in-flight data visibility.
+	// TEMP VIEWs are connection-scoped in DuckDB, so we must pin the same *sql.Conn
+	// for both view registration and query execution.
+	var pinnedConn *sql.Conn
+	var bufferedViewNames map[string]string
+	var bufferReleases []func()
+	if bufferViewInjectFunc != nil && h.arrowBuffer != nil {
+		tableNames := h.extractTableNamesFromSQL(req.SQL)
+		if len(tableNames) > 0 {
+			if conn, connErr := h.db.DB().Conn(ctx); connErr == nil {
+				bufferedViewNames, bufferReleases = bufferViewInjectFunc(h, conn, tableNames)
+				if len(bufferedViewNames) > 0 {
+					pinnedConn = conn
+					convertedSQL = h.applyBufferUnions(convertedSQL, bufferedViewNames)
+				} else {
+					conn.Close()
+				}
+			}
+		}
+	}
+
 	// Execute query using DuckDB's native Arrow API — returns record batches
 	// directly from DuckDB's internal columnar chunks, no row-by-row scanning.
-	reader, conn, err := h.db.ArrowQueryContext(ctx, convertedSQL)
+	// Uses the pinned connection when buffer views are active so the query can
+	// reference the TEMP VIEWs registered on that connection.
+	var reader array.RecordReader
+	var resultConn *sql.Conn
+	var err error
+	if pinnedConn != nil {
+		reader, err = h.db.ArrowQueryOnConn(ctx, pinnedConn, convertedSQL)
+		resultConn = pinnedConn
+	} else {
+		reader, resultConn, err = h.db.ArrowQueryContext(ctx, convertedSQL)
+	}
 	if err != nil {
+		for _, release := range bufferReleases {
+			release()
+		}
 		if cancel != nil {
 			cancel()
 		}
@@ -157,7 +192,10 @@ func (h *QueryHandler) executeQueryArrow(c *fiber.Ctx) error {
 			h.logger.Error().Err(err).Msg("Failed to close Arrow IPC writer")
 		}
 		reader.Release()
-		conn.Close()
+		resultConn.Close()
+		for _, release := range bufferReleases {
+			release()
+		}
 		if cancel != nil {
 			cancel()
 		}
@@ -275,19 +313,15 @@ func (h *QueryHandler) registerArrowRoutes(app *fiber.App) {
 	app.Get("/api/v1/query/arrow", h.executeQueryArrow)
 }
 
-// injectBufferViewsImpl creates DuckDB TEMP VIEWs for buffered data matching the given tables.
-// This is set as bufferViewInjectFunc in init(). It returns a map of original table name to
-// created view name. If buffer data is not found or view creation fails, the table is
-// silently skipped — queries fall back to Parquet-only.
-//
-// LIMITATION: TEMP VIEWs are connection-scoped in DuckDB. See RegisterArrowView for details.
-// The current implementation registers the view but it will not be visible to the query
-// connection unless connection affinity is added. For now, this provides the infrastructure
-// that will be enabled when the DuckDB connection scoping issue is resolved.
-func injectBufferViewsImpl(h *QueryHandler, tableNames []string) map[string]string {
+// injectBufferViewsImpl creates DuckDB TEMP VIEWs for buffered data matching the given tables
+// on the provided connection. Returns a map of original table name to view name, plus release
+// functions to clean up registered views after the query completes. If buffer data is not
+// found or view creation fails, the table is silently skipped.
+func injectBufferViewsImpl(h *QueryHandler, conn *sql.Conn, tableNames []string) (map[string]string, []func()) {
 	viewNames := make(map[string]string)
+	var releases []func()
 	if h.arrowBuffer == nil {
-		return viewNames
+		return viewNames, releases
 	}
 
 	for _, tableName := range tableNames {
@@ -305,12 +339,12 @@ func injectBufferViewsImpl(h *QueryHandler, tableNames []string) map[string]stri
 
 		viewName := "_buf_" + strings.ReplaceAll(tableName, ".", "_")
 
-		// Register Arrow data as DuckDB view
-		if err := database.RegisterArrowView(context.Background(), h.db.DB(), viewName, schema, arrays); err != nil {
+		// Register Arrow data as DuckDB view on the pinned connection
+		release, err := database.RegisterArrowView(context.Background(), conn, viewName, schema, arrays)
+		if err != nil {
 			h.logger.Warn().Err(err).Str("table", tableName).
 				Str("view", viewName).
 				Msg("Failed to register buffer view, skipping injection")
-			_ = schema
 			for _, a := range arrays {
 				if a != nil {
 					a.Release()
@@ -319,6 +353,7 @@ func injectBufferViewsImpl(h *QueryHandler, tableNames []string) map[string]stri
 			continue
 		}
 
+		releases = append(releases, release)
 		viewNames[tableName] = viewName
 		h.logger.Info().
 			Str("table", tableName).
@@ -329,6 +364,6 @@ func injectBufferViewsImpl(h *QueryHandler, tableNames []string) map[string]stri
 		// Schema and arrays are now owned by DuckDB — no release needed.
 	}
 
-	return viewNames
+	return viewNames, releases
 }
 

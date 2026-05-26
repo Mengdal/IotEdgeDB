@@ -102,7 +102,7 @@ var arrowJSONQueryFunc func(h *QueryHandler, c *fiber.Ctx, ctx context.Context, 
 // bufferViewInjectFunc is set by query_arrow.go init() when compiled with duckdb_arrow tag.
 // It injects TEMP VIEWs for buffered data matching the query's table names, returning
 // a map of original table name -> view name. If nil, buffer injection is skipped.
-var bufferViewInjectFunc func(h *QueryHandler, tableNames []string) map[string]string
+var bufferViewInjectFunc func(h *QueryHandler, conn *sql.Conn, tableNames []string) (map[string]string, []func())
 
 // isIdentChar returns true if c is a valid SQL identifier character (a-z, A-Z, 0-9, _)
 func isIdentChar(c byte) bool {
@@ -1254,7 +1254,7 @@ localProcessing:
 	if bufferViewInjectFunc != nil && h.arrowBuffer != nil {
 		tableNames := h.extractTableNamesFromSQL(req.SQL)
 		if len(tableNames) > 0 {
-			bufferedViewNames = bufferViewInjectFunc(h, tableNames)
+			bufferedViewNames, _ = bufferViewInjectFunc(h, nil, tableNames)
 		}
 	}
 
