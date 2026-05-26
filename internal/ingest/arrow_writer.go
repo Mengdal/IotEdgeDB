@@ -787,14 +787,46 @@ func getColumnSignature(columns map[string]interface{}) string {
 	return strings.Join(names, ",")
 }
 
-// estimateEntryMemory estimates the memory used by a bufferEntry in bytes.
-func estimateEntryMemory(batchesPtr *[]*TypedColumnBatch) int64 {
-	if batchesPtr == nil {
+// batchDataMemory computes the actual memory used by a TypedColumnBatch's typed data arrays.
+// Counts slice backing arrays (len * element size), string data, and validity bitmaps.
+func batchDataMemory(batch *TypedColumnBatch) int64 {
+	if batch == nil {
 		return 0
 	}
-	batches := *batchesPtr
-	const batchOverhead = 1024
-	return int64(cap(batches)*8) + int64(len(batches))*batchOverhead
+	var total int64
+	for _, col := range batch.Data {
+		switch arr := col.(type) {
+		case []int64:
+			total += int64(len(arr)) * 8
+		case []float64:
+			total += int64(len(arr)) * 8
+		case []string:
+			total += int64(len(arr)) * 16 // string header: pointer + len
+			for _, s := range arr {
+				total += int64(len(s))
+			}
+		case []bool:
+			total += int64(len(arr))
+		case []decimal128.Num:
+			total += int64(len(arr)) * 16
+		}
+	}
+	for _, v := range batch.Validity {
+		total += int64(len(v))
+	}
+	return total
+}
+
+// entryBatchesMemory sums batchDataMemory across all batches in an entry.
+func entryBatchesMemory(entry *bufferEntry) int64 {
+	if entry == nil || entry.batches == nil {
+		return 0
+	}
+	var total int64
+	for _, batch := range *entry.batches {
+		total += batchDataMemory(batch)
+	}
+	return total
 }
 
 // getShard returns the shard for a given buffer key using FNV-1a hash
@@ -1286,7 +1318,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 			measurement: record.Measurement,
 		}
 		shard.entries[bufferKey] = entry
-		b.totalMemoryBytes.Add(estimateEntryMemory(batchesPtr))
 	} else {
 		// Schema changed — update signature, do NOT flush
 		if entry.signature != newSignature {
@@ -1296,6 +1327,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 
 	*entry.batches = append(*entry.batches, typedColumns)
 	entry.count += numRecords
+	b.totalMemoryBytes.Add(batchDataMemory(typedColumns))
 	totalBuffered := entry.count
 
 	var shouldFlush bool
@@ -1357,7 +1389,6 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 			measurement: measurement,
 		}
 		shard.entries[bufferKey] = entry
-		b.totalMemoryBytes.Add(estimateEntryMemory(batchesPtr))
 	} else {
 		if entry.signature != newSignature {
 			entry.signature = newSignature
@@ -1366,6 +1397,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 
 	*entry.batches = append(*entry.batches, typedColumns)
 	entry.count += numRecords
+	b.totalMemoryBytes.Add(batchDataMemory(typedColumns))
 	totalBuffered := entry.count
 
 	var shouldFlush bool
@@ -1395,6 +1427,13 @@ func (b *ArrowBuffer) extractAndEnqueue(bufferKey, database, measurement string,
 	batchesCopy := make([]interface{}, len(*entry.batches))
 	for i, batch := range *entry.batches {
 		batchesCopy[i] = batch
+	}
+
+	// Subtract data memory for batches leaving the buffer
+	for _, batch := range batchesCopy {
+		if tcb, ok := batch.(*TypedColumnBatch); ok {
+			b.totalMemoryBytes.Add(-batchDataMemory(tcb))
+		}
 	}
 
 	// Reset entry for reuse
@@ -1488,6 +1527,12 @@ func (b *ArrowBuffer) flushEntrySync(entry *bufferEntry) error {
 		return nil
 	}
 
+	// Compute data memory before PutBatchSlice nils the backing array
+	var entryMem int64
+	for _, batch := range batches {
+		entryMem += batchDataMemory(batch)
+	}
+
 	batchesCopy := make([]interface{}, len(batches))
 	for i, batch := range batches {
 		batchesCopy[i] = batch
@@ -1516,7 +1561,7 @@ func (b *ArrowBuffer) flushEntrySync(entry *bufferEntry) error {
 
 	// Recycle memory
 	PutBatchSlice(entry.batches)
-	b.totalMemoryBytes.Add(-estimateEntryMemory(entry.batches))
+	b.totalMemoryBytes.Add(-entryMem)
 
 	return nil
 }
