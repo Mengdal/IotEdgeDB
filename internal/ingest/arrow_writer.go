@@ -1308,7 +1308,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 
 	entry, exists := shard.entries[bufferKey]
 	if !exists {
-		batchesPtr := GetBatchSlice()
+		batchesPtr := &[]*TypedColumnBatch{}
 		entry = &bufferEntry{
 			batches:     batchesPtr,
 			count:       0,
@@ -1379,7 +1379,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 
 	entry, exists := shard.entries[bufferKey]
 	if !exists {
-		batchesPtr := GetBatchSlice()
+		batchesPtr := &[]*TypedColumnBatch{}
 		entry = &bufferEntry{
 			batches:     batchesPtr,
 			count:       0,
@@ -1527,7 +1527,7 @@ func (b *ArrowBuffer) flushEntrySync(entry *bufferEntry) error {
 		return nil
 	}
 
-	// Compute data memory before PutBatchSlice nils the backing array
+	// Compute data memory before the entry is released
 	var entryMem int64
 	for _, batch := range batches {
 		entryMem += batchDataMemory(batch)
@@ -1561,8 +1561,6 @@ func (b *ArrowBuffer) flushEntrySync(entry *bufferEntry) error {
 		return err
 	}
 
-	// Recycle memory
-	PutBatchSlice(entry.batches)
 	b.totalMemoryBytes.Add(-entryMem)
 
 	return nil
