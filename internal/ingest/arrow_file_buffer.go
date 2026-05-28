@@ -172,10 +172,49 @@ func (b *ArrowFileBuffer) SetTieringManager(tm *tiering.Manager) {
 	b.logger.Info().Msg("Tiering manager enabled for ArrowFileBuffer")
 }
 
-// startupRecovery scans tmpDir for orphaned .arrow files and converts them.
-// Stub — full implementation in Task 7.
+// startupRecovery scans tmpDir for orphaned .arrow files from a previous crash
+// and converts them to Parquet. Called during NewArrowFileBuffer.
 func (b *ArrowFileBuffer) startupRecovery() {
-	// TODO: Implement in Task 7
+	entries, err := os.ReadDir(b.tmpDir)
+	if err != nil {
+		b.logger.Warn().Err(err).Str("tmp_dir", b.tmpDir).Msg("Cannot read tmp dir for recovery, skipping")
+		return
+	}
+
+	var recovered int
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".arrow" {
+			continue
+		}
+		path := filepath.Join(b.tmpDir, entry.Name())
+
+		// Parse database/measurement from filename: db_meas_timestamp.arrow
+		name := entry.Name()
+		nameWithoutExt := strings.TrimSuffix(name, ".arrow")
+		parts := strings.SplitN(nameWithoutExt, "_", 3)
+		if len(parts) < 2 {
+			b.logger.Warn().Str("file", name).Msg("Cannot parse db/measurement from recovery file, skipping")
+			continue
+		}
+		database, measurement := parts[0], parts[1]
+
+		b.logger.Info().
+			Str("path", path).
+			Str("database", database).
+			Str("measurement", measurement).
+			Msg("Recovering orphaned .arrow file")
+
+		b.doConvert(convertTask{
+			database:    database,
+			measurement: measurement,
+			path:        path,
+		})
+		recovered++
+	}
+
+	if recovered > 0 {
+		b.logger.Info().Int("files", recovered).Msg("Crash recovery complete")
+	}
 }
 
 // convertWorker is the single background goroutine that reads .arrow files,
