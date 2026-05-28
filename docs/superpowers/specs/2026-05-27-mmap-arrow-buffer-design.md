@@ -1,83 +1,106 @@
-# mmap Arrow Buffer — 零 WAL 数据缓冲设计
+# Arrow IPC Stream Buffer — 零 WAL 数据缓冲设计
 
 ## 概述
 
-用 mmap 文件中的 Arrow IPC 流格式替代当前堆内存 ArrowBuffer + WAL。每 measurement 一个固定大小的 mmap 文件，数据以 Arrow record batch 格式追加。文件满后异步 flush 为 Parquet 落盘。mmap 本身提供崩溃持久化，不再需要 WAL。
+用文件系统中的 Arrow IPC 流格式替代当前堆内存 ArrowBuffer + WAL。每 measurement 一个常规文件（`os.File`，非 mmap），数据以 Arrow record batch 格式逐批追加写入。文件达到大小阈值后关闭，投递给后台 worker 转换为 Parquet 落盘。文件本身提供崩溃持久化，不再需要 WAL。
+
+## direct write vs mmap 的选择
+
+| | mmap | direct write（选用） |
+|---|---|---|
+| 追加写入 | copy 进映射区 | `file.Write()` 系统调用 (~2μs) |
+| 空间管理 | 预分配+usedBytes 追踪 | `file.Write()` 后检查 size，超额一个 batch 可接受 |
+| msync | 需要定时器 | 不需要，走 OS page cache |
+| 读回 | 切片直接读（零拷贝） | `os.ReadFile()` (~5ms/10MB，在 Parquet 编码开销面前可忽略) |
+| 平台依赖 | mmap/ftruncate/msync | 纯 Go `os.File` |
+| 文件句柄 | 同上 | LRU 缓存 cap 64，低频 measurement 用完即关 |
+| 代码复杂度 | 高 | 低 |
 
 ## 核心变化
 
 | | 当前 | 新方案 |
 |---|---|---|
-| 缓冲介质 | 堆内存 `TypedColumnBatch` | mmap 文件，Arrow IPC 流格式 |
-| 触发条件 | 大小/时间/内存 三条 | 仅空间阈值（10MB）一条 |
-| 崩溃保护 | WAL 独立序列化/异步写/回放 | mmap 文件 + 定时 `msync` |
-| Flush 执行 | 16 worker + 100 queue 池 | 轻量异步 worker |
-| 查询注入 | Arrow API 桥接 + 连接固定 | 同（一期），零桥接 `read_arrow()`（二期）|
+| 缓冲介质 | 堆内存 `TypedColumnBatch` | 磁盘文件，Arrow IPC 流格式 |
+| 触发条件 | 大小/时间/内存 三条 | 仅文件大小阈值一条 |
+| 崩溃保护 | WAL 独立序列化/异步写/回放 | 缓冲文件本身就是持久化副本 |
+| Flush 执行 | 16 worker + 100 queue 池 | 单转换 worker（Arrow→Parquet） |
+| 查询注入 | Arrow API 桥接 + 连接固定 | 同（一期），`read_arrow()` 零桥接（二期） |
 | Schema 变化 | 更新 signature | Union schema 扩展 |
 | 内存追踪 | `totalMemoryBytes` + `checkMemoryAndEvict` | 不需要 |
+| 文件句柄 | — | LRU 缓存 cap 64 |
 
 ## 数据流
 
 ```
 写入:
   API → parse → 类型化数组 → 编码 Arrow IPC batch
-    → 检查 mmap 剩余空间
-      ├─ 够: 追加 batch 到 mmap
-      └─ 不够: 提交异步 flush → 等待新 mmap → 追加 batch
-    → 定时 msync (100ms)
+    → 获取/打开文件句柄（LRU 缓存）
+    → file.Write(batchBytes)
+    → 更新 union schema（如需要）
+    → 文件 size > 阈值？
+        ├─ 否 → 返回
+        └─ 是 → 关闭文件 → 投递转换任务 → 开新文件
 
-Flush:
-  异步 worker:
-    读回 mmap 文件所有 batch
+转换:
+  后台 worker:
+    读取 .arrow 文件所有 batch
     → mergeBatches
     → sortTypedColumnBatchByKeys
     → WriteParquetColumnar
     → storage.Write
-    → 清理 mmap 临时文件
+    → 删除 .arrow 文件
 
 查询 (一期 5B):
   获取 pinned conn
-  → ipc.NewReader 从 mmap 读 batch
+  → 读 .arrow 文件获取 record batches
   → RegisterArrowView 注册 TEMP VIEW
   → ArrowQueryOnConn 执行
-  → cleanup: reader.Release(), release views, conn.Close()
+  → cleanup
 
 查询 (二期 5A):
-  直接拼 read_parquet([buffer_file, flushed_files])
+  直接拼 read_arrow([buffer_file, ...]) UNION ALL read_parquet([...])
 
 崩溃恢复:
-  扫描 tmpdir/*.arrow
-  → ipc.NewReader 流式读取
+  启动时扫描 tmpdir/*.arrow
+  → ipc.NewReader 读取
   → 截断尾部不完整 batch
-  → merge + sort + Parquet 落盘
+  → merge → sort → Parquet 落盘
   → 删除临时文件
 ```
 
 ## 组件设计
 
-### MmapArrowBuffer
-
-替代当前 `ArrowBuffer`。结构：
+### ArrowFileBuffer（替代当前 ArrowBuffer）
 
 ```
-MmapArrowBuffer:
-  shards [32]*mmapShard          // 同当前 shard 模型
-  msyncTicker *time.Ticker       // 100ms
-  maxFileSize int64              // 10MB
-  tmpDir string                  // /tmp/iedb_buf
-  flushQueue chan *flushTask     // 轻量，cap 16
-  flushWorker goroutine          // 1 个 worker
+ArrowFileBuffer:
+  shards [32]*fileShard            // 同当前 shard 模型
+  fileCache *lruCache              // 文件句柄缓存 cap 64
+  maxFileSize int64                // 10MB
+  tmpDir string                    // /tmp/iedb_buf
+  convertQueue chan *convertTask   // cap 16
+  convertWorker goroutine          // 1 个 worker
 ```
 
-每个 mmapShard entry：
+### 文件句柄 LRU 缓存
 
 ```
-mmapEntry:
-  file       *os.File           // mmap 文件
-  data       []byte             // mmap 映射区域
-  usedBytes  int64              // 已用字节数
+fileCache (cap 64):
+  Get(key) *os.File     // 命中返回句柄；未命中打开文件，换出最久未用的
+  Remove(key)           // flush 后删除缓存项
+  CloseAll()            // 关闭时清空
+```
+
+高频 measurement 的句柄常驻缓存，几乎总是命中。低频 measurement 每次写入走 open → write → later evicted。64 个句柄覆盖真正并发活跃的 measurement 数。
+
+### Shard entry
+
+```
+fileEntry:
+  file       *os.File           // 当前活跃 .arrow 文件
+  path       string             // 文件路径
+  size       int64              // 已写入字节数
   schema     *arrow.Schema      // union schema（内存中）
-  startTime  time.Time
   database   string
   measurement string
 ```
@@ -88,67 +111,54 @@ mmapEntry:
 writeBatch(database, measurement, typedColumns, numRecords):
   batchBytes := encodeToArrowIPC(typedColumns, &entry.schema)  // 可能扩展 schema
 
-  // 单批超过文件大小，跳过 mmap 直接走 Parquet（含当前已累积数据）
-  if len(batchBytes) > maxFileSize:
-    shard.mu.Lock()
-    entry := shard.entries[key]
-    if entry != nil:
-      delete(shard.entries, key)
-      shard.mu.Unlock()
-      submitFlush(entry)        // 先 flush 积累的数据
-    else:
-      shard.mu.Unlock()
-    submitDirectFlush(typedColumns)  // 这批直接写 Parquet
-    return
-
   shard.mu.Lock()
-  entry := getOrCreateEntry(key)     // 不存在则创建新 mmap 文件并映射
-  if entry.usedBytes + len(batchBytes) > entry.fileSize:
-    // 空间不够：删除旧 entry，释放锁，提交异步 flush，然后开新 entry
+  entry := getOrCreateEntry(key)  // 不存在则创建新 .arrow 文件
+  entry.file.Write(batchBytes)
+  entry.size += int64(len(batchBytes))
+
+  if entry.size > maxFileSize:
     delete(shard.entries, key)
     shard.mu.Unlock()
-    submitFlush(entry)
-    shard.mu.Lock()
-    entry = createEntry(key, database, measurement)  // 新 mmap
-    shard.entries[key] = entry
-  copy(entry.data[entry.usedBytes:], batchBytes)
-  entry.usedBytes += int64(len(batchBytes))
-  shard.mu.Unlock()
+    entry.file.Close()
+    fileCache.Remove(key)
+    submitConvert(entry)
+  else:
+    shard.mu.Unlock()
 ```
 
-`createEntry` 操作：`os.CreateTemp(tmpDir, "*.arrow")` → `ftruncate(maxFileSize)` → `mmap(0, maxFileSize, PROT_READ|PROT_WRITE, MAP_SHARED)`
+`getOrCreateEntry`：查 shard map → 不存在或句柄为 nil 则从 LRU 缓存获取/创建文件句柄。
 
-### AppendRecordBatch 到 mmap
+### Arrow IPC 编码
 
 将 `*TypedColumnBatch` 编码为 Arrow IPC 流格式的 record batch：
 
-1. `array.NewRecord(schema, arrays, numRows)` 创建 Arrow record
-2. 通过 `ipc.NewWriter` (stream writer) 将 record 编码为 `[]byte`
-3. `copy()` 到 mmap 映射区域
+1. 检查当前 union schema，扩展新列（仅增不删）
+2. `array.NewRecord(schema, arrays, numRows)` 创建 Arrow record
+3. `ipc.NewWriter` (stream writer) 将 record 编码为 `[]byte`
+4. `file.Write(batchBytes)` 写入
 
-### msync 策略
-
-- 100ms 定时器触发 `msync(MS_ASYNC)` — 非阻塞，通知 OS 尽快刷脏页
-- 关闭 mmap 文件前（flush 时）调用 `msync(MS_SYNC)` — 阻塞等待数据完全落盘后，才提交 Parquet 写入任务
-- 进程 crash（SIGSEGV/SIGKILL）：内核刷脏页，mmap 数据安全
-- 内核 panic / 硬件断电：未 msync 的数据丢失，等效于当前 WAL 在 `fdatasync` 模式下 async channel 中未刷出的数据丢失窗口。如需断电级持久化，可将 `msync_interval_ms` 设为 0（每批次同步），或以 `MS_SYNC` 替代 `MS_ASYNC`
-
-### Flush 执行
+### Flush（Arrow → Parquet 转换）
 
 ```
-flushWorker:
-  for task := range flushQueue:
+convertWorker:
+  for task := range convertQueue:
     entry := task.entry
-    // 读回所有 batch
-    reader := ipc.NewReader(bytes.NewReader(entry.data[:entry.usedBytes]))
+    data := os.ReadFile(entry.path)
+    reader := ipc.NewReader(bytes.NewReader(data))
     batches := readAllBatches(reader)
     merged := mergeBatches(batches)
     sorted := sortTypedColumnBatchByKeys(merged, sortKeys)
     parquetBytes := WriteParquetColumnar(sorted)
     storage.Write(storagePath, parquetBytes)
-    entry.file.Close()
-    os.Remove(entry.filePath)
+    os.Remove(entry.path)
 ```
+
+### 持久化策略
+
+- 写入数据通过 `file.Write()` 进 OS page cache，由内核在合适时机刷盘
+- 进程 crash（SIGSEGV/SIGKILL）：内核刷脏页，文件数据安全
+- 内核 panic / 硬件断电：page cache 中未刷出的数据可能丢失。等效于当前 WAL `fdatasync` 模式下 async channel 中未刷出的数据丢失窗口
+- 如需断电级持久化：转换 worker 在 `os.Remove` 前对 `.arrow` 文件调用 `fdatasync()` 确保完全落盘，再删文件
 
 ### 查询注入（一期 5B）
 
@@ -156,7 +166,8 @@ flushWorker:
 injectBufferViews(h, conn, tableNames):
   for each tableName:
     entry := buffer.GetEntry(tableName)
-    reader := ipc.NewReader(bytes.NewReader(entry.data[:entry.usedBytes]))
+    data := os.ReadFile(entry.path)
+    reader := ipc.NewReader(bytes.NewReader(data))
     batches := reader.ReadAll()
     arrays, schema := batchesToArrowArrays(batches)
     release := database.RegisterArrowView(ctx, conn, viewName, schema, arrays)
@@ -166,10 +177,10 @@ injectBufferViews(h, conn, tableNames):
 
 ### Schema 演化（B 方案：Union Schema）
 
-- 内存中维护 `entry.schema` 作为 union schema（所有见到的列的最大集合）
-- 新列出现时：`entry.schema` 扩展，新 batch 编码时包含该列
-- 已有 batch 在 mmap 中保持原样（缺失列）
-- flush 时以 union schema 写 Parquet，缺失列对应旧行的位置填 null
+- 内存中维护 `entry.schema` 作为 union schema（所有见过列的最大集合）
+- 新列出现时：`entry.schema` 扩展，新 batch 编码时包含新列
+- 已有 batch 在文件中保持原样（缺失列）
+- 转换时以 union schema 写 Parquet，缺失列对应旧行的位置填 null
 
 ### 崩溃恢复
 
@@ -181,7 +192,10 @@ startupRecovery():
     var batches []arrow.Record
     for reader.Next():
       batches = append(batches, reader.Record())
-    // reader 在遇到不完整 batch 时自动截断
+    // 不完整 batch 自动截断（ipc.NewReader 在读到半截 batch 时报错退出）
+    if len(batches) == 0:
+      os.Remove(filepath)
+      continue
     merged := mergeBatches(batches)
     sorted := sortTypedColumnBatchByKeys(merged, sortKeys)
     parquetBytes := WriteParquetColumnar(sorted)
@@ -193,9 +207,9 @@ startupRecovery():
 
 ```toml
 [ingest]
-buffer_mmap_size_mb = 10         # 每个 measurement mmap 文件大小
-buffer_tmp_dir = "/tmp/iedb_buf" # mmap 临时文件目录  
-buffer_msync_interval_ms = 100   # msync 间隔
+buffer_file_size_mb = 10          # 每个 measurement .arrow 文件大小阈值
+buffer_tmp_dir = "/tmp/iedb_buf"  # .arrow 临时文件目录
+buffer_file_cache_size = 64       # LRU 文件句柄缓存上限
 # 删除: max_buffer_size, max_buffer_age_ms, min_flush_age_seconds
 # 删除: flush_timeout, flush_queue_size, flush_workers
 # 删除所有 [wal] 配置段
@@ -204,16 +218,18 @@ buffer_msync_interval_ms = 100   # msync 间隔
 ## 删除的模块
 
 - `internal/ingest/buffer_pool.go` — 已删除
-- `internal/wal/` — WAL 全部代码
+- `internal/wal/` — WAL 全部代码（约 4 个 Go 文件 + 2 个测试文件）
+- `cmd/iedb/main.go` 中 WAL 初始化、启动恢复、定时维护、关闭清理代码
 - ArrowBuffer 中的 `totalMemoryBytes`、`checkMemoryAndEvict`、`findOldestEntry`、`minAgeFlushLoop`、`flushAgedEntries`
 - flush worker 池（16 workers + 100 queue）— 替换为单 worker + cap 16 channel
-- 配置中的 WAL 段和 buffer 触发相关字段
+- `convertColumnsToTyped` 中不再需要的 `[]interface{}` → 类型化数组的中间路径（如果直接编码到 Arrow）
+- 配置中的 `[wal]` 段和 buffer 触发相关字段
 
 ## 保留未变的模块
 
-- `convertColumnsToTyped` / `writeTypedColumnarInternal` — 类型转换和 shard 逻辑
-- `mergeBatches`、`sortTypedColumnBatchByKeys` — flush 路径
-- `WriteParquetColumnar`、`writeRecordToParquet` — Parquet 编码
+- shard 模型和 FNV-1a 哈希分区
+- `mergeBatches`、`sortTypedColumnBatchByKeys`
+- `WriteParquetColumnar`、`writeRecordToParquet`
 - `storage.Backend` — 存储写入
 - `generateStoragePath` — 路径生成
 - `groupByHour` — 时间分区
