@@ -240,6 +240,12 @@ func (b *ArrowFileBuffer) doConvert(task convertTask) {
 		totalRecords += int(rec.NumRows())
 	}
 
+	if err := reader.Err(); err != nil {
+		b.logger.Error().Err(err).Str("path", task.path).Msg("Corrupt .arrow file, discarding partial data")
+		b.totalErrors.Add(1)
+		return // Don't delete the .arrow file — preserve for manual recovery
+	}
+
 	if len(batches) == 0 {
 		b.logger.Warn().Str("path", task.path).Msg("Empty .arrow file, deleting")
 		os.Remove(task.path)
