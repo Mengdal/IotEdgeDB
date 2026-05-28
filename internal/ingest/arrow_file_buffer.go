@@ -336,14 +336,22 @@ func (b *ArrowFileBuffer) convertWorker() {
 			// Drain remaining tasks before exiting
 			for {
 				select {
-				case task := <-b.convertQueue:
+				case task, ok := <-b.convertQueue:
+					if !ok {
+						b.logger.Info().Msg("Convert worker stopped")
+						return
+					}
 					b.doConvert(task)
 				default:
 					b.logger.Info().Msg("Convert worker stopped")
 					return
 				}
 			}
-		case task := <-b.convertQueue:
+		case task, ok := <-b.convertQueue:
+			if !ok {
+				b.logger.Info().Msg("Convert worker stopped (queue closed)")
+				return
+			}
 			b.doConvert(task)
 		}
 	}
