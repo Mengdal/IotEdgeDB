@@ -497,6 +497,7 @@ func (b *ArrowFileBuffer) writeBatch(ctx context.Context, database, measurement 
 	shard.mu.Lock()
 
 	entry, exists := shard.entries[bufferKey]
+	isNewEntry := !exists
 	if !exists {
 		path := filepath.Join(b.tmpDir, fmt.Sprintf("%s_%s_%d.arrow",
 			sanitizePathSegment(database), sanitizePathSegment(measurement), time.Now().UnixNano()))
@@ -519,6 +520,15 @@ func (b *ArrowFileBuffer) writeBatch(ctx context.Context, database, measurement 
 	// Encode to Arrow IPC stream bytes
 	batchBytes, err := encodeToArrowIPC(typedColumns, &entry.schema)
 	if err != nil {
+		if isNewEntry {
+			if closeErr := entry.file.Close(); closeErr != nil {
+				b.logger.Warn().Err(closeErr).Str("path", entry.path).Msg("Failed to close corrupt .arrow file after encode error")
+			}
+			if removeErr := os.Remove(entry.path); removeErr != nil {
+				b.logger.Warn().Err(removeErr).Str("path", entry.path).Msg("Failed to remove corrupt .arrow file after encode error")
+			}
+			delete(shard.entries, bufferKey)
+		}
 		shard.mu.Unlock()
 		return fmt.Errorf("encode: %w", err)
 	}
@@ -526,6 +536,15 @@ func (b *ArrowFileBuffer) writeBatch(ctx context.Context, database, measurement 
 	// Write to file
 	n, err := entry.file.Write(batchBytes)
 	if err != nil {
+		if isNewEntry {
+			if closeErr := entry.file.Close(); closeErr != nil {
+				b.logger.Warn().Err(closeErr).Str("path", entry.path).Msg("Failed to close corrupt .arrow file after write error")
+			}
+			if removeErr := os.Remove(entry.path); removeErr != nil {
+				b.logger.Warn().Err(removeErr).Str("path", entry.path).Msg("Failed to remove corrupt .arrow file after write error")
+			}
+			delete(shard.entries, bufferKey)
+		}
 		shard.mu.Unlock()
 		return fmt.Errorf("file write: %w", err)
 	}
