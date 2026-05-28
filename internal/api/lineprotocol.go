@@ -23,7 +23,7 @@ var lpGzipReaderPool = sync.Pool{}
 
 // LineProtocolHandler handles Line Protocol write requests
 type LineProtocolHandler struct {
-	buffer *ingest.ArrowBuffer
+	buffer *ingest.ArrowFileBuffer
 	parser *ingest.LineProtocolParser
 	logger zerolog.Logger
 
@@ -55,7 +55,7 @@ func isValidMeasurementName(name string) bool {
 }
 
 // NewLineProtocolHandler creates a new Line Protocol handler
-func NewLineProtocolHandler(buffer *ingest.ArrowBuffer, logger zerolog.Logger) *LineProtocolHandler {
+func NewLineProtocolHandler(buffer *ingest.ArrowFileBuffer, logger zerolog.Logger) *LineProtocolHandler {
 	return &LineProtocolHandler{
 		buffer: buffer,
 		parser: ingest.NewLineProtocolParser(),
@@ -271,7 +271,7 @@ localProcessing:
 
 	// Write each measurement to the buffer
 	for measurement, record := range columnarByMeasurement {
-		err := h.buffer.WriteColumnarRecord(c.Context(), database, record)
+		err := h.buffer.WriteColumnarDirect(c.Context(), database, measurement, record.Columns)
 		if err != nil {
 			h.totalErrors.Add(1)
 			metrics.Get().IncIngestErrors()

@@ -32,10 +32,7 @@ import (
 	"iedb/internal/storage"
 	"iedb/internal/telemetry"
 	"iedb/internal/tiering"
-	"iedb/internal/wal"
-
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -122,13 +119,6 @@ func main() {
 							Int("duckdb_threads", lic.MaxCores).
 							Msg("License core limit applied to DuckDB threads")
 
-						// Limit ingestion flush workers to licensed cores
-						if cfg.Ingest.FlushWorkers > lic.MaxCores {
-							cfg.Ingest.FlushWorkers = lic.MaxCores
-							log.Info().
-								Int("flush_workers", lic.MaxCores).
-								Msg("License core limit applied to ingestion flush workers")
-						}
 					}
 				}
 			}
@@ -279,178 +269,14 @@ func main() {
 		log.Fatal().Str("backend", cfg.Storage.Backend).Msg("Unsupported storage backend (use 'local', 's3', 'minio', 'azure', or 'azblob')")
 	}
 
-	// Initialize WAL writer (if enabled) - recovery happens after ArrowBuffer is ready
-	var walWriter *wal.Writer
-	var walRecovery *wal.Recovery
-	if cfg.WAL.Enabled {
-		var err error
-		walWriter, err = wal.NewWriter(&wal.WriterConfig{
-			WALDir:       cfg.WAL.Directory,
-			SyncMode:     wal.SyncMode(cfg.WAL.SyncMode),
-			MaxSizeBytes: int64(cfg.WAL.MaxSizeMB) * 1024 * 1024,
-			MaxAge:       time.Duration(cfg.WAL.MaxAgeSeconds) * time.Second,
-			BufferSize:   cfg.WAL.BufferSize,
-			Logger:       logger.Get("wal"),
-		})
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to initialize WAL writer")
-		}
-		shutdownCoordinator.Register("wal", walWriter, shutdown.PriorityWAL)
-
-		// Prepare recovery (will run after ArrowBuffer is created)
-		walRecovery = wal.NewRecovery(cfg.WAL.Directory, logger.Get("wal"))
-
-		log.Info().
-			Str("directory", cfg.WAL.Directory).
-			Str("sync_mode", cfg.WAL.SyncMode).
-			Int("max_size_mb", cfg.WAL.MaxSizeMB).
-			Int("max_age_seconds", cfg.WAL.MaxAgeSeconds).
-			Msg("WAL enabled")
-	} else {
-		log.Info().Msg("WAL is DISABLED - data durability relies on immediate Parquet flushes")
-	}
-
-	// Initialize Arrow buffer (optionally with WAL)
+	// Initialize Arrow file buffer (disk-based Arrow IPC stream format, zero-WAL)
 	log.Info().
-		Int("flush_workers", cfg.Ingest.FlushWorkers).
 		Int("shard_count", cfg.Ingest.ShardCount).
-		Int("flush_queue_size", cfg.Ingest.FlushQueueSize).
-		Msg("Initializing Arrow buffer with ingestion config")
-	arrowBuffer := ingest.NewArrowBuffer(&cfg.Ingest, storageBackend, logger.Get("arrow"))
-	if walWriter != nil {
-		arrowBuffer.SetWAL(walWriter)
-	}
+		Int("buffer_file_size_mb", cfg.Ingest.BufferFileSizeMB).
+		Str("tmp_dir", cfg.Ingest.BufferTmpDir).
+		Msg("Initializing Arrow file buffer")
+	arrowBuffer := ingest.NewArrowFileBuffer(&cfg.Ingest, storageBackend, logger.Get("arrow"))
 	shutdownCoordinator.Register("arrow-buffer", arrowBuffer, shutdown.PriorityBuffer)
-
-	// After ArrowBuffer flushes (priority 30) but before WAL closes (priority 40),
-	// purge WAL files since all data has been flushed to storage.
-	// This prevents recovery from replaying already-persisted data on next startup.
-	if walWriter != nil {
-		shutdownCoordinator.RegisterHook("wal-purge", func(ctx context.Context) error {
-			deleted, err := walWriter.PurgeAll()
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to purge WAL files on shutdown")
-				return err
-			}
-			if deleted > 0 {
-				log.Info().Int("deleted", deleted).Msg("Purged WAL files after clean buffer flush")
-			}
-			return nil
-		}, 35) // Between PriorityBuffer(30) and PriorityWAL(40)
-	}
-
-	// Run WAL recovery NOW that ArrowBuffer is ready
-	if walRecovery != nil {
-		// Create shared recovery callback to avoid code duplication
-		recoveryCallback := createWALRecoveryCallback(arrowBuffer, logger.Get("wal-recovery"))
-		columnarCallback := createColumnarRecoveryCallback(arrowBuffer, logger.Get("wal-recovery"))
-
-		recoveryStats, err := walRecovery.RecoverWithOptions(context.Background(), recoveryCallback, &wal.RecoveryOptions{
-			BatchSize:        cfg.WAL.RecoveryBatchSize,
-			ColumnarCallback: columnarCallback,
-		})
-		if err != nil {
-			log.Error().Err(err).Msg("WAL recovery failed")
-		} else if recoveryStats.RecoveredFiles > 0 {
-			// Track recovery metrics
-			metrics.Get().IncWALRecoveryTotal()
-			metrics.Get().IncWALRecoveryRecords(int64(recoveryStats.RecoveredEntries))
-			log.Info().
-				Int("files", recoveryStats.RecoveredFiles).
-				Int("batches", recoveryStats.RecoveredBatches).
-				Int("entries", recoveryStats.RecoveredEntries).
-				Int("corrupted", recoveryStats.CorruptedEntries).
-				Dur("duration", recoveryStats.RecoveryDuration).
-				Msg("WAL recovery complete")
-		}
-
-		// Start periodic WAL maintenance goroutine.
-		// Two modes:
-		//   Normal:   purge rotated WAL files older than safeAge (data already in parquet)
-		//   Recovery: when a flush failure is detected (S3 outage), replay WAL files
-		//             to re-buffer data that was cleared from buffers after failed flush
-		walMaintenanceCtx, walMaintenanceCancel := context.WithCancel(context.Background())
-		shutdownCoordinator.RegisterHook("wal-periodic-maintenance", func(ctx context.Context) error {
-			walMaintenanceCancel()
-			return nil
-		}, shutdown.PriorityBuffer)
-
-		// Safe age threshold: after this duration, a rotated WAL file's data MUST have
-		// been flushed to parquet by the normal buffer flush cycle (MinFlushAgeSeconds).
-		// We use 3x margin to account for flush worker delays and clock skew.
-		safeAge := time.Duration(cfg.Ingest.MinFlushAgeSeconds) * time.Second * 3
-		if safeAge < 30*time.Second {
-			safeAge = 30 * time.Second
-		}
-
-		recoveryInterval := time.Duration(cfg.WAL.RecoveryIntervalSeconds) * time.Second
-		go func() {
-			ticker := time.NewTicker(recoveryInterval)
-			defer ticker.Stop()
-			walLogger := logger.Get("wal-maintenance")
-
-			for {
-				select {
-				case <-walMaintenanceCtx.Done():
-					return
-				case <-ticker.C:
-					if arrowBuffer.HasFlushFailure() {
-						// Storage failure detected — replay WAL files to recover data
-						// that was cleared from buffers after failed flush
-						walLogger.Info().Msg("Flush failure detected, attempting WAL recovery")
-
-						// Purge old WAL files first (same as normal path) to avoid replaying
-						// data that was already successfully flushed to parquet before the failure.
-						if walWriter != nil {
-							deleted, purgeErr := walWriter.PurgeOlderThan(safeAge)
-							if purgeErr != nil {
-								walLogger.Error().Err(purgeErr).Msg("WAL purge before recovery failed")
-							} else if deleted > 0 {
-								walLogger.Info().Int("deleted", deleted).Msg("Purged old WAL files before recovery")
-							}
-						}
-
-						recovery := wal.NewRecovery(cfg.WAL.Directory, walLogger)
-						activeFile := ""
-						if walWriter != nil {
-							activeFile = walWriter.CurrentFile()
-						}
-						stats, err := recovery.RecoverWithOptions(context.Background(), recoveryCallback, &wal.RecoveryOptions{
-							SkipActiveFile:   activeFile,
-							BatchSize:        cfg.WAL.RecoveryBatchSize,
-							ColumnarCallback: columnarCallback,
-						})
-						if err != nil {
-							walLogger.Error().Err(err).Msg("WAL recovery after flush failure failed")
-						} else {
-							if stats.RecoveredFiles > 0 {
-								metrics.Get().IncWALRecoveryTotal()
-								metrics.Get().IncWALRecoveryRecords(int64(stats.RecoveredEntries))
-								walLogger.Info().
-									Int("files", stats.RecoveredFiles).
-									Int("entries", stats.RecoveredEntries).
-									Msg("WAL recovery after flush failure complete")
-							}
-							arrowBuffer.ResetFlushFailure()
-						}
-					} else {
-						// Normal operation — purge WAL files old enough that their data
-						// has been flushed to parquet by the normal buffer flush cycle
-						deleted, err := walWriter.PurgeOlderThan(safeAge)
-						if err != nil {
-							walLogger.Error().Err(err).Msg("Periodic WAL purge failed")
-						} else if deleted > 0 {
-							walLogger.Info().Int("deleted", deleted).Msg("Periodic WAL cleanup complete")
-						}
-					}
-				}
-			}
-		}()
-		log.Info().
-			Dur("interval", recoveryInterval).
-			Dur("safe_age", safeAge).
-			Msg("Periodic WAL maintenance enabled")
-	}
 
 	// Initialize MQTT Subscription Manager (if enabled)
 	var mqttManager mqtt.Manager
@@ -761,17 +587,6 @@ func main() {
 							Bool("can_compact", capabilities.CanCompact).
 							Msg("Cluster coordinator started")
 
-						// Wire up WAL replication if enabled
-						if cfg.Cluster.ReplicationEnabled && walWriter != nil {
-							clusterCoordinator.SetWAL(walWriter)
-							if err := clusterCoordinator.StartReplication(); err != nil {
-								log.Warn().Err(err).Msg("Failed to start WAL replication")
-							} else {
-								log.Info().
-									Bool("is_writer", capabilities.CanIngest).
-									Msg("WAL replication started")
-							}
-						}
 					}
 				}
 			}
@@ -926,7 +741,6 @@ func main() {
 
 	// Register Query handler with dedicated query timeout and slow query logging
 	queryHandler := api.NewQueryHandler(db, storageBackend, logger.Get("query"), cfg.Query.Timeout, cfg.Query.SlowQueryThresholdMs)
-	queryHandler.SetArrowBuffer(arrowBuffer)
 	if authManager != nil && rbacManager != nil {
 		queryHandler.SetAuthAndRBAC(authManager, rbacManager)
 	}
@@ -1406,75 +1220,6 @@ func main() {
 	}
 
 	log.Info().Msg("iedb shutdown complete")
-}
-
-// createWALRecoveryCallback creates a reusable WAL recovery callback function.
-// This callback replays recovered WAL records through the ArrowBuffer for re-ingestion.
-func createWALRecoveryCallback(arrowBuffer *ingest.ArrowBuffer, walLogger zerolog.Logger) wal.RecoveryCallback {
-	return func(ctx context.Context, records []map[string]interface{}) error {
-		if len(records) == 0 {
-			return nil
-		}
-		for _, rec := range records {
-			// Extract measurement from recovered record
-			// WAL row format uses underscore-prefixed keys: _measurement, _database
-			measurement, _ := rec["_measurement"].(string)
-			if measurement == "" {
-				measurement, _ = rec["measurement"].(string)
-			}
-			if measurement == "" {
-				measurement, _ = rec["m"].(string)
-			}
-			if measurement == "" {
-				continue // Skip records without measurement
-			}
-
-			database, _ := rec["_database"].(string)
-			if database == "" {
-				database, _ = rec["database"].(string)
-			}
-			if database == "" {
-				database = "default"
-			}
-
-			// Build columnar record from recovered data
-			columns := make(map[string][]interface{})
-			for key, value := range rec {
-				if key == "_measurement" || key == "measurement" || key == "m" || key == "_database" || key == "database" {
-					continue
-				}
-				columns[key] = []interface{}{value}
-			}
-
-			if err := arrowBuffer.WriteColumnarDirectNoWAL(ctx, database, measurement, columns); err != nil {
-				walLogger.Error().Err(err).Str("measurement", measurement).Msg("Failed to replay WAL record")
-				return err
-			}
-		}
-		walLogger.Info().Int("records", len(records)).Msg("WAL recovery: replayed records")
-		return nil
-	}
-}
-
-// createColumnarRecoveryCallback creates a WAL recovery callback for columnar entries
-// written via the zero-copy AppendRaw path.
-func createColumnarRecoveryCallback(arrowBuffer *ingest.ArrowBuffer, walLogger zerolog.Logger) wal.ColumnarRecoveryCallback {
-	return func(ctx context.Context, database, measurement string, columns map[string][]interface{}) error {
-		if database == "" {
-			database = "default"
-		}
-		if err := arrowBuffer.WriteColumnarDirectNoWAL(ctx, database, measurement, columns); err != nil {
-			walLogger.Error().Err(err).Str("database", database).Str("measurement", measurement).Msg("Failed to replay columnar WAL entry")
-			return err
-		}
-		rowCount := 0
-		for _, col := range columns {
-			rowCount = len(col)
-			break
-		}
-		walLogger.Info().Str("database", database).Str("measurement", measurement).Int("rows", rowCount).Msg("WAL recovery: replayed columnar entry")
-		return nil
-	}
 }
 
 // runCompactSubcommand handles the "compact" subcommand for subprocess-based compaction.

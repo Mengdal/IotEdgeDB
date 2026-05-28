@@ -488,7 +488,7 @@ type QueryHandler struct {
 
 	// Arrow buffer for buffer-in-query injection
 	// When set, queries will UNION in-memory buffer data with Parquet files
-	arrowBuffer *ingest.ArrowBuffer
+	arrowBuffer *ingest.ArrowFileBuffer
 }
 
 // isDebugEnabled returns true if debug logging is enabled.
@@ -712,7 +712,7 @@ func (h *QueryHandler) SetQueryRegistry(registry *queryregistry.Registry) {
 // SetArrowBuffer sets the ArrowBuffer reference for in-flight data visibility.
 // When set, queries will UNION in-memory buffer data with Parquet files so that
 // recently ingested records are visible in query results before being flushed to storage.
-func (h *QueryHandler) SetArrowBuffer(ab *ingest.ArrowBuffer) {
+func (h *QueryHandler) SetArrowBuffer(ab *ingest.ArrowFileBuffer) {
 	h.arrowBuffer = ab
 	h.logger.Info().Msg("ArrowBuffer set for buffer-in-query injection")
 }

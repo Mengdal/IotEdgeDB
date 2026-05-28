@@ -19,7 +19,7 @@ import (
 // TLE data is parsed into the satellite_tle measurement with orbital elements
 // as fields and satellite identifiers as tags.
 type TLEHandler struct {
-	buffer *ingest.ArrowBuffer
+	buffer *ingest.ArrowFileBuffer
 	parser *ingest.TLEParser
 	logger zerolog.Logger
 
@@ -38,7 +38,7 @@ type TLEHandler struct {
 }
 
 // NewTLEHandler creates a new TLE handler
-func NewTLEHandler(buffer *ingest.ArrowBuffer, logger zerolog.Logger) *TLEHandler {
+func NewTLEHandler(buffer *ingest.ArrowFileBuffer, logger zerolog.Logger) *TLEHandler {
 	return &TLEHandler{
 		buffer: buffer,
 		parser: ingest.NewTLEParser(),

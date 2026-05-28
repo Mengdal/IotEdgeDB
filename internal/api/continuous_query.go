@@ -32,7 +32,7 @@ type CQSchedulerReloader interface {
 type ContinuousQueryHandler struct {
 	db          *database.DuckDB
 	storage     storage.Backend
-	arrowBuffer *ingest.ArrowBuffer
+	arrowBuffer *ingest.ArrowFileBuffer
 	config      *config.ContinuousQueryConfig
 	sqliteDB    *sql.DB
 	authManager *auth.AuthManager
@@ -121,7 +121,7 @@ type CQExecution struct {
 }
 
 // NewContinuousQueryHandler creates a new continuous query handler
-func NewContinuousQueryHandler(db *database.DuckDB, storage storage.Backend, arrowBuffer *ingest.ArrowBuffer, cfg *config.ContinuousQueryConfig, authManager *auth.AuthManager, logger zerolog.Logger) (*ContinuousQueryHandler, error) {
+func NewContinuousQueryHandler(db *database.DuckDB, storage storage.Backend, arrowBuffer *ingest.ArrowFileBuffer, cfg *config.ContinuousQueryConfig, authManager *auth.AuthManager, logger zerolog.Logger) (*ContinuousQueryHandler, error) {
 	// Ensure directory exists
 	dir := filepath.Dir(cfg.DBPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {

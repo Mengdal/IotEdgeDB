@@ -37,7 +37,7 @@ type Manager interface {
 type SubscriptionManager struct {
 	repo        *Repository
 	encryptor   PasswordEncryptor
-	arrowBuffer *ingest.ArrowBuffer
+	arrowBuffer *ingest.ArrowFileBuffer
 	logger      zerolog.Logger
 
 	// Running subscribers
@@ -53,7 +53,7 @@ var _ shutdown.Shutdownable = (*SubscriptionManager)(nil)
 func NewSubscriptionManager(
 	repo *Repository,
 	encryptor PasswordEncryptor,
-	arrowBuffer *ingest.ArrowBuffer,
+	arrowBuffer *ingest.ArrowFileBuffer,
 	logger zerolog.Logger,
 ) *SubscriptionManager {
 	return &SubscriptionManager{

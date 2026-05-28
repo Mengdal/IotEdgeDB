@@ -57,7 +57,7 @@ type ImportHandler struct {
 	logger  zerolog.Logger
 
 	// ArrowBuffer for LP import (uses the streaming ingest pipeline)
-	arrowBuffer *ingest.ArrowBuffer
+	arrowBuffer *ingest.ArrowFileBuffer
 
 	// RBAC support
 	authManager AuthManager
@@ -79,7 +79,7 @@ func NewImportHandler(db *database.DuckDB, storage storage.Backend, logger zerol
 }
 
 // SetArrowBuffer sets the ArrowBuffer for Line Protocol import
-func (h *ImportHandler) SetArrowBuffer(buf *ingest.ArrowBuffer) {
+func (h *ImportHandler) SetArrowBuffer(buf *ingest.ArrowFileBuffer) {
 	h.arrowBuffer = buf
 }
 
@@ -396,7 +396,7 @@ func (h *ImportHandler) handleLineProtocolImport(c *fiber.Ctx) error {
 	var totalRows int64
 	importedMeasurements := make([]string, 0, len(columnarByMeasurement))
 	for measurement, record := range columnarByMeasurement {
-		if err := h.arrowBuffer.WriteColumnarRecord(c.Context(), database, record); err != nil {
+		if err := h.arrowBuffer.WriteColumnarDirect(c.Context(), database, measurement, record.Columns); err != nil {
 			h.totalErrors.Add(1)
 			h.logger.Error().Err(err).
 				Str("database", database).

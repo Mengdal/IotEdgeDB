@@ -78,7 +78,7 @@ func (pb *PooledBuffer) Release() {
 // MsgPackHandler handles MessagePack binary protocol endpoints
 type MsgPackHandler struct {
 	decoder        *ingest.MessagePackDecoder
-	arrowBuffer    *ingest.ArrowBuffer
+	arrowBuffer    *ingest.ArrowFileBuffer
 	logger         zerolog.Logger
 	maxPayloadSize int64 // Maximum payload size in bytes (applies to both compressed and decompressed)
 
@@ -91,7 +91,7 @@ type MsgPackHandler struct {
 }
 
 // NewMsgPackHandler creates a new MessagePack handler
-func NewMsgPackHandler(logger zerolog.Logger, arrowBuffer *ingest.ArrowBuffer, maxPayloadSize int64) *MsgPackHandler {
+func NewMsgPackHandler(logger zerolog.Logger, arrowBuffer *ingest.ArrowFileBuffer, maxPayloadSize int64) *MsgPackHandler {
 	return &MsgPackHandler{
 		decoder:        ingest.NewMessagePackDecoder(logger),
 		arrowBuffer:    arrowBuffer,
@@ -312,12 +312,55 @@ localProcessing:
 		}
 	}
 
-	if err := h.arrowBuffer.Write(ctx, database, records); err != nil {
-		h.logger.Error().Err(err).Msg("Failed to write to Arrow buffer")
+	// Write records to Arrow file buffer
+	recordList, ok := records.([]interface{})
+	if !ok {
+		h.logger.Error().Interface("type", fmt.Sprintf("%T", records)).Msg("Unexpected record type from decoder")
 		metrics.Get().IncIngestErrors()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to write records",
 		})
+	}
+
+	// Group row records by measurement for batch conversion
+	var rowRecordsByMeasurement map[string][]*models.Record
+
+	for _, record := range recordList {
+		switch r := record.(type) {
+		case *models.ColumnarRecord:
+			if err := h.arrowBuffer.WriteColumnarDirect(ctx, database, r.Measurement, r.Columns); err != nil {
+				h.logger.Error().Err(err).Str("measurement", r.Measurement).Msg("Failed to write columnar record")
+				metrics.Get().IncIngestErrors()
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Failed to write records",
+				})
+			}
+		case *models.Record:
+			if rowRecordsByMeasurement == nil {
+				rowRecordsByMeasurement = make(map[string][]*models.Record)
+			}
+			rowRecordsByMeasurement[r.Measurement] = append(rowRecordsByMeasurement[r.Measurement], r)
+		default:
+			h.logger.Warn().Interface("type", fmt.Sprintf("%T", record)).Msg("Unknown record type in msgpack payload")
+		}
+	}
+
+	// Convert grouped row records to columnar format and write
+	if len(rowRecordsByMeasurement) > 0 {
+		var allRowRecords []*models.Record
+		for _, recs := range rowRecordsByMeasurement {
+			allRowRecords = append(allRowRecords, recs...)
+		}
+		columnarByMeasurement := ingest.BatchToColumnar(allRowRecords)
+		for measurement, cr := range columnarByMeasurement {
+			if err := h.arrowBuffer.WriteColumnarDirect(ctx, database, measurement, cr.Columns); err != nil {
+				h.logger.Error().Err(err).Str("measurement", measurement).Msg("Failed to write converted row records")
+				metrics.Get().IncIngestErrors()
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Failed to write records",
+				})
+			}
+		}
 	}
 
 	// Record metrics

@@ -25,7 +25,7 @@ type Subscriber struct {
 	id             string
 	config         *Subscription
 	client         pahomqtt.Client
-	arrowBuffer    *ingest.ArrowBuffer
+	arrowBuffer    *ingest.ArrowFileBuffer
 	logger         zerolog.Logger
 	encryptor      PasswordEncryptor
 	onStatusChange func(id string, status SubscriptionStatus, errMsg string)
@@ -50,7 +50,7 @@ type Subscriber struct {
 // NewSubscriber creates a new MQTT subscriber
 func NewSubscriber(
 	config *Subscription,
-	arrowBuffer *ingest.ArrowBuffer,
+	arrowBuffer *ingest.ArrowFileBuffer,
 	encryptor PasswordEncryptor,
 	onStatusChange func(id string, status SubscriptionStatus, errMsg string),
 	logger zerolog.Logger,
@@ -319,7 +319,7 @@ func (s *Subscriber) onMessage(client pahomqtt.Client, msg pahomqtt.Message) {
 	}
 }
 
-// processMessage decodes and writes an MQTT message to the ArrowBuffer
+// processMessage decodes and writes an MQTT message to the ArrowFileBuffer
 func (s *Subscriber) processMessage(topic string, payload []byte, database string) error {
 	// Try to decode as MessagePack first (check magic bytes)
 	if len(payload) > 0 {
@@ -328,9 +328,40 @@ func (s *Subscriber) processMessage(topic string, payload []byte, database strin
 			return fmt.Errorf("failed to decode payload: %w", err)
 		}
 
-		// Write to ArrowBuffer
-		if err := s.arrowBuffer.Write(s.ctx, database, records); err != nil {
-			return fmt.Errorf("failed to write to buffer: %w", err)
+		// Group records by measurement and convert to columnar format
+		byMeasurement := make(map[string]map[string][]interface{})
+		for _, rec := range records {
+			r, ok := rec.(*models.Record)
+			if !ok {
+				continue
+			}
+			cols, exists := byMeasurement[r.Measurement]
+			if !exists {
+				cols = make(map[string][]interface{})
+				byMeasurement[r.Measurement] = cols
+			}
+			// Time column
+			if r.Timestamp != 0 {
+				cols["time"] = append(cols["time"], r.Timestamp)
+			} else if !r.Time.IsZero() {
+				cols["time"] = append(cols["time"], r.Time.UnixMicro())
+			} else {
+				cols["time"] = append(cols["time"], time.Now().UnixMicro())
+			}
+			// Tags as string columns
+			for k, v := range r.Tags {
+				cols[k] = append(cols[k], v)
+			}
+			// Fields
+			for k, v := range r.Fields {
+				cols[k] = append(cols[k], v)
+			}
+		}
+
+		for measurement, cols := range byMeasurement {
+			if err := s.arrowBuffer.WriteColumnarDirect(s.ctx, database, measurement, cols); err != nil {
+				return fmt.Errorf("failed to write to buffer: %w", err)
+			}
 		}
 	}
 
