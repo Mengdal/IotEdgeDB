@@ -706,6 +706,74 @@ func (b *ArrowFileBuffer) WriteColumnarDirect(ctx context.Context, database, mea
 	return b.writeBatch(ctx, database, measurement, typedColumns, numRecords)
 }
 
+// Close drains the convert queue, flushes all remaining .arrow files, and shuts down.
+func (b *ArrowFileBuffer) Close() error {
+	b.logger.Info().Msg("Closing ArrowFileBuffer...")
+
+	// Stop accepting new writes
+	b.cancel()
+
+	// Close convert queue and wait for worker to finish draining
+	close(b.convertQueue)
+	b.wg.Wait()
+
+	// Flush remaining entries synchronously
+	for _, shard := range b.shards {
+		shard.mu.Lock()
+		for key, entry := range shard.entries {
+			entry.file.Close()
+			delete(shard.entries, key)
+			b.doConvert(convertTask{
+				database:    entry.database,
+				measurement: entry.measurement,
+				path:        entry.path,
+			})
+		}
+		shard.mu.Unlock()
+	}
+
+	b.logger.Info().
+		Int64("total_records_written", b.totalRecordsWritten.Load()).
+		Int64("total_flushes", b.totalFlushes.Load()).
+		Msg("ArrowFileBuffer closed")
+	return nil
+}
+
+// FlushAll forces conversion of all active .arrow files to Parquet.
+func (b *ArrowFileBuffer) FlushAll(ctx context.Context) error {
+	b.logger.Info().Msg("Flushing all buffer files...")
+
+	for _, shard := range b.shards {
+		shard.mu.Lock()
+		for key, entry := range shard.entries {
+			entry.file.Close()
+			delete(shard.entries, key)
+			b.submitConvert(entry.database, entry.measurement, entry.path)
+		}
+		shard.mu.Unlock()
+	}
+	return nil
+}
+
+// GetStats returns buffer statistics.
+func (b *ArrowFileBuffer) GetStats() map[string]interface{} {
+	activeFiles := 0
+	for _, shard := range b.shards {
+		shard.mu.RLock()
+		activeFiles += len(shard.entries)
+		shard.mu.RUnlock()
+	}
+
+	return map[string]interface{}{
+		"total_records_buffered": b.totalRecordsBuffered.Load(),
+		"total_records_written":  b.totalRecordsWritten.Load(),
+		"total_flushes":          b.totalFlushes.Load(),
+		"total_errors":           b.totalErrors.Load(),
+		"active_files":           activeFiles,
+		"convert_queue_depth":    len(b.convertQueue),
+	}
+}
+
 // submitConvert sends a convert task to the background worker.
 // Non-blocking — if the queue is full, logs warning.
 func (b *ArrowFileBuffer) submitConvert(database, measurement, path string) {
