@@ -75,6 +75,10 @@ var (
 	// Matches: WITH name AS, WITH RECURSIVE name AS, and comma-separated CTEs
 	patternCTENames = regexp.MustCompile(`(?i)\bWITH\s+(?:RECURSIVE\s+)?(\w+)\s+AS\s*\(|,\s*(\w+)\s+AS\s*\(`)
 
+	// readParquetStartRe matches the start of a read_parquet(...) call.
+	// Used by applyBufferUnions to locate and wrap read_parquet expressions with buffer UNION ALL.
+	readParquetStartRe = regexp.MustCompile(`read_parquet\s*\(`)
+
 	// skipPrefixes are table name prefixes that should not be converted to storage paths
 	skipPrefixes = []string{"read_parquet", "information_schema", "pg_", "duckdb_"}
 
@@ -1074,20 +1078,116 @@ func (h *QueryHandler) wrapWithBufferUnion(tableName, readParquetExpr string, vi
 
 // applyBufferUnions wraps read_parquet expressions with buffer UNION ALL for tables with active buffers.
 // This is a post-processing step applied after the standard SQL-to-storage-path transformation.
-//
-// TODO: Implement full SQL UNION wrapping for buffer injection. The current implementation
-// is a no-op placeholder because RegisterArrowView is a stub. When that is implemented,
-// this function should find read_parquet() expressions and wrap them with:
+// It finds read_parquet(...) calls in the converted SQL, matches the path (database/measurement)
+// against the viewNames map, and wraps matching expressions with:
 //   (SELECT * FROM _buf_X UNION ALL read_parquet('...'))
 func (h *QueryHandler) applyBufferUnions(sql string, viewNames map[string]string) string {
 	if len(viewNames) == 0 {
 		return sql
 	}
-	// TODO: Implement read_parquet wrapping. This requires parsing the SQL to find
-	// read_parquet() calls, matching them to the table names in viewNames, and
-	// wrapping with (SELECT * FROM _buf_table UNION ALL original_expression).
-	// For now, return the SQL unchanged — queries will not see buffer data.
-	return sql
+
+	// Build lookup maps from path segments to view names.
+	// "db.meas" → "db/meas" key; "meas" alone → meas-only key (for default-db queries).
+	dbMeasToView := make(map[string]string, len(viewNames))
+	measToView := make(map[string]string, len(viewNames))
+	for tableName, viewName := range viewNames {
+		if idx := strings.IndexByte(tableName, '.'); idx >= 0 {
+			dbMeasToView[tableName[:idx]+"/"+tableName[idx+1:]] = viewName
+		}
+		measToView[tableName] = viewName
+	}
+
+	var result strings.Builder
+	lastEnd := 0
+
+	for _, loc := range readParquetStartRe.FindAllStringIndex(sql, -1) {
+		start := loc[0]
+
+		// Copy everything between the last replacement and this match
+		result.WriteString(sql[lastEnd:start])
+
+		// Find the matching closing paren (handle nested parens from tiering subqueries)
+		openParenIdx := loc[1] - 1 // loc[1] is the byte after '('
+		end := findMatchingParen(sql, openParenIdx)
+		if end < 0 {
+			// Unmatched paren — write the match as-is and skip
+			result.WriteString(sql[start:loc[1]])
+			lastEnd = loc[1]
+			continue
+		}
+
+		fullExpr := sql[start : end+1]
+
+		// Extract the first path argument
+		path := extractPathFromReadParquet(fullExpr)
+		if path == "" {
+			result.WriteString(fullExpr)
+			lastEnd = end + 1
+			continue
+		}
+
+		db, meas := h.extractDBMeasurementFromPath(path)
+
+		// Match: prefer db/meas exact match, fall back to measurement-only
+		var viewName string
+		var ok bool
+		if viewName, ok = dbMeasToView[db+"/"+meas]; !ok {
+			viewName, ok = measToView[meas]
+		}
+
+		if ok {
+			result.WriteString("(SELECT * FROM ")
+			result.WriteString(viewName)
+			result.WriteString(" UNION ALL ")
+			result.WriteString(fullExpr)
+			result.WriteByte(')')
+		} else {
+			result.WriteString(fullExpr)
+		}
+
+		lastEnd = end + 1
+	}
+
+	result.WriteString(sql[lastEnd:])
+	return result.String()
+}
+
+// findMatchingParen returns the index of the closing ')' that matches the '(' at openParenIdx.
+// Returns -1 if no matching paren is found.
+func findMatchingParen(s string, openParenIdx int) int {
+	depth := 1
+	for i := openParenIdx + 1; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// extractPathFromReadParquet extracts the first single-quoted path argument from a
+// read_parquet(...) expression. Handles both single-path syntax:
+//   read_parquet('path', ...)
+// and array syntax:
+//   read_parquet(['p1', 'p2'], ...)
+func extractPathFromReadParquet(expr string) string {
+	i := strings.IndexByte(expr, '\'')
+	if i < 0 {
+		return ""
+	}
+	for j := i + 1; j < len(expr); j++ {
+		if expr[j] == '\\' {
+			j++ // skip escaped character
+		} else if expr[j] == '\'' {
+			return expr[i+1 : j]
+		}
+	}
+	return ""
 }
 
 // executeQuery handles POST /api/v1/query - returns JSON response
