@@ -1,0 +1,208 @@
+# =============================================================================
+# IEDB Cluster — Shared Storage (MinIO)
+#
+# Writers, readers, and MinIO share a single S3-compatible bucket. Traefik
+# acts as a dynamic reverse proxy via the Docker provider: routing is defined
+# per container via labels, so new writers/readers are load-balanced
+# automatically.
+# =============================================================================
+
+x-iedb-common: &iedb-common
+  image: ghcr.io/mengdal/iedb:latest
+  networks:
+    - iedb-cluster
+  depends_on:
+    minio:
+      condition: service_started
+
+x-iedb-env: &iedb-env
+  # Cluster
+  IEDB_CLUSTER_ENABLED: "true"
+  IEDB_CLUSTER_CLUSTER_NAME: "iedb-dev"
+  IEDB_CLUSTER_SEEDS: "iedb-writer1:9100,iedb-writer2:9100,iedb-writer3:9100"
+  IEDB_CLUSTER_COORDINATOR_ADDR: ":9100"
+  IEDB_CLUSTER_RAFT_BIND_ADDR: ":9200"
+  # Storage (MinIO)
+  IEDB_STORAGE_BACKEND: "s3"
+  IEDB_STORAGE_S3_BUCKET: "iedb-data"
+  IEDB_STORAGE_S3_REGION: "us-east-1"
+  IEDB_STORAGE_S3_ENDPOINT: "http://minio:9000"
+  IEDB_STORAGE_S3_ACCESS_KEY: "minioadmin"
+  IEDB_STORAGE_S3_SECRET_KEY: "minioadmin"
+  IEDB_STORAGE_S3_FORCE_PATH_STYLE: "true"
+  # License
+  IEDB_LICENSE_KEY: "${IEDB_LICENSE_KEY}"
+
+# Reusable Traefik label groups. Each role gets one of these merged into its
+# `labels:` block.
+x-traefik-writer-labels: &traefik-writer-labels
+  traefik.enable: "true"
+  traefik.docker.network: "iedb-cluster"
+  traefik.http.services.iedb-writers.loadbalancer.server.port: "8000"
+  traefik.http.services.iedb-writers.loadbalancer.sticky.cookie: "false"
+  # Writes + admin endpoints fan out to writers only
+  traefik.http.routers.iedb-writers.rule: >-
+    PathPrefix(`/write`) ||
+    PathPrefix(`/api/v1/write`) ||
+    PathPrefix(`/api/v2/write`) ||
+    PathPrefix(`/api/v1/import`) ||
+    PathPrefix(`/api/v1/msgpack`) ||
+    PathPrefix(`/api/v1/cluster`) ||
+    PathPrefix(`/api/v1/databases`) ||
+    PathPrefix(`/api/v1/tokens`) ||
+    PathPrefix(`/api/v1/retention`) ||
+    PathPrefix(`/api/v1/continuous-queries`)
+  traefik.http.routers.iedb-writers.entrypoints: "web"
+  traefik.http.routers.iedb-writers.service: "iedb-writers"
+  traefik.http.routers.iedb-writers.priority: "100"
+
+x-traefik-reader-labels: &traefik-reader-labels
+  traefik.enable: "true"
+  traefik.docker.network: "iedb-cluster"
+  traefik.http.services.iedb-readers.loadbalancer.server.port: "8000"
+  # Queries go to readers only
+  traefik.http.routers.iedb-readers.rule: "PathPrefix(`/api/v1/query`)"
+  traefik.http.routers.iedb-readers.entrypoints: "web"
+  traefik.http.routers.iedb-readers.service: "iedb-readers"
+  traefik.http.routers.iedb-readers.priority: "100"
+  # /health and /ready + default route can hit any node (reader labelled here
+  # so readers participate; writers also participate via `iedb-any` below)
+  traefik.http.services.iedb-any.loadbalancer.server.port: "8000"
+  traefik.http.routers.iedb-any.rule: "PathPrefix(`/health`) || PathPrefix(`/ready`) || PathPrefix(`/`)"
+  traefik.http.routers.iedb-any.entrypoints: "web"
+  traefik.http.routers.iedb-any.service: "iedb-any"
+  traefik.http.routers.iedb-any.priority: "1"
+
+services:
+  # =============================================================================
+  # Traefik — dynamic reverse proxy (Docker provider)
+  # =============================================================================
+  traefik:
+    image: traefik:v3.6
+    container_name: iedb-traefik
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=iedb-cluster
+      - --entrypoints.web.address=:80
+      - --api.dashboard=true
+      - --api.insecure=true    # dashboard on :8080 — disable in production
+      - --log.level=INFO
+      - --accesslog=true
+    ports:
+      - "8000:80"
+      - "8080:8080"            # Traefik dashboard (disable in production)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - iedb-cluster
+    depends_on:
+      - iedb-writer1
+      - iedb-writer2
+      - iedb-writer3
+      - iedb-reader1
+
+  # =============================================================================
+  # Writers (3 nodes) — Raft consensus for HA writes
+  # =============================================================================
+  iedb-writer1:
+    <<: *iedb-common
+    container_name: iedb-writer1
+    hostname: iedb-writer1
+    volumes:
+      - iedb-writer1-data:/app/data
+    environment:
+      <<: *iedb-env
+      IEDB_CLUSTER_NODE_ID: "iedb-writer1"
+      IEDB_CLUSTER_ROLE: "writer"
+      IEDB_CLUSTER_ADVERTISE_ADDR: "iedb-writer1:9100"
+      IEDB_CLUSTER_RAFT_ADVERTISE_ADDR: "iedb-writer1:9200"
+      IEDB_CLUSTER_RAFT_BOOTSTRAP: "true"
+    labels:
+      <<: *traefik-writer-labels
+
+  iedb-writer2:
+    <<: *iedb-common
+    container_name: iedb-writer2
+    hostname: iedb-writer2
+    volumes:
+      - iedb-writer2-data:/app/data
+    environment:
+      <<: *iedb-env
+      IEDB_CLUSTER_NODE_ID: "iedb-writer2"
+      IEDB_CLUSTER_ROLE: "writer"
+      IEDB_CLUSTER_ADVERTISE_ADDR: "iedb-writer2:9100"
+      IEDB_CLUSTER_RAFT_ADVERTISE_ADDR: "iedb-writer2:9200"
+      IEDB_CLUSTER_RAFT_BOOTSTRAP: "false"
+    labels:
+      <<: *traefik-writer-labels
+    depends_on:
+      - iedb-writer1
+
+  iedb-writer3:
+    <<: *iedb-common
+    container_name: iedb-writer3
+    hostname: iedb-writer3
+    volumes:
+      - iedb-writer3-data:/app/data
+    environment:
+      <<: *iedb-env
+      IEDB_CLUSTER_NODE_ID: "iedb-writer3"
+      IEDB_CLUSTER_ROLE: "writer"
+      IEDB_CLUSTER_ADVERTISE_ADDR: "iedb-writer3:9100"
+      IEDB_CLUSTER_RAFT_ADVERTISE_ADDR: "iedb-writer3:9200"
+      IEDB_CLUSTER_RAFT_BOOTSTRAP: "false"
+    labels:
+      <<: *traefik-writer-labels
+    depends_on:
+      - iedb-writer1
+
+  # =============================================================================
+  # Reader (1 node) — Query-only
+  # =============================================================================
+  iedb-reader1:
+    <<: *iedb-common
+    container_name: iedb-reader1
+    hostname: iedb-reader1
+    volumes:
+      - iedb-reader1-data:/app/data
+    environment:
+      <<: *iedb-env
+      IEDB_CLUSTER_NODE_ID: "iedb-reader1"
+      IEDB_CLUSTER_ROLE: "reader"
+      IEDB_CLUSTER_ADVERTISE_ADDR: "iedb-reader1:9100"
+      IEDB_CLUSTER_REPLICATION_ENABLED: "true"
+    labels:
+      <<: *traefik-reader-labels
+    depends_on:
+      - iedb-writer1
+
+  # =============================================================================
+  # MinIO — S3-compatible shared storage
+  # =============================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: "minioadmin"
+      MINIO_ROOT_PASSWORD: "minioadmin"
+    volumes:
+      - minio-data:/data
+    networks:
+      - iedb-cluster
+
+volumes:
+  iedb-writer1-data:
+  iedb-writer2-data:
+  iedb-writer3-data:
+  iedb-reader1-data:
+  minio-data:
+
+networks:
+  iedb-cluster:
+    name: iedb-cluster
+    driver: bridge

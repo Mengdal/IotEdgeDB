@@ -49,6 +49,7 @@ type Config struct {
 	MemoryLimit    string
 	ThreadCount    int
 	EnableWAL      bool
+	TimeZone       string // DuckDB timezone (e.g., "Asia/Shanghai", "UTC")
 	// S3 configuration for httpfs extension
 	S3Region    string
 	S3AccessKey string
@@ -126,7 +127,7 @@ func buildDSN(_ *Config) string {
 func configureDatabase(db *sql.DB, cfg *Config, logger zerolog.Logger) error {
 	// Set memory limit to prevent unbounded memory growth
 	if cfg.MemoryLimit != "" {
-		if _, err := db.Exec(fmt.Sprintf("SET GLOBAL memory_limit='%s'", cfg.MemoryLimit)); err != nil {
+		if _, err := db.Exec(fmt.Sprintf("SET GLOBAL memory_limit='%s'", escapeSQLString(cfg.MemoryLimit))); err != nil {
 			return fmt.Errorf("failed to set memory_limit: %w", err)
 		}
 	}
@@ -146,6 +147,14 @@ func configureDatabase(db *sql.DB, cfg *Config, logger zerolog.Logger) error {
 	// Preserve insertion order for deterministic results (important for LIMIT queries)
 	if _, err := db.Exec("SET GLOBAL preserve_insertion_order=true"); err != nil {
 		logger.Warn().Err(err).Msg("Failed to set preserve_insertion_order")
+	}
+
+	// Set DuckDB timezone for date_trunc, to_timestamp, epoch() etc.
+	if cfg.TimeZone != "" {
+		if _, err := db.Exec(fmt.Sprintf("SET GLOBAL TimeZone = '%s'", escapeSQLString(cfg.TimeZone))); err != nil {
+			return fmt.Errorf("failed to set TimeZone: %w", err)
+		}
+		logger.Info().Str("timezone", cfg.TimeZone).Msg("DuckDB timezone set")
 	}
 
 	// Configure httpfs extension for S3 access if credentials are provided
@@ -366,7 +375,7 @@ func (d *DuckDB) ClearHTTPCache() {
 	if _, err := d.db.Exec("SELECT cache_httpfs_clear_cache()"); err != nil {
 		d.logger.Debug().Err(err).Msg("cache_httpfs_clear_cache not available (extension may not be loaded)")
 	} else {
-		d.logger.Info().Msg("Cleared cache_httpfs cache after compaction")
+		d.logger.Info().Msg("Cleared cache_httpfs cache")
 	}
 
 	// Reset parquet_metadata_cache by toggling off/on to clear cached schema for deleted files
@@ -376,7 +385,7 @@ func (d *DuckDB) ClearHTTPCache() {
 		if _, err := d.db.Exec("SET GLOBAL parquet_metadata_cache=true"); err != nil {
 			d.logger.Warn().Err(err).Msg("Failed to re-enable parquet_metadata_cache")
 		} else {
-			d.logger.Info().Msg("Reset parquet_metadata_cache after compaction")
+			d.logger.Info().Msg("Reset parquet_metadata_cache")
 		}
 	}
 }

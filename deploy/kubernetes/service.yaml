@@ -1,0 +1,55 @@
+---
+# LoadBalancer for writes - routes to writers only
+apiVersion: v1
+kind: Service
+metadata:
+  name: iedb-write
+  namespace: iedb
+  labels:
+    app: iedb
+spec:
+  type: LoadBalancer
+  selector:
+    app: iedb
+    role: writer
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+
+---
+# LoadBalancer for reads - routes to readers only
+apiVersion: v1
+kind: Service
+metadata:
+  name: iedb-read
+  namespace: iedb
+  labels:
+    app: iedb
+spec:
+  type: LoadBalancer
+  selector:
+    app: iedb
+    role: reader
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+
+---
+# ClusterIP for internal access (all nodes)
+apiVersion: v1
+kind: Service
+metadata:
+  name: iedb
+  namespace: iedb
+  labels:
+    app: iedb
+spec:
+  type: ClusterIP
+  selector:
+    app: iedb
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http

@@ -273,11 +273,6 @@ func (c *Client) ActivateOrVerify(ctx context.Context) (*License, error) {
 		return license, nil
 	}
 
-	// If the machine is revoked, never auto-activate.
-	if strings.Contains(err.Error(), "machine revoked") {
-		return nil, err
-	}
-
 	// If verification failed with "machine not activated", try to activate
 	if strings.Contains(err.Error(), "machine not activated") {
 		c.logger.Info().Msg("Machine not activated, attempting activation")
@@ -360,6 +355,16 @@ func (c *Client) CanUseTieredStorage() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.license != nil && c.license.CanUseTieredStorage()
+}
+
+// CanUseClustering returns true if multi-node clustering is allowed.
+// Used by the reconciliation API middleware to re-validate the
+// license on every request so a license expiry mid-process kicks
+// in without restart.
+func (c *Client) CanUseClustering() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.license != nil && c.license.CanUseClustering()
 }
 
 // CanUseAuditLogging returns true if audit logging is allowed

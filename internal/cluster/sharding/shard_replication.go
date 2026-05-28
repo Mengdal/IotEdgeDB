@@ -2,7 +2,9 @@ package sharding
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"iedb/internal/cluster/security"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -31,6 +33,8 @@ type ShardReplicationConfig struct {
 
 	// Logger for replication events
 	Logger zerolog.Logger
+	// TLSConfig for encrypted inter-node communication (nil = plain TCP)
+	TLSConfig *tls.Config
 }
 
 // ShardReplicationManager manages WAL replication for shards where this node is primary.
@@ -493,7 +497,7 @@ func (s *ShardSender) connectToReplica(replica *ShardReplicaConn) error {
 		return fmt.Errorf("replica has no address")
 	}
 
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	conn, err := security.Dial("tcp", addr, 10*time.Second, s.cfg.TLSConfig)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}

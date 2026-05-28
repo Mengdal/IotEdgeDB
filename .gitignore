@@ -1,6 +1,7 @@
 # Binaries
 /iedb
 /iedb-*
+!helm/iedb-*/
 *.exe
 *.dll
 *.so
@@ -43,6 +44,7 @@ go.work.sum
 
 # Claude Code
 .claude/
+CLAUDE.md
 
 # OS
 .DS_Store
@@ -91,3 +93,4 @@ docs/progress/
 /.cache
 /cmd/tools
 front/
+iedb.toml

@@ -82,12 +82,12 @@ func NewManager(cfg *ManagerConfig) (*Manager, error) {
 	}
 
 	// Validate license
-	// if cfg.LicenseClient == nil {
-	// 	return nil, fmt.Errorf("license client is required for tiered storage")
-	// }
-	// if !cfg.LicenseClient.CanUseTieredStorage() {
-	// 	return nil, fmt.Errorf("valid license with tiered_storage feature required")
-	// }
+	if cfg.LicenseClient == nil {
+		return nil, fmt.Errorf("license client is required for tiered storage")
+	}
+	if !cfg.LicenseClient.CanUseTieredStorage() {
+		return nil, fmt.Errorf("valid license with tiered_storage feature required")
+	}
 
 	// Create metadata store
 	metadata, err := NewMetadataStore(cfg.DB, logger)
@@ -148,7 +148,7 @@ func (m *Manager) Start() error {
 	}
 
 	// Verify license before starting
-	if m.licenseClient != nil && !m.licenseClient.CanUseTieredStorage() {
+	if !m.licenseClient.CanUseTieredStorage() {
 		m.logger.Warn().Msg("Valid license required for tiered storage - not starting scheduler")
 		return nil
 	}
@@ -188,7 +188,7 @@ func (m *Manager) IsRunning() bool {
 // RunMigrationCycle runs a single migration cycle
 func (m *Manager) RunMigrationCycle(ctx context.Context) error {
 	// Check license before each cycle
-	if m.licenseClient != nil && !m.licenseClient.CanUseTieredStorage() {
+	if !m.licenseClient.CanUseTieredStorage() {
 		m.logger.Warn().Msg("Valid license required - skipping migration cycle")
 		return nil
 	}
@@ -293,7 +293,7 @@ func (m *Manager) DeleteFile(ctx context.Context, path string) error {
 func (m *Manager) GetStatus(ctx context.Context) (*StatusResponse, error) {
 	status := &StatusResponse{
 		Enabled:      m.config.Enabled,
-		LicenseValid: m.licenseClient == nil || m.licenseClient.CanUseTieredStorage(),
+		LicenseValid: m.licenseClient.CanUseTieredStorage(),
 	}
 
 	if !status.LicenseValid {

@@ -26,6 +26,16 @@ import (
 // This avoids a circular import between api and scheduler packages.
 type CQSchedulerReloader interface {
 	ReloadCQ(cqID int64) error
+	// StartJobDirect schedules a job using data already in hand, avoiding a
+	// redundant SQLite read that could race with the just-committed INSERT.
+	StartJobDirect(cqID int64, name, interval string, isActive bool) error
+}
+
+// CQCoordinator is the minimal cluster interface the CQ handler needs to gate
+// manual execute requests to the primary writer. nil = standalone mode (no gate).
+type CQCoordinator interface {
+	IsPrimaryWriter() bool
+	Role() string
 }
 
 // ContinuousQueryHandler handles continuous query operations
@@ -37,6 +47,7 @@ type ContinuousQueryHandler struct {
 	sqliteDB    *sql.DB
 	authManager *auth.AuthManager
 	scheduler   CQSchedulerReloader
+	coordinator CQCoordinator
 	logger      zerolog.Logger
 }
 
@@ -44,6 +55,12 @@ type ContinuousQueryHandler struct {
 // Called after scheduler creation since it depends on the handler.
 func (h *ContinuousQueryHandler) SetScheduler(s CQSchedulerReloader) {
 	h.scheduler = s
+}
+
+// SetCoordinator sets the cluster coordinator for writer-gate checks.
+// Called after coordinator creation since it depends on the handler.
+func (h *ContinuousQueryHandler) SetCoordinator(c CQCoordinator) {
+	h.coordinator = c
 }
 
 // ContinuousQuery represents a continuous query definition
@@ -124,7 +141,7 @@ type CQExecution struct {
 func NewContinuousQueryHandler(db *database.DuckDB, storage storage.Backend, arrowBuffer *ingest.ArrowBuffer, cfg *config.ContinuousQueryConfig, authManager *auth.AuthManager, logger zerolog.Logger) (*ContinuousQueryHandler, error) {
 	// Ensure directory exists
 	dir := filepath.Dir(cfg.DBPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create directory for CQ DB: %w", err)
 	}
 
@@ -292,6 +309,14 @@ func (h *ContinuousQueryHandler) handleCreate(c *fiber.Ctx) error {
 	queryID, _ := result.LastInsertId()
 	h.logger.Info().Int64("query_id", queryID).Str("name", req.Name).Msg("Created continuous query")
 
+	// Kick the scheduler using the data we already have — avoids a redundant
+	// SQLite read that could race with the just-committed INSERT on a
+	// multi-connection pool.
+	if h.scheduler != nil {
+		if err := h.scheduler.StartJobDirect(queryID, req.Name, req.Interval, req.IsActive); err != nil {
+			h.logger.Warn().Err(err).Int64("query_id", queryID).Msg("Failed to start CQ job after create")
+		}
+	}
 	// Return created query
 	cq, err := h.getQuery(queryID)
 	if err != nil {
@@ -515,6 +540,12 @@ func (h *ContinuousQueryHandler) GetCQ(queryID int64) (*ContinuousQuery, error) 
 func (h *ContinuousQueryHandler) handleExecute(c *fiber.Ctx) error {
 	start := time.Now()
 
+	// Cluster gate: only the primary writer may execute CQs.
+	if h.coordinator != nil && !h.coordinator.IsPrimaryWriter() {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": fmt.Sprintf("CQ execution rejected: node role %q is not primary writer", h.coordinator.Role()),
+		})
+	}
 	queryID, err := c.ParamsInt("id")
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid query ID"})

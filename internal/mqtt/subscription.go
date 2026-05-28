@@ -204,7 +204,7 @@ func (s *Subscription) SetDefaults() {
 	if s.ClientID == "" {
 		s.ClientID = generateClientID()
 	}
-	if s.QoS == 0 {
+	if s.QoS != 0 && s.QoS != 1 && s.QoS != 2 {
 		s.QoS = 1 // Default to at-least-once
 	}
 	if s.KeepAliveSeconds == 0 {

@@ -27,6 +27,7 @@ format = "console"  # json or console
 # max_connections = 28    # Default: 2x CPU cores
 # memory_limit = "8GB"    # Default: ~50% system memory
 # thread_count = 14       # Default: CPU cores
+# timezone = "UTC"  # Default: current timezone
 enable_wal = true
 
 # -----------------------------------------------------------------------------
@@ -50,8 +51,8 @@ s3_secret_key = "password123"
 # Ingestion
 # -----------------------------------------------------------------------------
 [ingest]
-max_buffer_size = 5000000   # Records before flush (default: 50000)
-max_buffer_age_ms = 100   # Max buffer age before flush
+max_buffer_size = 50000   # Records before flush (default: 50000)
+max_buffer_age_ms = 1000   # Max buffer age before flush
 
 # Sort keys for compression/query performance: "measurement:col1,col2"
 # Time column is always appended automatically
@@ -80,7 +81,7 @@ daily_min_files = 12
 # Authentication
 # -----------------------------------------------------------------------------
 [auth]
-enabled = false
+enabled = true
 
 # -----------------------------------------------------------------------------
 # Delete
@@ -94,12 +95,14 @@ max_rows_per_delete = 1000000
 # Governance
 # -----------------------------------------------------------------------------
 [governance]
-enabled = false
+enabled = true
 # -----------------------------------------------------------------------------
 # Retention
 # -----------------------------------------------------------------------------
 [retention]
 enabled = true
+[scheduler]
+retention_schedule = "0 3 * * *"  # 每天凌晨 3 点执行所有活跃策略
 
 # -----------------------------------------------------------------------------
 # Continuous Queries
@@ -144,7 +147,7 @@ migration_batch_size = 100
 default_hot_max_age_days = 0
 
 [tiered_storage.cold]
-enabled = true
+enabled = false
 backend = "s3"              # "s3" or "azure"
 
 # S3/MinIO
@@ -176,14 +179,18 @@ include_reads = false           # Log GET/query requests (high volume)
 # Backup & Restore
 # -----------------------------------------------------------------------------
 [backup]
-enabled = true
+enabled = false
 local_path = "./data/backups"           # Directory for local backups
 
 # Query Management (Enterprise)
 # -----------------------------------------------------------------------------
-# [query_management]
-# enabled = false
-# history_size = 100              # Number of completed queries to keep in memory
+[query_management]
+enabled = true
+history_size = 100              # Number of completed queries to keep in memory
 
 [wal]
 enabled = false
+
+[license]
+enabled = true
+key = "ARC-ENT-1234-5678-90AB-CDEF"

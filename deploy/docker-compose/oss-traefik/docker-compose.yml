@@ -1,0 +1,59 @@
+# =============================================================================
+# IEDB OSS — single node, local storage, fronted by Traefik
+#
+# One IEDB container with Traefik v3.6 in front of it. Useful when you need
+# TLS termination, request logging, or an integration point for other
+# services on the same host — without the complexity of an Enterprise cluster.
+# =============================================================================
+
+services:
+  traefik:
+    image: traefik:v3.6
+    container_name: iedb-traefik
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=iedb-oss
+      - --entrypoints.web.address=:80
+      - --api.dashboard=true
+      - --api.insecure=true    # dashboard on :8080 — disable in production
+      - --log.level=INFO
+      - --accesslog=true
+    ports:
+      - "8000:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - iedb-oss
+    depends_on:
+      - iedb
+
+  iedb:
+    image: ghcr.io/mengdal/iedb:latest
+    container_name: iedb
+    hostname: iedb
+    environment:
+      IEDB_STORAGE_BACKEND: "local"
+      IEDB_WAL_ENABLED: "true"
+      IEDB_AUTH_BOOTSTRAP_TOKEN: "${IEDB_AUTH_BOOTSTRAP_TOKEN:-}"
+    volumes:
+      - iedb-data:/app/data
+    networks:
+      - iedb-oss
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "iedb-oss"
+      traefik.http.services.iedb.loadbalancer.server.port: "8000"
+      traefik.http.routers.iedb.rule: "PathPrefix(`/`)"
+      traefik.http.routers.iedb.entrypoints: "web"
+      traefik.http.routers.iedb.service: "iedb"
+    restart: unless-stopped
+
+volumes:
+  iedb-data:
+
+networks:
+  iedb-oss:
+    name: iedb-oss
+    driver: bridge

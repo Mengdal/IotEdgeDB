@@ -227,9 +227,9 @@ func (m *Migrator) MigrateFile(ctx context.Context, candidate MigrationCandidate
 		m.logger.Warn().Err(err).Msg("Failed to record migration start")
 	}
 
-	// Perform the migration
+	// Perform the migration using streaming to avoid loading entire files into memory
 	// Use normalized path for destination (S3 key)
-	migrationErr := m.copyFile(ctx, srcBackend, dstBackend, normalizedPath, candidate.SizeBytes)
+	migrationErr := m.copyFileStreaming(ctx, srcBackend, dstBackend, normalizedPath, candidate.SizeBytes)
 
 	if migrationErr != nil {
 		// Record failure

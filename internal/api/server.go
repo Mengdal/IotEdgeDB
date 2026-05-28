@@ -85,7 +85,7 @@ func NewServer(config *ServerConfig, logger zerolog.Logger) *Server {
 
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
-		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
+		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 		AllowHeaders: "Origin,Content-Type,Accept,Authorization,x-api-key,x-iedb-database,Content-Encoding",
 	}))
 
@@ -322,11 +322,12 @@ func (s *Server) endpointMetricsHandler(c *fiber.Ctx) error {
 			"latency_avg_ms": queryLatencyAvgMs,
 		},
 		"buffer": fiber.Map{
-			"records_buffered": snapshot["buffer_records_buffered"],
-			"records_written":  snapshot["buffer_records_written"],
-			"flushes_total":    snapshot["buffer_flushes_total"],
-			"errors_total":     snapshot["buffer_errors_total"],
-			"queue_depth":      snapshot["buffer_queue_depth"],
+			"records_buffered":     snapshot["buffer_records_buffered"],
+			"records_written":      snapshot["buffer_records_written"],
+			"flushes_total":        snapshot["buffer_flushes_total"],
+			"errors_total":         snapshot["buffer_errors_total"],
+			"flush_failures_total": snapshot["buffer_flush_failures_total"],
+			"queue_depth":          snapshot["buffer_queue_depth"],
 		},
 		"storage": fiber.Map{
 			"writes_total":      snapshot["storage_writes_total"],
@@ -538,8 +539,7 @@ func securityHeaders(tlsEnabled bool) fiber.Handler {
 		// Permissions policy - disable unnecessary browser features
 		c.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 
-		// Content Security Policy - restrict resource loading
-		// Note: API-only service, so restrictive CSP is appropriate
+		// Content Security Policy
 		c.Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' http: https: ws: wss:")
 
 		// HSTS - Only set when TLS is enabled (native TLS termination)

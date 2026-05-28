@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	arcRaft "iedb/internal/cluster/raft"
+	Raft "iedb/internal/cluster/raft"
 
 	"github.com/rs/zerolog"
 )
@@ -18,7 +18,7 @@ type WriterFailoverConfig struct {
 	Registry *Registry
 
 	// RaftNode for applying promote/demote commands via consensus
-	RaftNode *arcRaft.Node
+	RaftNode *Raft.Node
 
 	// HealthCheckInterval is how often to check writer health
 	HealthCheckInterval time.Duration

@@ -1,0 +1,32 @@
+# =============================================================================
+# IEDB OSS — single node, local filesystem storage
+#
+# Simplest possible IEDB deployment: one container, one volume, HTTP on :8000.
+# No clustering, no replication, no license key required.
+#
+# Good for: local development, evaluation, embedded deployments, small
+# workloads where a single host is sufficient.
+# =============================================================================
+
+services:
+  iedb:
+    image: ghcr.io/mengdal/iedb:latest
+    container_name: iedb
+    hostname: iedb
+    ports:
+      - "8000:8000"
+    environment:
+      # Local filesystem storage — IEDB defaults to ./data/iedb under /app,
+      # which resolves to /app/data/iedb inside the container.
+      IEDB_STORAGE_BACKEND: "local"
+      # Durable ingest — commit to WAL before ack
+      IEDB_WAL_ENABLED: "true"
+      # Pre-set the admin token (optional — comment out to let IEDB generate
+      # one and print it in the logs on first boot).
+      IEDB_AUTH_BOOTSTRAP_TOKEN: "${IEDB_AUTH_BOOTSTRAP_TOKEN:-}"
+    volumes:
+      - iedb-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  iedb-data:

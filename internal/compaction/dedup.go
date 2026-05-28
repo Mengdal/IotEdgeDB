@@ -126,12 +126,18 @@ func buildCompactionQuery(fileListSQL, orderByClause, outputFile string, tagColu
 	}
 	partitionBy := strings.Join(quotedTags, ", ")
 
+	// NOTE: CAST("time" AS TIMESTAMP WITH TIME ZONE) is required because DuckDB's
+	// union_by_name=true can create ambiguous column bindings when files have different
+	// column ordering. Without the cast, ROW_NUMBER() may bind "time" as both
+	// TIMESTAMP WITH TIME ZONE and VARCHAR, causing: "Failed to bind column reference:
+	// inequal types". The WITH TIME ZONE variant is used to preserve timezone-aware
+	// semantics, avoiding false dedup across different timezones.
 	return fmt.Sprintf(`
 		COPY (
 			SELECT * EXCLUDE (__dedup_rn) FROM (
 				SELECT *, ROW_NUMBER() OVER (
-					PARTITION BY %s, "time"
-					ORDER BY "time" DESC
+					PARTITION BY %s, CAST("time" AS TIMESTAMP WITH TIME ZONE)
+					ORDER BY CAST("time" AS TIMESTAMP WITH TIME ZONE) DESC
 				) AS __dedup_rn
 				FROM read_parquet(%s, union_by_name=true)
 			) WHERE __dedup_rn = 1

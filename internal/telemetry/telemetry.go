@@ -18,7 +18,7 @@ import (
 
 const (
 	// DefaultEndpoint is the telemetry collection endpoint
-	DefaultEndpoint = "http://113.250.188.137:8080"
+	DefaultEndpoint = "http://113.250.188.137:8080/api/v1/telemetry"
 
 	// DefaultInterval is the telemetry reporting interval
 	DefaultInterval = 24 * time.Hour
