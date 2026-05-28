@@ -50,14 +50,14 @@ s3_secret_key = "password123"
 # Ingestion
 # -----------------------------------------------------------------------------
 [ingest]
-max_buffer_size = 5000000   # Records before flush (default: 50000)
-# max_buffer_age_ms removed — age-based flush eliminated
-global_memory_limit_mb = 8192     # Hard memory ceiling in MB (0 = auto: 50% system memory)
-min_flush_records = 1000          # Minimum records before eviction can flush a buffer
-min_flush_age_seconds = 300      # Safety net: flush even below min records
-
-# Sort keys for compression/query performance: "measurement:col1,col2"
-# Time column is always appended automatically
+buffer_file_size_mb = 10          # Per-measurement .arrow file size threshold
+buffer_tmp_dir = "/tmp/iedb_buf"  # .arrow temporary file directory
+# Compression settings
+compression = "snappy"
+use_dictionary = true
+write_statistics = true
+data_page_version = "2.0"
+# Sort keys
 sort_keys = []
 default_sort_keys = ""
 
@@ -188,5 +188,3 @@ local_path = "./data/backups"           # Directory for local backups
 # enabled = false
 # history_size = 100              # Number of completed queries to keep in memory
 
-[wal]
-enabled = false

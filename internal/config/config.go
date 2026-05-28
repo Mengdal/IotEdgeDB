@@ -19,7 +19,6 @@ type Config struct {
 	Log             LogConfig
 	Auth            AuthConfig
 	Compaction      CompactionConfig
-	WAL             WALConfig
 	Telemetry       TelemetryConfig
 	Delete          DeleteConfig
 	Retention       RetentionConfig
@@ -81,21 +80,17 @@ type StorageConfig struct {
 }
 
 type IngestConfig struct {
-	MaxBufferSize          int      // Max records before flush
-	GlobalMemoryLimitMB    int      // Hard memory ceiling in MB (0 = auto: 50% system)
-	MinFlushRecords        int      // Minimum records before eviction can flush a buffer
-	MinFlushAgeSeconds     int      // Safety net seconds — flush even below min records
+	BufferFileSizeMB       int      // Per-measurement .arrow file size threshold in MB (default: 10)
+	BufferTmpDir           string   // Directory for .arrow temporary files (default: /tmp/iedb_buf)
 	Compression            string   // Parquet compression: snappy, gzip, zstd
 	UseDictionary          bool     // Use dictionary encoding
 	WriteStatistics        bool     // Write Parquet statistics
 	DataPageVersion        string   // Parquet data page version: 1.0 or 2.0
-	FlushWorkers           int      // Number of workers for async flush (default: 2x CPU, min 8, max 64)
-	FlushQueueSize         int      // Capacity of flush task queue (default: 4x workers, min 100)
 	ShardCount             int      // Number of buffer shards for lock distribution (default: 32)
 	SortKeys               []string // Per-measurement sort keys: "measurement:col1,col2,time"
 	DefaultSortKeys        string   // Default sort keys for measurements not in SortKeys
-	FlushTimeoutSeconds    int      // Timeout for storage writes during flush (default: 30s, 0 = no timeout)
-	DecimalColumns         []string // Per-measurement decimal columns: "measurement:col=precision,scale;col2=p,s"
+	FlushTimeoutSeconds    int      // Timeout for storage writes (default: 30s, 0 = no timeout)
+	DecimalColumns         []string // Per-measurement decimal columns
 	DefaultDecimalColumns  string   // Default decimal columns for unmapped measurements
 }
 
@@ -132,16 +127,6 @@ type CompactionConfig struct {
 	TempDirectory             string // Temporary directory for compaction files (default: ./data/compaction)
 }
 
-type WALConfig struct {
-	Enabled                 bool   // Enable WAL for durability (default: false)
-	Directory               string // WAL directory (default: ./data/wal)
-	SyncMode                string // Sync mode: fsync, fdatasync, async (default: fdatasync)
-	MaxSizeMB               int    // Rotate WAL when it reaches this size in MB (default: 100)
-	MaxAgeSeconds           int    // Rotate WAL after this many seconds (default: 3600)
-	RecoveryIntervalSeconds int    // Interval for periodic WAL recovery in seconds (default: 300 = 5 minutes)
-	RecoveryBatchSize       int    // Max records to replay per batch during recovery (default: 10000)
-	BufferSize              int    // Async write buffer size in entries (default: 10000)
-}
 
 type TelemetryConfig struct {
 	Enabled         bool   // Enable telemetry (default: true)
@@ -421,20 +406,16 @@ func Load() (*Config, error) {
 			AzureUseManagedIdentity: v.GetBool("storage.azure_use_managed_identity"),
 		},
 		Ingest: IngestConfig{
-			MaxBufferSize:          v.GetInt("ingest.max_buffer_size"),
-			GlobalMemoryLimitMB:    v.GetInt("ingest.global_memory_limit_mb"),
-			MinFlushRecords:        v.GetInt("ingest.min_flush_records"),
-			MinFlushAgeSeconds:     v.GetInt("ingest.min_flush_age_seconds"),
+			BufferFileSizeMB:       v.GetInt("ingest.buffer_file_size_mb"),
+			BufferTmpDir:           v.GetString("ingest.buffer_tmp_dir"),
 			Compression:            v.GetString("ingest.compression"),
 			UseDictionary:          v.GetBool("ingest.use_dictionary"),
 			WriteStatistics:        v.GetBool("ingest.write_statistics"),
 			DataPageVersion:        v.GetString("ingest.data_page_version"),
-			FlushWorkers:           v.GetInt("ingest.flush_workers"),
-			FlushQueueSize:         v.GetInt("ingest.flush_queue_size"),
-			FlushTimeoutSeconds:    v.GetInt("ingest.flush_timeout_seconds"),
 			ShardCount:             v.GetInt("ingest.shard_count"),
 			SortKeys:               v.GetStringSlice("ingest.sort_keys"),
 			DefaultSortKeys:        v.GetString("ingest.default_sort_keys"),
+			FlushTimeoutSeconds:    v.GetInt("ingest.flush_timeout_seconds"),
 			DecimalColumns:         v.GetStringSlice("ingest.decimal_columns"),
 			DefaultDecimalColumns:  v.GetString("ingest.default_decimal_columns"),
 		},
@@ -467,16 +448,7 @@ func Load() (*Config, error) {
 			MaxConcurrent:             v.GetInt("compaction.max_concurrent"),
 			TempDirectory:             v.GetString("compaction.temp_directory"),
 		},
-		WAL: WALConfig{
-			Enabled:                 v.GetBool("wal.enabled"),
-			Directory:               v.GetString("wal.directory"),
-			SyncMode:                v.GetString("wal.sync_mode"),
-			MaxSizeMB:               v.GetInt("wal.max_size_mb"),
-			MaxAgeSeconds:           v.GetInt("wal.max_age_seconds"),
-			RecoveryIntervalSeconds: v.GetInt("wal.recovery_interval_seconds"),
-			RecoveryBatchSize:       v.GetInt("wal.recovery_batch_size"),
-			BufferSize:              v.GetInt("wal.buffer_size"),
-		},
+
 		Telemetry: TelemetryConfig{
 			Enabled:         v.GetBool("telemetry.enabled"),
 			Endpoint:        v.GetString("telemetry.endpoint"),
@@ -646,16 +618,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cache.default_ttl", 300)
 
 	// Ingest defaults
-	v.SetDefault("ingest.max_buffer_size", 50000)
-	v.SetDefault("ingest.global_memory_limit_mb", 0) // 0 = auto
-	v.SetDefault("ingest.min_flush_records", 1000)
-	v.SetDefault("ingest.min_flush_age_seconds", 300)
+	v.SetDefault("ingest.buffer_file_size_mb", 10)
+	v.SetDefault("ingest.buffer_tmp_dir", "/tmp/iedb_buf")
 	v.SetDefault("ingest.compression", "snappy")
 	v.SetDefault("ingest.use_dictionary", true)
 	v.SetDefault("ingest.write_statistics", true)
 	v.SetDefault("ingest.data_page_version", "2.0")
-	v.SetDefault("ingest.flush_workers", getDefaultFlushWorkers())
-	v.SetDefault("ingest.flush_queue_size", getDefaultFlushQueueSize())
 	v.SetDefault("ingest.shard_count", 32)
 	v.SetDefault("ingest.sort_keys", []string{})     // No custom sort keys by default
 	v.SetDefault("ingest.default_sort_keys", "time") // Default to time-only sorting
@@ -687,15 +655,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("compaction.max_concurrent", 2)                   // 2 concurrent jobs
 	v.SetDefault("compaction.temp_directory", "./data/compaction") // Temp directory for compaction files
 
-	// WAL defaults
-	v.SetDefault("wal.enabled", false)                 // Disabled by default for backwards compatibility
-	v.SetDefault("wal.directory", "./data/wal")        // WAL directory
-	v.SetDefault("wal.sync_mode", "fdatasync")         // Balanced mode: fdatasync, fsync, or async
-	v.SetDefault("wal.max_size_mb", 100)               // Rotate WAL at 100MB
-	v.SetDefault("wal.max_age_seconds", 3600)          // Rotate WAL after 1 hour
-	v.SetDefault("wal.recovery_interval_seconds", 300) // Periodic recovery every 5 minutes
-	v.SetDefault("wal.recovery_batch_size", 10000)     // Max records per recovery batch (rate limiting)
-	v.SetDefault("wal.buffer_size", 10000)             // Async write buffer size in entries
 
 	// Telemetry defaults
 	v.SetDefault("telemetry.enabled", true)                                                // Enabled by default (opt-out)
@@ -895,30 +854,7 @@ func getDefaultMemoryLimit() string {
 	return fmt.Sprintf("%dGB", targetMemGB)
 }
 
-func getDefaultFlushWorkers() int {
-	// Scale flush workers with CPU cores, similar to InfluxDB's approach
-	// More workers allow higher concurrent I/O to storage
-	cores := runtime.NumCPU()
-	workers := cores * 2
-	if workers < 8 {
-		return 8 // Minimum for reasonable concurrency
-	}
-	if workers > 64 {
-		return 64 // Cap to avoid excessive resource usage
-	}
-	return workers
-}
 
-func getDefaultFlushQueueSize() int {
-	// Queue should absorb bursts without dropping tasks
-	// 4x workers provides good burst capacity
-	workers := getDefaultFlushWorkers()
-	queueSize := workers * 4
-	if queueSize < 100 {
-		return 100
-	}
-	return queueSize
-}
 
 // ValidateTLS validates TLS configuration when TLS is enabled.
 // Returns nil if TLS is disabled or if configuration is valid.
