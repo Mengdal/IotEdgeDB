@@ -1,8 +1,11 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -11,6 +14,8 @@ import (
 	"iedb/internal/tiering"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/rs/zerolog"
 )
 
@@ -176,4 +181,64 @@ func (b *ArrowFileBuffer) convertWorker() {
 	defer b.wg.Done()
 	b.logger.Info().Msg("Convert worker stub started")
 	<-b.ctx.Done()
+}
+
+// encodeToArrowIPC encodes a TypedColumnBatch as Arrow IPC stream format bytes.
+// Each call produces one record batch in the stream. The stream has no footer
+// so O(1) append — each batch is self-describing with its own schema.
+// New columns not in the current union schema cause the schema to be extended.
+func encodeToArrowIPC(batch *TypedColumnBatch, unionSchema **arrow.Schema) ([]byte, error) {
+	// Build column arrays and fields from typed batch data
+	colNames := make([]string, 0, len(batch.Data))
+	for name := range batch.Data {
+		colNames = append(colNames, name)
+	}
+	sort.Strings(colNames)
+
+	var fields []arrow.Field
+	var arrays []arrow.Array
+
+	for _, colName := range colNames {
+		colData := batch.Data[colName]
+		validity := batch.Validity[colName]
+
+		field, arr, err := buildSingleArrowArrayStandalone(colName, colData, validity)
+		if err != nil {
+			return nil, fmt.Errorf("column %s: %w", colName, err)
+		}
+		fields = append(fields, field)
+		arrays = append(arrays, arr)
+	}
+
+	// Determine num rows from the first array
+	numRows := 0
+	if len(arrays) > 0 {
+		numRows = arrays[0].Len()
+	}
+
+	schema := arrow.NewSchema(fields, nil)
+	rec := array.NewRecord(schema, arrays, int64(numRows))
+	defer rec.Release()
+
+	// Release arrays after record takes ownership
+	for _, arr := range arrays {
+		arr.Release()
+	}
+
+	// Encode as Arrow IPC stream
+	var buf bytes.Buffer
+	writer := ipc.NewWriter(&buf, ipc.WithSchema(schema))
+	if err := writer.Write(rec); err != nil {
+		return nil, fmt.Errorf("ipc write: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("ipc close: %w", err)
+	}
+
+	// Extend union schema with any new columns
+	if unionSchema != nil && *unionSchema == nil {
+		*unionSchema = schema
+	}
+
+	return buf.Bytes(), nil
 }

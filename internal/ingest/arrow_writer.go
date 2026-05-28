@@ -3075,6 +3075,12 @@ func (b *ArrowBuffer) BatchesToArrow(batches []*TypedColumnBatch) ([]arrow.Array
 // always converted to Arrow Timestamp type. The validity bitmap tracks null values
 // (nil = all valid, []bool with false entries = null).
 func (b *ArrowBuffer) buildSingleArrowArray(colName string, colData interface{}, validity []bool) (arrow.Field, arrow.Array, error) {
+	return buildSingleArrowArrayStandalone(colName, colData, validity)
+}
+
+// buildSingleArrowArrayStandalone constructs an Arrow array and field from a single typed column.
+// This is the standalone version callable from other files without an ArrowBuffer receiver.
+func buildSingleArrowArrayStandalone(colName string, colData interface{}, validity []bool) (arrow.Field, arrow.Array, error) {
 	mem := sharedArrowAllocator
 
 	// Handle time column specially — stored as []int64, but Arrow type is Timestamp
