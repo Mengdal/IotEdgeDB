@@ -943,3 +943,105 @@ func (b *ArrowFileBuffer) registerFileInTiering(ctx context.Context, database, m
 			Msg("Failed to register file in tiering metadata")
 	}
 }
+
+// readArrowFileToBatches reads an Arrow IPC stream file and returns typed batches.
+func readArrowFileToBatches(path string) ([]*TypedColumnBatch, int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	reader, err := ipc.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, err
+	}
+	defer reader.Release()
+
+	var batches []*TypedColumnBatch
+	var totalRecords int
+	for reader.Next() {
+		rec := reader.Record()
+		tcb, err := recordToTypedColumnBatch(rec)
+		if err != nil {
+			return nil, 0, err
+		}
+		batches = append(batches, tcb)
+		totalRecords += int(rec.NumRows())
+	}
+
+	if err := reader.Err(); err != nil {
+		return nil, 0, fmt.Errorf("corrupt .arrow file: %w", err)
+	}
+
+	return batches, totalRecords, nil
+}
+
+// GetEntry reads the .arrow file for a measurement and returns typed column batches.
+// Used by query injection to create TEMP VIEWs for in-flight data.
+func (b *ArrowFileBuffer) GetEntry(measurement string) ([]*TypedColumnBatch, int, bool) {
+	for _, shard := range b.shards {
+		shard.mu.RLock()
+		for key, entry := range shard.entries {
+			if strings.HasSuffix(key, "/"+measurement) || key == measurement {
+				path := entry.path
+				shard.mu.RUnlock()
+
+				batches, count, err := readArrowFileToBatches(path)
+				if err != nil {
+					b.logger.Warn().Err(err).Str("path", path).Msg("Failed to read .arrow for query injection")
+					return nil, 0, false
+				}
+				return batches, count, true
+			}
+		}
+		shard.mu.RUnlock()
+	}
+	return nil, 0, false
+}
+
+// BatchesToArrow merges typed batches and builds Arrow arrays for DuckDB TEMP VIEW.
+func (b *ArrowFileBuffer) BatchesToArrow(batches []*TypedColumnBatch) ([]arrow.Array, *arrow.Schema, error) {
+	if len(batches) == 0 {
+		return nil, nil, fmt.Errorf("empty batches")
+	}
+
+	// Convert to []interface{} for mergeTypedColumnBatches
+	iface := make([]interface{}, len(batches))
+	for i, batch := range batches {
+		iface[i] = batch
+	}
+
+	merged, err := mergeTypedColumnBatches(iface)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Extract column names and types from merged data
+	var fields []arrow.Field
+	var arrays []arrow.Array
+	colNames := make([]string, 0, len(merged.Data))
+
+	for colName := range merged.Data {
+		colNames = append(colNames, colName)
+	}
+	sort.Strings(colNames)
+
+	for _, colName := range colNames {
+		colData := merged.Data[colName]
+		validity := merged.Validity[colName]
+
+		field, arr, err := buildSingleArrowArrayStandalone(colName, colData, validity)
+		if err != nil {
+			// Release already-built arrays on error
+			for _, a := range arrays {
+				a.Release()
+			}
+			return nil, nil, fmt.Errorf("failed to build arrow array for column %s: %w", colName, err)
+		}
+		fields = append(fields, field)
+		arrays = append(arrays, arr)
+	}
+
+	schema := arrow.NewSchema(fields, nil)
+	return arrays, schema, nil
+}
