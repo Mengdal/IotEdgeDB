@@ -5,9 +5,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"iedb/internal/config"
 	"iedb/internal/storage"
@@ -241,4 +244,346 @@ func encodeToArrowIPC(batch *TypedColumnBatch, unionSchema **arrow.Schema) ([]by
 	}
 
 	return buf.Bytes(), nil
+}
+
+// getDecimalColumns returns the decimal column config for a measurement.
+// Falls back to default config if no measurement-specific config exists.
+func (b *ArrowFileBuffer) getDecimalColumns(measurement string) map[string]config.DecimalSpec {
+	if b.decimalConfig != nil {
+		if cfg, ok := b.decimalConfig[measurement]; ok {
+			return cfg
+		}
+	}
+	return b.defaultDecimalConfig
+}
+
+// tryInt64ZeroCopy attempts zero-copy conversion for int64 arrays.
+func (b *ArrowFileBuffer) tryInt64ZeroCopy(col []interface{}) ([]int64, bool) {
+	arr := make([]int64, len(col))
+	for i, v := range col {
+		if v == nil {
+			return nil, false
+		}
+		val, ok := v.(int64)
+		if !ok {
+			return nil, false
+		}
+		arr[i] = val
+	}
+	return arr, true
+}
+
+// tryFloat64ZeroCopy attempts zero-copy conversion for float64 arrays.
+func (b *ArrowFileBuffer) tryFloat64ZeroCopy(col []interface{}) ([]float64, bool) {
+	arr := make([]float64, len(col))
+	for i, v := range col {
+		if v == nil {
+			return nil, false
+		}
+		val, ok := v.(float64)
+		if !ok {
+			return nil, false
+		}
+		arr[i] = val
+	}
+	return arr, true
+}
+
+// tryStringZeroCopy attempts zero-copy conversion for string arrays.
+func (b *ArrowFileBuffer) tryStringZeroCopy(col []interface{}) ([]string, bool) {
+	arr := make([]string, len(col))
+	for i, v := range col {
+		if v == nil {
+			return nil, false
+		}
+		val, ok := v.(string)
+		if !ok {
+			return nil, false
+		}
+		arr[i] = val
+	}
+	return arr, true
+}
+
+// tryBoolZeroCopy attempts zero-copy conversion for bool arrays.
+func (b *ArrowFileBuffer) tryBoolZeroCopy(col []interface{}) ([]bool, bool) {
+	arr := make([]bool, len(col))
+	for i, v := range col {
+		if v == nil {
+			return nil, false
+		}
+		val, ok := v.(bool)
+		if !ok {
+			return nil, false
+		}
+		arr[i] = val
+	}
+	return arr, true
+}
+
+// convertColumnsToTyped converts []interface{} columns to typed arrays with null tracking.
+// Returns a TypedColumnBatch where Validity maps track which values are null (false=null).
+// Columns with no nil values have no entry in Validity (all valid).
+// ZERO-COPY OPTIMIZATION: Try bulk type assertion first before element-by-element conversion.
+func (b *ArrowFileBuffer) convertColumnsToTyped(measurement string, columns map[string][]interface{}) (*TypedColumnBatch, int, error) {
+	typed := make(map[string]interface{})
+	validity := make(map[string][]bool)
+	var numRecords int
+
+	// Look up decimal column config for this measurement (nil if none configured)
+	decimalCols := b.getDecimalColumns(measurement)
+
+	for name, col := range columns {
+		if len(col) == 0 {
+			continue
+		}
+
+		// Set record count from first column
+		if numRecords == 0 {
+			numRecords = len(col)
+		}
+
+		// Check if this column is declared as decimal — override normal type inference
+		if decimalCols != nil {
+			if spec, isDecimal := decimalCols[name]; isDecimal {
+				arr, valid, err := convertToDecimal128Slice(col, spec.Precision, spec.Scale)
+				if err != nil {
+					return nil, 0, fmt.Errorf("decimal conversion error in column '%s': %w", name, err)
+				}
+				typed[name] = arr
+				if valid != nil {
+					validity[name] = valid
+				}
+				continue
+			}
+		}
+
+		// Infer type from first non-nil value
+		firstVal := firstNonNil(col)
+		if firstVal == nil {
+			continue // Skip all-nil columns
+		}
+
+		// FAST PATH: Try zero-copy bulk conversion first (fails fast on nils or mixed types).
+		// If zero-copy succeeds, no nils exist and no validity bitmap is needed.
+		switch firstVal.(type) {
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			if arr, ok := b.tryInt64ZeroCopy(col); ok {
+				typed[name] = arr
+				continue
+			}
+			// Zero-copy failed (has nils or mixed types) — single-pass conversion with validity
+			arr := make([]int64, len(col))
+			valid := make([]bool, len(col))
+			hasNils := false
+			for i, v := range col {
+				if v == nil {
+					hasNils = true
+					continue
+				}
+				valid[i] = true
+				val, ok := toInt64(v)
+				if !ok {
+					return nil, 0, fmt.Errorf("cannot convert %T to int64 in column '%s'", v, name)
+				}
+				arr[i] = val
+			}
+			typed[name] = arr
+			if hasNils {
+				validity[name] = valid
+			}
+
+		case float32, float64:
+			if arr, ok := b.tryFloat64ZeroCopy(col); ok {
+				typed[name] = arr
+				continue
+			}
+			arr := make([]float64, len(col))
+			valid := make([]bool, len(col))
+			hasNils := false
+			for i, v := range col {
+				if v == nil {
+					hasNils = true
+					continue
+				}
+				valid[i] = true
+				val, ok := toFloat64(v)
+				if !ok {
+					return nil, 0, fmt.Errorf("cannot convert %T to float64 in column '%s'", v, name)
+				}
+				arr[i] = val
+			}
+			typed[name] = arr
+			if hasNils {
+				validity[name] = valid
+			}
+
+		case string:
+			if arr, ok := b.tryStringZeroCopy(col); ok {
+				typed[name] = arr
+				continue
+			}
+			arr := make([]string, len(col))
+			valid := make([]bool, len(col))
+			hasNils := false
+			for i, v := range col {
+				if v == nil {
+					hasNils = true
+					continue
+				}
+				valid[i] = true
+				str, ok := v.(string)
+				if !ok {
+					return nil, 0, fmt.Errorf("unexpected type in string column '%s': %T", name, v)
+				}
+				arr[i] = str
+			}
+			typed[name] = arr
+			if hasNils {
+				validity[name] = valid
+			}
+
+		case bool:
+			if arr, ok := b.tryBoolZeroCopy(col); ok {
+				typed[name] = arr
+				continue
+			}
+			arr := make([]bool, len(col))
+			valid := make([]bool, len(col))
+			hasNils := false
+			for i, v := range col {
+				if v == nil {
+					hasNils = true
+					continue
+				}
+				valid[i] = true
+				bval, ok := v.(bool)
+				if !ok {
+					return nil, 0, fmt.Errorf("unexpected type in bool column '%s': %T", name, v)
+				}
+				arr[i] = bval
+			}
+			typed[name] = arr
+			if hasNils {
+				validity[name] = valid
+			}
+
+		default:
+			return nil, 0, fmt.Errorf("unsupported column type for '%s': %T", name, firstVal)
+		}
+	}
+
+	batch := &TypedColumnBatch{Data: typed, Validity: validity}
+	return batch, numRecords, nil
+}
+
+// sanitizePathSegment replaces characters unsafe for filenames.
+func sanitizePathSegment(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r == ':' || r == '*' || r == '?' || r == '"' || r == '<' || r == '>' || r == '|' {
+			return '_'
+		}
+		return r
+	}, s)
+}
+
+// writeBatch encodes a TypedColumnBatch as Arrow IPC stream bytes, appends to the
+// measurement's .arrow file, and checks if the file exceeds the size threshold.
+// If the file is over maxFileSize, it closes the file and submits a convert task.
+func (b *ArrowFileBuffer) writeBatch(ctx context.Context, database, measurement string, typedColumns *TypedColumnBatch, numRecords int) error {
+	bufferKey := database + "/" + measurement
+
+	shard := b.getShard(bufferKey)
+	shard.mu.Lock()
+
+	entry, exists := shard.entries[bufferKey]
+	if !exists {
+		path := filepath.Join(b.tmpDir, fmt.Sprintf("%s_%s_%d.arrow",
+			sanitizePathSegment(database), sanitizePathSegment(measurement), time.Now().UnixNano()))
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			shard.mu.Unlock()
+			return fmt.Errorf("open arrow file: %w", err)
+		}
+		entry = &fileEntry{
+			file:        f,
+			path:        path,
+			size:        0,
+			schema:      nil,
+			database:    database,
+			measurement: measurement,
+		}
+		shard.entries[bufferKey] = entry
+	}
+
+	// Encode to Arrow IPC stream bytes
+	batchBytes, err := encodeToArrowIPC(typedColumns, &entry.schema)
+	if err != nil {
+		shard.mu.Unlock()
+		return fmt.Errorf("encode: %w", err)
+	}
+
+	// Write to file
+	n, err := entry.file.Write(batchBytes)
+	if err != nil {
+		shard.mu.Unlock()
+		return fmt.Errorf("file write: %w", err)
+	}
+	entry.size += int64(n)
+
+	var shouldFlush bool
+	var flushPath string
+	var flushDB, flushMeas string
+
+	if entry.size >= b.maxFileSize {
+		flushPath = entry.path
+		flushDB = entry.database
+		flushMeas = entry.measurement
+		shouldFlush = true
+		delete(shard.entries, bufferKey)
+		entry.file.Close()
+	}
+
+	shard.mu.Unlock()
+
+	b.totalRecordsBuffered.Add(int64(numRecords))
+
+	if shouldFlush {
+		b.submitConvert(flushDB, flushMeas, flushPath)
+	}
+
+	return nil
+}
+
+// WriteTypedColumnarDirect writes a pre-typed column batch to the file buffer.
+func (b *ArrowFileBuffer) WriteTypedColumnarDirect(ctx context.Context, database, measurement string, batch *TypedColumnBatch, numRecords int) error {
+	return b.writeBatch(ctx, database, measurement, batch, numRecords)
+}
+
+// WriteColumnarDirect writes columnar data through the file buffer.
+func (b *ArrowFileBuffer) WriteColumnarDirect(ctx context.Context, database, measurement string, columns map[string][]interface{}) error {
+	typedColumns, numRecords, err := b.convertColumnsToTyped(measurement, columns)
+	if err != nil {
+		return fmt.Errorf("convert columns: %w", err)
+	}
+	return b.writeBatch(ctx, database, measurement, typedColumns, numRecords)
+}
+
+// submitConvert sends a convert task to the background worker.
+// Non-blocking — if the queue is full, logs warning.
+func (b *ArrowFileBuffer) submitConvert(database, measurement, path string) {
+	task := convertTask{
+		database:    database,
+		measurement: measurement,
+		path:        path,
+	}
+	select {
+	case b.convertQueue <- task:
+	default:
+		b.logger.Warn().
+			Str("database", database).
+			Str("measurement", measurement).
+			Str("path", path).
+			Msg("Convert queue full, dropping task")
+	}
 }
