@@ -53,52 +53,6 @@ func TestGetDefaultMemoryLimit(t *testing.T) {
 	}
 }
 
-func TestGetDefaultFlushWorkers(t *testing.T) {
-	cores := runtime.NumCPU()
-	expected := cores * 2
-	if expected < 8 {
-		expected = 8
-	}
-	if expected > 64 {
-		expected = 64
-	}
-
-	actual := getDefaultFlushWorkers()
-	if actual != expected {
-		t.Errorf("getDefaultFlushWorkers() = %d, want %d", actual, expected)
-	}
-}
-
-func TestGetDefaultFlushWorkers_Bounds(t *testing.T) {
-	actual := getDefaultFlushWorkers()
-	if actual < 8 {
-		t.Errorf("getDefaultFlushWorkers() = %d, should be at least 8", actual)
-	}
-	if actual > 64 {
-		t.Errorf("getDefaultFlushWorkers() = %d, should be at most 64", actual)
-	}
-}
-
-func TestGetDefaultFlushQueueSize(t *testing.T) {
-	workers := getDefaultFlushWorkers()
-	expected := workers * 4
-	if expected < 100 {
-		expected = 100
-	}
-
-	actual := getDefaultFlushQueueSize()
-	if actual != expected {
-		t.Errorf("getDefaultFlushQueueSize() = %d, want %d", actual, expected)
-	}
-}
-
-func TestGetDefaultFlushQueueSize_Bounds(t *testing.T) {
-	actual := getDefaultFlushQueueSize()
-	if actual < 100 {
-		t.Errorf("getDefaultFlushQueueSize() = %d, should be at least 100", actual)
-	}
-}
-
 func TestLoad_DefaultsFromSystem(t *testing.T) {
 	// Create a temp dir without config file to test defaults
 	tmpDir, err := os.MkdirTemp("", "iedb-config-test")
@@ -134,14 +88,12 @@ func TestLoad_DefaultsFromSystem(t *testing.T) {
 	}
 
 	// Verify ingest defaults are applied
-	expectedFlushWorkers := getDefaultFlushWorkers()
-	if cfg.Ingest.FlushWorkers != expectedFlushWorkers {
-		t.Errorf("Ingest.FlushWorkers = %d, want %d", cfg.Ingest.FlushWorkers, expectedFlushWorkers)
+	if cfg.Ingest.BufferFileSizeMB != 10 {
+		t.Errorf("Ingest.BufferFileSizeMB = %d, want 10", cfg.Ingest.BufferFileSizeMB)
 	}
 
-	expectedFlushQueueSize := getDefaultFlushQueueSize()
-	if cfg.Ingest.FlushQueueSize != expectedFlushQueueSize {
-		t.Errorf("Ingest.FlushQueueSize = %d, want %d", cfg.Ingest.FlushQueueSize, expectedFlushQueueSize)
+	if cfg.Ingest.BufferTmpDir != "/tmp/iedb_buf" {
+		t.Errorf("Ingest.BufferTmpDir = %s, want /tmp/iedb_buf", cfg.Ingest.BufferTmpDir)
 	}
 
 	if cfg.Ingest.ShardCount != 32 {
@@ -723,61 +675,5 @@ func TestQueryConfig_EnvOverride(t *testing.T) {
 	}
 	if cfg.Query.S3CacheTTLSeconds != 7200 {
 		t.Errorf("Query.S3CacheTTLSeconds = %d, want 7200", cfg.Query.S3CacheTTLSeconds)
-	}
-}
-
-func TestWALConfig_Defaults(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "iedb-config-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	oldWd, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	defer os.Chdir(oldWd)
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-
-	// Test WAL defaults
-	if cfg.WAL.RecoveryIntervalSeconds != 300 {
-		t.Errorf("WAL.RecoveryIntervalSeconds default = %d, want 300", cfg.WAL.RecoveryIntervalSeconds)
-	}
-	if cfg.WAL.RecoveryBatchSize != 10000 {
-		t.Errorf("WAL.RecoveryBatchSize default = %d, want 10000", cfg.WAL.RecoveryBatchSize)
-	}
-}
-
-func TestWALConfig_EnvOverride(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "iedb-config-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	oldWd, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	defer os.Chdir(oldWd)
-
-	os.Setenv("IEDB_WAL_RECOVERY_INTERVAL_SECONDS", "600")
-	os.Setenv("IEDB_WAL_RECOVERY_BATCH_SIZE", "5000")
-	defer func() {
-		os.Unsetenv("IEDB_WAL_RECOVERY_INTERVAL_SECONDS")
-		os.Unsetenv("IEDB_WAL_RECOVERY_BATCH_SIZE")
-	}()
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-
-	if cfg.WAL.RecoveryIntervalSeconds != 600 {
-		t.Errorf("WAL.RecoveryIntervalSeconds = %d, want 600", cfg.WAL.RecoveryIntervalSeconds)
-	}
-	if cfg.WAL.RecoveryBatchSize != 5000 {
-		t.Errorf("WAL.RecoveryBatchSize = %d, want 5000", cfg.WAL.RecoveryBatchSize)
 	}
 }
