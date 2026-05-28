@@ -892,15 +892,9 @@ func (b *ArrowBuffer) getDecimalColumns(measurement string) map[string]config.De
 func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger zerolog.Logger) *ArrowBuffer {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	flushWorkers := cfg.FlushWorkers
-	if flushWorkers <= 0 {
-		flushWorkers = 16
-	}
+	flushWorkers := 16
 
-	queueSize := cfg.FlushQueueSize
-	if queueSize <= 0 {
-		queueSize = 100
-	}
+	queueSize := 100
 
 	shardCount := cfg.ShardCount
 	if shardCount <= 0 {
@@ -926,7 +920,7 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		flushTimeout = 30 * time.Second
 	}
 
-	maxMemoryBytes := int64(cfg.GlobalMemoryLimitMB) * 1024 * 1024
+	maxMemoryBytes := int64(0)
 	if maxMemoryBytes <= 0 {
 		// Default: 50% of system memory
 		var m runtime.MemStats
@@ -934,15 +928,9 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		maxMemoryBytes = int64(m.Sys) / 2
 	}
 
-	minFlushRecords := cfg.MinFlushRecords
-	if minFlushRecords <= 0 {
-		minFlushRecords = 1000
-	}
+	minFlushRecords := 1000
 
-	minFlushAgeSeconds := cfg.MinFlushAgeSeconds
-	if minFlushAgeSeconds <= 0 {
-		minFlushAgeSeconds = 300
-	}
+	minFlushAgeSeconds := 300
 
 	buffer := &ArrowBuffer{
 		config:               cfg,
@@ -955,7 +943,7 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		flushQueue:           make(chan flushTask, queueSize),
 		flushWorkers:         flushWorkers,
 		flushTimeout:         flushTimeout,
-		maxBufferSize:        cfg.MaxBufferSize,
+		maxBufferSize:        0,
 		maxMemoryBytes:       maxMemoryBytes,
 		minFlushRecords:      minFlushRecords,
 		minFlushAgeSeconds:   minFlushAgeSeconds,
@@ -984,7 +972,7 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 	go buffer.minAgeFlushLoop()
 
 	buffer.logger.Info().
-		Int("max_buffer_size", cfg.MaxBufferSize).
+		Int("max_buffer_size", 0).
 		Str("compression", cfg.Compression).
 		Int("shards", shardCount).
 		Int("flush_workers", flushWorkers).
@@ -2174,9 +2162,15 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 }
 
 // mergeBatches merges multiple column batches into a single TypedColumnBatch.
+// Delegates to the standalone mergeTypedColumnBatches function.
+func (b *ArrowBuffer) mergeBatches(batches []interface{}) (*TypedColumnBatch, error) {
+	return mergeTypedColumnBatches(batches)
+}
+
+// mergeTypedColumnBatches merges multiple column batches into a single TypedColumnBatch.
 // OPTIMIZATION: Pre-allocate merged arrays to avoid O(n²) append reallocations
 // Handles sparse columns (schema evolution) by marking missing positions as null via validity bitmaps.
-func (b *ArrowBuffer) mergeBatches(batches []interface{}) (*TypedColumnBatch, error) {
+func mergeTypedColumnBatches(batches []interface{}) (*TypedColumnBatch, error) {
 	if len(batches) == 0 {
 		return nil, fmt.Errorf("no batches to merge")
 	}

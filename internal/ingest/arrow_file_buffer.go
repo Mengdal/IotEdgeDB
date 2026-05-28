@@ -178,12 +178,124 @@ func (b *ArrowFileBuffer) startupRecovery() {
 	// TODO: Implement in Task 7
 }
 
-// convertWorker is the background goroutine for Arrow -> Parquet conversion.
-// Stub — full implementation in Task 5.
+// convertWorker is the single background goroutine that reads .arrow files,
+// converts them to Parquet, writes to storage, and deletes the .arrow file.
 func (b *ArrowFileBuffer) convertWorker() {
 	defer b.wg.Done()
-	b.logger.Info().Msg("Convert worker stub started")
-	<-b.ctx.Done()
+	b.logger.Info().Msg("Convert worker started")
+
+	for {
+		select {
+		case <-b.ctx.Done():
+			// Drain remaining tasks before exiting
+			for {
+				select {
+				case task := <-b.convertQueue:
+					b.doConvert(task)
+				default:
+					b.logger.Info().Msg("Convert worker stopped")
+					return
+				}
+			}
+		case task := <-b.convertQueue:
+			b.doConvert(task)
+		}
+	}
+}
+
+// doConvert reads an .arrow file, merges batches, sorts, writes Parquet,
+// and deletes the .arrow file.
+func (b *ArrowFileBuffer) doConvert(task convertTask) {
+	startTime := time.Now()
+
+	// Read entire .arrow file
+	data, err := os.ReadFile(task.path)
+	if err != nil {
+		b.logger.Error().Err(err).Str("path", task.path).Msg("Failed to read .arrow file for conversion")
+		b.totalErrors.Add(1)
+		return
+	}
+
+	// Parse Arrow IPC stream
+	reader, err := ipc.NewReader(bytes.NewReader(data))
+	if err != nil {
+		b.logger.Error().Err(err).Str("path", task.path).Msg("Failed to parse Arrow IPC stream")
+		b.totalErrors.Add(1)
+		return
+	}
+	defer reader.Release()
+
+	// Read all record batches
+	var batches []interface{}
+	totalRecords := 0
+	for reader.Next() {
+		rec := reader.Record()
+		tcb, err := recordToTypedColumnBatch(rec)
+		if err != nil {
+			b.logger.Error().Err(err).Str("path", task.path).Msg("Failed to convert record to typed batch")
+			b.totalErrors.Add(1)
+			return
+		}
+		batches = append(batches, tcb)
+		totalRecords += int(rec.NumRows())
+	}
+
+	if len(batches) == 0 {
+		b.logger.Warn().Str("path", task.path).Msg("Empty .arrow file, deleting")
+		os.Remove(task.path)
+		return
+	}
+
+	// Merge batches
+	merged, err := mergeTypedColumnBatches(batches)
+	if err != nil {
+		b.logger.Error().Err(err).Str("path", task.path).Msg("Failed to merge batches")
+		b.totalErrors.Add(1)
+		return
+	}
+
+	// Sort by configured sort keys
+	sortKeys := b.getSortKeys(task.measurement)
+	sorted := sortTypedColumnBatchByKeys(merged, sortKeys)
+
+	// Write Parquet
+	decimalCols := b.getDecimalColumns(task.measurement)
+	parquetBytes, err := b.writer.WriteParquetColumnar(context.Background(), task.measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols)
+	if err != nil {
+		b.logger.Error().Err(err).Str("path", task.path).Msg("Failed to write Parquet")
+		b.totalErrors.Add(1)
+		return
+	}
+
+	// Determine storage path
+	storagePath := b.generateStoragePath(task.database, task.measurement, startTime)
+
+	// Write to storage
+	if err := b.storage.Write(context.Background(), storagePath, parquetBytes); err != nil {
+		b.logger.Error().Err(err).Str("path", task.path).Str("storage_path", storagePath).Msg("Failed to write to storage")
+		b.totalErrors.Add(1)
+		return
+	}
+
+	// Register in tiering
+	b.registerFileInTiering(context.Background(), task.database, task.measurement, storagePath, startTime, int64(len(parquetBytes)))
+
+	// Delete .arrow file
+	if err := os.Remove(task.path); err != nil {
+		b.logger.Warn().Err(err).Str("path", task.path).Msg("Failed to delete .arrow file after conversion")
+	}
+
+	b.totalRecordsWritten.Add(int64(totalRecords))
+	b.totalFlushes.Add(1)
+
+	b.logger.Info().
+		Str("database", task.database).
+		Str("measurement", task.measurement).
+		Str("storage_path", storagePath).
+		Int("records", totalRecords).
+		Int("size_bytes", len(parquetBytes)).
+		Dur("duration", time.Since(startTime)).
+		Msg("Convert worker: Arrow->Parquet complete")
 }
 
 // encodeToArrowIPC encodes a TypedColumnBatch as Arrow IPC stream format bytes.
@@ -604,5 +716,117 @@ func (b *ArrowFileBuffer) submitConvert(database, measurement, path string) {
 			Str("measurement", measurement).
 			Str("path", path).
 			Msg("Convert queue full, dropping task")
+	}
+}
+
+// recordToTypedColumnBatch converts an Arrow Record to a TypedColumnBatch.
+// Extracts typed Go slices from Arrow arrays for use with mergeBatches and sort.
+func recordToTypedColumnBatch(rec arrow.Record) (*TypedColumnBatch, error) {
+	schema := rec.Schema()
+	data := make(map[string]interface{}, len(schema.Fields()))
+	validity := make(map[string][]bool)
+
+	for i, field := range schema.Fields() {
+		col := rec.Column(i)
+		arr := col // keep reference for null bitmap extraction outside type switch
+
+		switch a := col.(type) {
+		case *array.Int64:
+			values := make([]int64, a.Len())
+			copy(values, a.Int64Values())
+			data[field.Name] = values
+		case *array.Float64:
+			values := make([]float64, a.Len())
+			copy(values, a.Float64Values())
+			data[field.Name] = values
+		case *array.String:
+			values := make([]string, a.Len())
+			for j := 0; j < a.Len(); j++ {
+				values[j] = a.Value(j)
+			}
+			data[field.Name] = values
+		case *array.Boolean:
+			values := make([]bool, a.Len())
+			for j := 0; j < a.Len(); j++ {
+				values[j] = a.Value(j)
+			}
+			data[field.Name] = values
+		case *array.Timestamp:
+			values := make([]int64, a.Len())
+			for j := 0; j < a.Len(); j++ {
+				values[j] = int64(a.Value(j))
+			}
+			data[field.Name] = values
+		default:
+			return nil, fmt.Errorf("unsupported Arrow array type %T for column %s", col, field.Name)
+		}
+
+		// Extract null bitmap
+		if arr.NullN() > 0 {
+			v := make([]bool, arr.Len())
+			for j := 0; j < arr.Len(); j++ {
+				v[j] = arr.IsValid(j)
+			}
+			validity[field.Name] = v
+		}
+	}
+
+	return &TypedColumnBatch{Data: data, Validity: validity}, nil
+}
+
+// generateStoragePath generates a hierarchical storage path for a Parquet file.
+func (b *ArrowFileBuffer) generateStoragePath(database, measurement string, partitionTime time.Time) string {
+	year := partitionTime.Format("2006")
+	month := partitionTime.Format("01")
+	day := partitionTime.Format("02")
+	hour := partitionTime.Format("15")
+	now := time.Now().UTC()
+	timestamp := now.Format("20060102_150405")
+	nanos := now.UnixNano() % 1_000_000_000
+
+	return fmt.Sprintf("%s/%s/%s/%s/%s/%s/%s_%s_%09d.parquet",
+		database, measurement, year, month, day, hour, measurement, timestamp, nanos)
+}
+
+// getSortKeys returns sort keys for a measurement.
+func (b *ArrowFileBuffer) getSortKeys(measurement string) []string {
+	var keys []string
+	if measurementKeys, exists := b.sortKeysConfig[measurement]; exists {
+		keys = measurementKeys
+	} else {
+		keys = b.defaultSortKeys
+	}
+	for _, k := range keys {
+		if k == "time" {
+			return keys
+		}
+	}
+	return append(keys, "time")
+}
+
+// registerFileInTiering registers a newly written parquet file in the tiering metadata.
+func (b *ArrowFileBuffer) registerFileInTiering(ctx context.Context, database, measurement, storagePath string, partitionTime time.Time, sizeBytes int64) {
+	if b.tieringManager == nil {
+		return
+	}
+	metadata := b.tieringManager.GetMetadata()
+	if metadata == nil {
+		return
+	}
+	file := &tiering.FileMetadata{
+		Path:          storagePath,
+		Database:      database,
+		Measurement:   measurement,
+		PartitionTime: partitionTime,
+		Tier:          tiering.TierHot,
+		SizeBytes:     sizeBytes,
+		CreatedAt:     time.Now().UTC(),
+	}
+	if err := metadata.RecordFile(ctx, file); err != nil {
+		b.logger.Warn().Err(err).
+			Str("path", storagePath).
+			Str("database", database).
+			Str("measurement", measurement).
+			Msg("Failed to register file in tiering metadata")
 	}
 }
