@@ -15,8 +15,6 @@ import (
 	"iedb/internal/cluster/replication"
 	"iedb/internal/config"
 	"iedb/internal/license"
-	"iedb/internal/wal"
-
 	"github.com/rs/zerolog"
 )
 
@@ -45,10 +43,9 @@ type Coordinator struct {
 	// Writer failover (Phase 3)
 	writerFailoverMgr *WriterFailoverManager
 
-	// WAL Replication (Phase 3.3)
+	// Replication (Phase 3.3)
 	replicationSender   *replication.Sender   // Writer only: sends entries to readers
 	replicationReceiver *replication.Receiver // Reader only: receives entries from writer
-	walWriter           *wal.Writer           // Reference to local WAL for replication hook
 
 	// Network
 	listener net.Listener
@@ -1080,18 +1077,10 @@ func (c *Coordinator) GetRouter() *Router {
 	return c.router
 }
 
-// SetWAL sets the WAL writer reference for replication.
-// This should be called after the WAL is created but before Start().
-func (c *Coordinator) SetWAL(walWriter *wal.Writer) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.walWriter = walWriter
-}
-
-// StartReplication starts WAL replication based on node role.
+// StartReplication starts replication based on node role.
 // - Writers start a Sender to stream entries to readers
 // - Readers start a Receiver to receive entries from the writer
-// This should be called after Start() and SetWAL().
+// This should be called after Start().
 func (c *Coordinator) StartReplication() error {
 	if !c.cfg.ReplicationEnabled {
 		c.logger.Debug().Msg("WAL replication is disabled")
@@ -1114,18 +1103,6 @@ func (c *Coordinator) StartReplication() error {
 
 		if err := c.replicationSender.Start(c.ctx); err != nil {
 			return fmt.Errorf("failed to start replication sender: %w", err)
-		}
-
-		// Hook into WAL if available
-		if c.walWriter != nil {
-			c.walWriter.SetReplicationHook(func(entry *wal.ReplicationEntry) {
-				c.replicationSender.Replicate(&replication.ReplicateEntry{
-					Sequence:    entry.Sequence,
-					TimestampUS: entry.TimestampUS,
-					Payload:     entry.Payload,
-				})
-			})
-			c.logger.Info().Msg("WAL replication hook installed")
 		}
 
 		c.logger.Info().
@@ -1192,7 +1169,7 @@ func (c *Coordinator) startReceiverWithAddr(writerAddr string) error {
 	c.replicationReceiver = replication.NewReceiver(&replication.ReceiverConfig{
 		ReaderID:          c.localNode.ID,
 		WriterAddr:        writerAddr,
-		LocalWAL:          c.walWriter,
+		LocalWAL:          nil, // WAL removed — replication no longer writes to WAL
 		ReconnectInterval: 5 * time.Second,
 		AckInterval:       time.Duration(c.cfg.ReplicationAckInterval) * time.Millisecond,
 		Logger:            c.logger,

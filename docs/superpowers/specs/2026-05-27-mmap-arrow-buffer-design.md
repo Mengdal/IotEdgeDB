@@ -13,7 +13,7 @@
 | msync | 需要定时器 | 不需要，走 OS page cache |
 | 读回 | 切片直接读（零拷贝） | `os.ReadFile()` (~5ms/10MB，在 Parquet 编码开销面前可忽略) |
 | 平台依赖 | mmap/ftruncate/msync | 纯 Go `os.File` |
-| 文件句柄 | 同上 | LRU 缓存 cap 64，低频 measurement 用完即关 |
+| 文件句柄 | — | 句柄存于 shard entry，flush 时关闭 |
 | 代码复杂度 | 高 | 低 |
 
 ## 核心变化
@@ -27,7 +27,7 @@
 | 查询注入 | Arrow API 桥接 + 连接固定 | 同（一期），`read_arrow()` 零桥接（二期） |
 | Schema 变化 | 更新 signature | Union schema 扩展 |
 | 内存追踪 | `totalMemoryBytes` + `checkMemoryAndEvict` | 不需要 |
-| 文件句柄 | — | LRU 缓存 cap 64 |
+| 文件句柄 | — | 句柄存于 shard entry，flush 时关闭 |
 
 ## 数据流
 
@@ -75,23 +75,15 @@
 ```
 ArrowFileBuffer:
   shards [32]*fileShard            // 同当前 shard 模型
-  fileCache *lruCache              // 文件句柄缓存 cap 64
   maxFileSize int64                // 10MB
   tmpDir string                    // /tmp/iedb_buf
   convertQueue chan *convertTask   // cap 16
   convertWorker goroutine          // 1 个 worker
 ```
 
-### 文件句柄 LRU 缓存
+### 文件句柄管理
 
-```
-fileCache (cap 64):
-  Get(key) *os.File     // 命中返回句柄；未命中打开文件，换出最久未用的
-  Remove(key)           // flush 后删除缓存项
-  CloseAll()            // 关闭时清空
-```
-
-高频 measurement 的句柄常驻缓存，几乎总是命中。低频 measurement 每次写入走 open → write → later evicted。64 个句柄覆盖真正并发活跃的 measurement 数。
+每个 shard entry 直接持有 `*os.File` 句柄，不通过缓存层。首次写入时 `os.OpenFile(path, O_APPEND|O_CREATE|O_WRONLY, 0644)` 打开文件，句柄存于 entry 中。后续写入复用同一句柄。文件达到大小阈值后关闭句柄并投递转换任务，entry 从 shard map 中移除。系统 ulimit 默认 65536 可支持同时打开几万个 measurement 文件，句柄上限远低于此实际活跃数。
 
 ### Shard entry
 
@@ -120,13 +112,12 @@ writeBatch(database, measurement, typedColumns, numRecords):
     delete(shard.entries, key)
     shard.mu.Unlock()
     entry.file.Close()
-    fileCache.Remove(key)
     submitConvert(entry)
   else:
     shard.mu.Unlock()
 ```
 
-`getOrCreateEntry`：查 shard map → 不存在或句柄为 nil 则从 LRU 缓存获取/创建文件句柄。
+`getOrCreateEntry`：查 shard map → 不存在则 `os.OpenFile` 打开新 `.arrow` 文件并将句柄存入 entry。
 
 ### Arrow IPC 编码
 
@@ -209,7 +200,6 @@ startupRecovery():
 [ingest]
 buffer_file_size_mb = 10          # 每个 measurement .arrow 文件大小阈值
 buffer_tmp_dir = "/tmp/iedb_buf"  # .arrow 临时文件目录
-buffer_file_cache_size = 64       # LRU 文件句柄缓存上限
 # 删除: max_buffer_size, max_buffer_age_ms, min_flush_age_seconds
 # 删除: flush_timeout, flush_queue_size, flush_workers
 # 删除所有 [wal] 配置段
