@@ -172,8 +172,11 @@ func (b *ArrowFileBuffer) SetTieringManager(tm *tiering.Manager) {
 	b.logger.Info().Msg("Tiering manager enabled for ArrowFileBuffer")
 }
 
-// startupRecovery scans tmpDir for orphaned .arrow files from a previous crash
-// and converts them to Parquet. Called during NewArrowFileBuffer.
+// startupRecovery scans tmpDir for orphaned .arrow files from a previous crash,
+// truncates any trailing incomplete batch, and reopens each file for appending.
+// The reopened file is registered in the shard map so new data flows into it.
+// Files are NOT converted to Parquet here — that happens via the normal
+// convertWorker when the file reaches the size threshold.
 func (b *ArrowFileBuffer) startupRecovery() {
 	entries, err := os.ReadDir(b.tmpDir)
 	if err != nil {
@@ -204,16 +207,120 @@ func (b *ArrowFileBuffer) startupRecovery() {
 			Str("measurement", measurement).
 			Msg("Recovering orphaned .arrow file")
 
-		b.doConvert(convertTask{
+		// Read all complete batches. ipc.NewReader stops cleanly at the first
+		// corrupt/incomplete batch, returning the valid ones via reader.Next().
+		rawData, readErr := os.ReadFile(path)
+		if readErr != nil {
+			b.logger.Warn().Err(readErr).Str("path", path).Msg("Cannot read recovery file, deleting")
+			os.Remove(path)
+			continue
+		}
+
+		reader, newReaderErr := ipc.NewReader(bytes.NewReader(rawData))
+		if newReaderErr != nil {
+			b.logger.Warn().Err(newReaderErr).Str("path", path).Msg("Cannot open IPC reader for recovery file, deleting")
+			os.Remove(path)
+			continue
+		}
+
+		var records []arrow.Record
+		for reader.Next() {
+			rec := reader.Record()
+			rec.Retain() // keep after reader moves to next
+			records = append(records, rec)
+		}
+		reader.Release()
+
+		// If reader.Err() is set, there was trailing corrupt data after valid batches.
+		// This is expected after a crash — we truncate by rewriting only valid batches.
+		if readerErr := reader.Err(); readerErr != nil {
+			b.logger.Warn().Err(readerErr).Str("path", path).
+				Int("valid_batches", len(records)).
+				Msg("Trailing incomplete data in recovery file, will truncate")
+		}
+		// reader.Err() was checked; readerErr is nil here if there was no error
+
+		if len(records) == 0 {
+			b.logger.Warn().Str("path", path).Msg("No valid batches in recovery file, deleting")
+			os.Remove(path)
+			continue
+		}
+
+		// Rebuild union schema from all batch schemas (columns are only added, never removed)
+		seenFields := make(map[string]bool)
+		var unionFields []arrow.Field
+		for _, rec := range records {
+			for _, f := range rec.Schema().Fields() {
+				if !seenFields[f.Name] {
+					seenFields[f.Name] = true
+					unionFields = append(unionFields, f)
+				}
+			}
+		}
+		var unionSchema *arrow.Schema
+		if len(unionFields) > 0 {
+			unionSchema = arrow.NewSchema(unionFields, nil)
+		}
+
+		// Rewrite file with only valid batches, removing any trailing corrupt data.
+		// We write each batch with its own schema (ipc.NewWriter per batch) to
+		// support union schema evolution where different batches may have different columns.
+		var cleanBuf bytes.Buffer
+		for _, rec := range records {
+			w := ipc.NewWriter(&cleanBuf, ipc.WithSchema(rec.Schema()))
+			w.Write(rec)
+			w.Close()
+			rec.Release()
+		}
+		records = nil // released
+
+		cleanSize := int64(cleanBuf.Len())
+
+		if writeErr := os.WriteFile(path, cleanBuf.Bytes(), 0644); writeErr != nil {
+			b.logger.Warn().Err(writeErr).Str("path", path).Msg("Failed to rewrite recovery file, deleting")
+			os.Remove(path)
+			continue
+		}
+
+		// Reopen for appending
+		f, openErr := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+		if openErr != nil {
+			b.logger.Warn().Err(openErr).Str("path", path).Msg("Cannot reopen recovery file for append, deleting")
+			os.Remove(path)
+			continue
+		}
+
+		// Register in shard so new data continues flowing into this file
+		bufferKey := database + "/" + measurement
+		shard := b.getShard(bufferKey)
+		shard.mu.Lock()
+		if _, exists := shard.entries[bufferKey]; exists {
+			// Already have an entry (shouldn't happen), close and skip
+			f.Close()
+			shard.mu.Unlock()
+			b.logger.Warn().Str("key", bufferKey).Msg("Duplicate shard entry during recovery, skipping file")
+			continue
+		}
+		shard.entries[bufferKey] = &fileEntry{
+			file:        f,
+			path:        path,
+			size:        cleanSize,
+			schema:      unionSchema,
 			database:    database,
 			measurement: measurement,
-			path:        path,
-		})
+		}
+		shard.mu.Unlock()
+
+		b.logger.Info().
+			Str("database", database).
+			Str("measurement", measurement).
+			Int64("size_bytes", cleanSize).
+			Msg("Recovered .arrow file, reopened for appending")
 		recovered++
 	}
 
 	if recovered > 0 {
-		b.logger.Info().Int("files", recovered).Msg("Crash recovery complete")
+		b.logger.Info().Int("files", recovered).Msg("Crash recovery complete — files reopened for continued appending")
 	}
 }
 
