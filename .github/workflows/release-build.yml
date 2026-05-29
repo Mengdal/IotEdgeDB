@@ -72,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Downloading latest frontend from Mengdal/iedb-ui..."
-          gh release download --repo Mengdal/iedb-ui --latest \
+          gh release download --repo Mengdal/iedb-ui \
             --pattern 'front.zip' --dir /tmp/front-download
           unzip -o /tmp/front-download/front.zip
           echo "Frontend downloaded:"
