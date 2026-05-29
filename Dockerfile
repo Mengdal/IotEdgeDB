@@ -16,12 +16,11 @@ RUN go mod download && go mod verify
 COPY . .
 
 # Download frontend from iedb-ui releases
-RUN apt-get update && apt-get install -y curl unzip && \
-    TAG=$(curl -fsSL https://api.github.com/repos/Mengdal/iedb-ui/releases/latest | grep '"tag_name"' | sed 's/.*"tag_name": *"//;s/".*//') && \
-    curl -fsSL "https://github.com/Mengdal/iedb-ui/releases/download/${TAG}/front.zip" -o /tmp/front.zip && \
-    unzip -o /tmp/front.zip && \
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && \
+    curl -fsSL -o /tmp/front.zip -L "https://github.com/Mengdal/iedb-ui/releases/latest/download/front.zip" && \
+    unzip -o /tmp/front.zip -d /build && \
     rm /tmp/front.zip && \
-    apt-get remove -y curl unzip && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*
 
 # Build
 ARG VERSION
