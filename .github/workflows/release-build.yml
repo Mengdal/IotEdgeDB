@@ -67,6 +67,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Download frontend from iedb-ui
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Downloading latest frontend from Mengdal/iedb-ui..."
+          gh release download --repo Mengdal/iedb-ui --latest \
+            --pattern 'front.zip' --dir /tmp/front-download
+          unzip -o /tmp/front-download/front.zip
+          echo "Frontend downloaded:"
+          ls -la front/
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
