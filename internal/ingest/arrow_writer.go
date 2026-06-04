@@ -687,11 +687,45 @@ type TypedColumnBatch struct {
 }
 
 type bufferShard struct {
-	buffers            map[string][]interface{}
-	bufferStartTimes   map[string]time.Time
-	bufferRecordCounts map[string]int
-	bufferSchemas      map[string]string // Column signature for schema evolution detection
-	mu                 sync.RWMutex
+	buffers              map[string][]interface{}
+	bufferStartTimes     map[string]time.Time
+	bufferRecordCounts   map[string]int
+	bufferSchemas        map[string]string // Column signature for schema evolution detection
+	bufferEstimatedBytes map[string]uint64 // Estimated memory usage per buffer key
+	bufferRefreshIndex   map[string]int    // Arrow VIEW incremental refresh cursor
+	mu                   sync.RWMutex
+}
+
+// estimateBytesPerRow 估算 TypedColumnBatch 中每行的内存占用。
+func estimateBytesPerRow(batch *TypedColumnBatch) uint64 {
+	if batch == nil || len(batch.Data) == 0 {
+		return 256
+	}
+	var totalBytes uint64
+	for _, col := range batch.Data {
+		switch v := col.(type) {
+		case []int64:
+			totalBytes += 8
+		case []float64:
+			totalBytes += 8
+		case []bool:
+			totalBytes += 1
+		case []string:
+			n := len(v)
+			if n > 100 {
+				n = 100
+			}
+			var sumLen int
+			for i := 0; i < n; i++ {
+				sumLen += len(v[i])
+			}
+			totalBytes += uint64(sumLen / n)
+		default:
+			totalBytes += 64
+		}
+	}
+	totalBytes += uint64(len(batch.Data))
+	return totalBytes
 }
 
 // flushTask represents a flush operation to be executed by workers
@@ -742,6 +776,9 @@ type ArrowBuffer struct {
 	// Set by cmd/iedb/main.go when clustering + peer replication is enabled.
 	// Called asynchronously after each flush — never blocks the flush path.
 	fileRegistrar FileRegistrar
+
+	// Optional buffer change notifier (injected by database package)
+	notifier BufferChangeNotifier
 	// OPTIMIZATION: Shard buffers to reduce lock contention
 	// Configurable via ingest.shard_count (default 32)
 	// Each shard handles ~1/N of measurements where N = shard count
@@ -994,6 +1031,8 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 			bufferStartTimes:   make(map[string]time.Time),
 			bufferRecordCounts: make(map[string]int),
 			bufferSchemas:      make(map[string]string),
+				bufferEstimatedBytes: make(map[string]uint64),
+				bufferRefreshIndex:   make(map[string]int),
 		}
 	}
 
@@ -1602,6 +1641,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 
 	// CRITICAL FIX: Track count incrementally instead of O(n) loop
 	shard.bufferRecordCounts[bufferKey] += numRecords
+	shard.bufferEstimatedBytes[bufferKey] = uint64(shard.bufferRecordCounts[bufferKey]) * estimateBytesPerRow(typedColumns)
 	totalBuffered := shard.bufferRecordCounts[bufferKey]
 
 	// Check if buffer needs flush (size-based)
@@ -1726,6 +1766,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	shard.buffers[bufferKey] = append(shard.buffers[bufferKey], typedColumns)
 
 	shard.bufferRecordCounts[bufferKey] += numRecords
+	shard.bufferEstimatedBytes[bufferKey] = uint64(shard.bufferRecordCounts[bufferKey]) * estimateBytesPerRow(typedColumns)
 	totalBuffered := shard.bufferRecordCounts[bufferKey]
 
 	// Check if buffer needs flush (size-based)
@@ -3366,4 +3407,68 @@ func (b *ArrowBuffer) GetStats() map[string]interface{} {
 		"flush_queue_depth":           b.queueDepth.Load(),
 		"flush_workers":               b.flushWorkers,
 	}
+}
+
+// SetNotifier 设置缓冲变更通知回调。
+// 由 database 包在启动时注入 ArrowViewManager。
+func (b *ArrowBuffer) SetNotifier(n BufferChangeNotifier) {
+	b.notifier = n
+}
+
+// SinceRefresh 返回指定 bufferKey 自上次 VIEW 刷新以来新增的 batch。
+func (b *ArrowBuffer) SinceRefresh(bufferKey string) ([]*TypedColumnBatch, error) {
+	var result []*TypedColumnBatch
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.RLock()
+		batches, ok := shard.buffers[bufferKey]
+		refreshIdx := shard.bufferRefreshIndex[bufferKey]
+		if ok && refreshIdx < len(batches) {
+			for _, b := range batches[refreshIdx:] {
+				if tb, ok := b.(*TypedColumnBatch); ok {
+					result = append(result, tb)
+				}
+			}
+		}
+		shard.mu.RUnlock()
+	}
+	return result, nil
+}
+
+// MarkRefreshed 更新指定 bufferKey 的刷新游标。
+func (b *ArrowBuffer) MarkRefreshed(bufferKey string) {
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.Lock()
+		if batches, ok := shard.buffers[bufferKey]; ok {
+			shard.bufferRefreshIndex[bufferKey] = len(batches)
+		}
+		shard.mu.Unlock()
+	}
+}
+
+// TotalBufferedRecords 返回指定 bufferKey 的总缓冲记录数。
+func (b *ArrowBuffer) TotalBufferedRecords(bufferKey string) int {
+	total := 0
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.RLock()
+		total += shard.bufferRecordCounts[bufferKey]
+		shard.mu.RUnlock()
+	}
+	return total
+}
+
+// TotalBufferedBytes 返回所有 bufferKey 的估算内存总占用。
+func (b *ArrowBuffer) TotalBufferedBytes() uint64 {
+	var total uint64
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.RLock()
+		for _, bytes := range shard.bufferEstimatedBytes {
+			total += bytes
+		}
+		shard.mu.RUnlock()
+	}
+	return total
 }
