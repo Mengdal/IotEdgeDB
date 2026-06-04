@@ -779,6 +779,9 @@ type ArrowBuffer struct {
 
 	// Optional buffer change notifier (injected by database package)
 	notifier BufferChangeNotifier
+
+	// Adaptive flush engine (replaces periodicFlush timer when set)
+	adaptiveFlush *AdaptiveFlushEngine
 	// OPTIMIZATION: Shard buffers to reduce lock contention
 	// Configurable via ingest.shard_count (default 32)
 	// Each shard handles ~1/N of measurements where N = shard count
@@ -1706,6 +1709,10 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	}
 
 	// Return immediately (don't wait for flush to complete!)
+	// Notify VIEW manager of new data
+	if b.notifier != nil {
+		b.notifier.OnNewData(bufferKey)
+	}
 	return nil
 }
 
@@ -2313,6 +2320,10 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 			b.flushRecordsAsync(task.ctx, task.bufferKey, task.database, task.measurement, task.records, task.recordCount)
 			// Release timeout context resources
 			task.cancel()
+		// Notify VIEW manager that flush is complete
+		if b.notifier != nil {
+			b.notifier.OnFlushComplete(task.bufferKey)
+		}
 		}
 	}
 }
@@ -2540,6 +2551,10 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 		delete(shard.bufferStartTimes, bufferKey)
 		delete(shard.bufferRecordCounts, bufferKey)
 		delete(shard.bufferSchemas, bufferKey)
+	// Notify VIEW manager after synchronous flush
+	if b.notifier != nil {
+		b.notifier.OnFlushComplete(bufferKey)
+	}
 		return nil
 	}
 
@@ -3328,6 +3343,23 @@ func (b *ArrowBuffer) FlushAll(ctx context.Context) error {
 //     send-on-closed-channel race the closing flag was added to fix.
 //  4. Wait for workers to drain. Then take shard locks to flush any
 //     in-memory buffers synchronously.
+
+// SetAdaptiveFlushEngine 设置自适应刷盘引擎。由 main.go 在启动时注入。
+func (b *ArrowBuffer) SetAdaptiveFlushEngine(engine *AdaptiveFlushEngine) {
+	b.adaptiveFlush = engine
+}
+
+// StartAdaptiveFlush 启动自适应刷盘引擎的后台循环。
+func (b *ArrowBuffer) StartAdaptiveFlush() {
+	if b.adaptiveFlush != nil {
+		b.wg.Add(1)
+		go func() {
+			defer b.wg.Done()
+			b.adaptiveFlush.Run(b.ctx)
+		}()
+	}
+}
+
 func (b *ArrowBuffer) Close() error {
 	b.logger.Info().Msg("Closing ArrowBuffer...")
 

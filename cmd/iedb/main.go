@@ -325,6 +325,30 @@ func main() {
 	}
 	shutdownCoordinator.Register("arrow-buffer", arrowBuffer, shutdown.PriorityBuffer)
 
+		// === Adaptive buffer wiring ===
+		// 1. Memory monitor (cgroup-aware memory pressure detection)
+		memoryMonitor := ingest.NewMemoryMonitor(ingest.MemoryMonitorConfig{
+			MaxBufferMemoryMB: cfg.Ingest.MaxBufferMemoryMB,
+			MinBufferMemoryMB: cfg.Ingest.MinBufferMemoryMB,
+			GreenPct:          cfg.Ingest.MemoryPressureGreenPct,
+			RedPct:            cfg.Ingest.MemoryPressureRedPct,
+			CheckIntervalMS:   cfg.Ingest.MemoryCheckIntervalMS,
+		}, 0, logger.Get("memory-monitor")) // duckdbLimitMB: 0 uses auto-detect
+		go memoryMonitor.Run(context.Background())
+
+		// 2. Adaptive flush engine (replaces fixed-size periodic flush)
+		maxAge := time.Duration(cfg.Ingest.MaxBufferAgeSeconds) * time.Second
+		adaptiveEngine := ingest.NewAdaptiveFlushEngine(arrowBuffer, memoryMonitor, maxAge, logger.Get("adaptive-flush"))
+		arrowBuffer.SetAdaptiveFlushEngine(adaptiveEngine)
+		arrowBuffer.StartAdaptiveFlush()
+
+		// 3. Arrow VIEW manager (buffer data queryable via DuckDB temp tables)
+		arrowViewMgr := database.NewArrowViewManager(db, arrowBuffer, logger.Get("arrow-view"))
+		arrowBuffer.SetNotifier(arrowViewMgr)
+
+		// 4. Query rewriter (transparent Parquet + buffer UNION queries)
+
+
 	// After ArrowBuffer flushes (priority 30) but before WAL closes (priority 40),
 	// purge WAL files since all data has been flushed to storage.
 	// This prevents recovery from replaying already-persisted data on next startup.
