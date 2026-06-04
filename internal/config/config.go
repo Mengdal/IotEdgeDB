@@ -86,9 +86,20 @@ type StorageConfig struct {
 }
 
 type IngestConfig struct {
-	MaxBufferSize         int      // Max records before flush
-	MaxBufferAgeMS        int      // Max age in milliseconds before flush
-	Compression           string   // Parquet compression: snappy, gzip, zstd
+	// === 废弃字段（保留但不再生效） ===
+	MaxBufferSize  int // DEPRECATED: use max_buffer_memory_mb and adaptive flush
+	MaxBufferAgeMS int // DEPRECATED: use max_buffer_age_seconds
+
+	// === 新增：自适应缓冲 ===
+	MaxBufferMemoryMB      int // 0=自动检测，>0=手动指定硬上限（MB）
+	MinBufferMemoryMB      int // 最低保证缓冲内存（MB）
+	MaxBufferAgeSeconds    int // 超时强制刷盘（秒），默认 900
+	MemoryPressureGreenPct int // 可用内存 >此值=绿色，默认 50
+	MemoryPressureRedPct   int // 可用内存 <此值=红色，默认 20
+	MemoryCheckIntervalMS  int // 内存检查间隔（毫秒），默认 1000
+
+	// === 以下字段不变 ===
+	Compression            string // Parquet compression: snappy, gzip, zstd
 	UseDictionary         bool     // Use dictionary encoding
 	WriteStatistics       bool     // Write Parquet statistics
 	DataPageVersion       string   // Parquet data page version: 1.0 or 2.0
@@ -481,7 +492,13 @@ func Load() (*Config, error) {
 		Ingest: IngestConfig{
 			MaxBufferSize:         v.GetInt("ingest.max_buffer_size"),
 			MaxBufferAgeMS:        v.GetInt("ingest.max_buffer_age_ms"),
-			Compression:           v.GetString("ingest.compression"),
+			MaxBufferMemoryMB:      v.GetInt("ingest.max_buffer_memory_mb"),
+			MinBufferMemoryMB:      v.GetInt("ingest.min_buffer_memory_mb"),
+			MaxBufferAgeSeconds:    v.GetInt("ingest.max_buffer_age_seconds"),
+			MemoryPressureGreenPct: v.GetInt("ingest.memory_pressure_green_pct"),
+			MemoryPressureRedPct:   v.GetInt("ingest.memory_pressure_red_pct"),
+			MemoryCheckIntervalMS:  v.GetInt("ingest.memory_check_interval_ms"),
+			Compression:            v.GetString("ingest.compression"),
 			UseDictionary:         v.GetBool("ingest.use_dictionary"),
 			WriteStatistics:       v.GetBool("ingest.write_statistics"),
 			DataPageVersion:       v.GetString("ingest.data_page_version"),
@@ -751,6 +768,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ingest.flush_timeout_seconds", 30) // 30s timeout for storage writes during flush
 	v.SetDefault("ingest.decimal_columns", []string{})
 	v.SetDefault("ingest.default_decimal_columns", "")
+
+		// Adaptive buffer defaults
+		v.SetDefault("ingest.max_buffer_memory_mb", 0)
+		v.SetDefault("ingest.min_buffer_memory_mb", 128)
+		v.SetDefault("ingest.max_buffer_age_seconds", 900)
+		v.SetDefault("ingest.memory_pressure_green_pct", 50)
+		v.SetDefault("ingest.memory_pressure_red_pct", 20)
+		v.SetDefault("ingest.memory_check_interval_ms", 1000)
 
 	// Log defaults
 	v.SetDefault("log.level", "info")
