@@ -57,6 +57,11 @@ type Metrics struct {
 	bufferErrorsTotal     atomic.Int64
 	bufferFlushFailures   atomic.Int64
 	bufferQueueDepth      atomic.Int64
+	memoryPressureLevel   atomic.Int64
+	bufferEstimatedBytes  atomic.Int64
+	adaptiveFlushTotal    atomic.Int64
+	hardLimitFlushTotal   atomic.Int64
+	ageExpiredFlushTotal  atomic.Int64
 
 	// Storage metrics
 	storageWritesTotal     atomic.Int64
@@ -222,6 +227,11 @@ func (m *Metrics) RecordQueryLatency(durationMicros int64) {
 
 // Buffer Metrics
 func (m *Metrics) SetBufferRecordsBuffered(count int64) { m.bufferRecordsBuffered.Store(count) }
+func (m *Metrics) SetMemoryPressureLevel(level int64)  { m.memoryPressureLevel.Store(level) }
+func (m *Metrics) SetBufferEstimatedBytes(bytes int64)  { m.bufferEstimatedBytes.Store(bytes) }
+func (m *Metrics) IncAdaptiveFlush()                   { m.adaptiveFlushTotal.Add(1) }
+func (m *Metrics) IncHardLimitFlush()                  { m.hardLimitFlushTotal.Add(1) }
+func (m *Metrics) IncAgeExpiredFlush()                 { m.ageExpiredFlushTotal.Add(1) }
 func (m *Metrics) SetBufferRecordsWritten(count int64)  { m.bufferRecordsWritten.Store(count) }
 func (m *Metrics) SetBufferFlushes(count int64)         { m.bufferFlushesTotal.Store(count) }
 func (m *Metrics) SetBufferErrors(count int64)          { m.bufferErrorsTotal.Store(count) }
