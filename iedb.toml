@@ -51,8 +51,17 @@ s3_secret_key = "password123"
 # Ingestion
 # -----------------------------------------------------------------------------
 [ingest]
-max_buffer_size = 50000   # Records before flush (default: 50000)
-max_buffer_age_ms = 1000   # Max buffer age before flush
+# === 自适应缓冲（新增）===
+max_buffer_memory_mb = 0            # 0=自动检测（默认），>0=手动指定硬上限（MB）
+min_buffer_memory_mb = 128          # 最低保证缓冲内存（MB）
+max_buffer_age_seconds = 900        # 超时强制刷盘（秒），默认 15 分钟
+memory_pressure_green_pct = 50      # 可用内存 >50% 绿色（正常缓冲）
+memory_pressure_red_pct = 20        # 可用内存 <20% 红色（激进刷盘）
+memory_check_interval_ms = 1000     # 内存检查间隔（毫秒）
+
+# === 废弃字段（保留兼容，不再生效）===
+# max_buffer_size = 50000
+# max_buffer_age_ms = 1000
 
 # Sort keys for compression/query performance: "measurement:col1,col2"
 # Time column is always appended automatically
