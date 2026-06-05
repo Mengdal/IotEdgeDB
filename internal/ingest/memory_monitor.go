@@ -39,6 +39,9 @@ type MemoryMonitor struct {
 	duckdbLimit uint64        // DuckDB memory_limit（字节）
 	stopCh      chan struct{}
 	logger      zerolog.Logger
+
+	// getAvailableMem is overridden in tests to mock system memory state.
+	getAvailableMem func() uint64
 }
 
 // NewMemoryMonitor 创建内存监控器并执行一次性容量检测。
@@ -140,7 +143,12 @@ func (m *MemoryMonitor) getAvailableMemory() uint64 {
 
 // check 读取当前可用内存并计算压力等级。
 func (m *MemoryMonitor) check() PressureLevel {
-	available := m.getAvailableMemory()
+	var available uint64
+	if m.getAvailableMem != nil {
+		available = m.getAvailableMem()
+	} else {
+		available = m.getAvailableMemory()
+	}
 	if m.totalMemory == 0 {
 		return PressureGreen
 	}
