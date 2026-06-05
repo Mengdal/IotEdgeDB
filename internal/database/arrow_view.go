@@ -254,6 +254,7 @@ func (m *ArrowViewManager) appendBatchToTable(conn *sql.Conn, viewName string, b
 			}
 			if err := appender.AppendRow(values...); err != nil {
 				_ = appender.Close()
+				appender = nil // prevent double-close in outer block
 				return fmt.Errorf("appender row %d: %w", row, err)
 			}
 		}

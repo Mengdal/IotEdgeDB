@@ -745,6 +745,7 @@ type flushTask struct {
 	measurement string
 	records     []interface{}
 	recordCount int
+	trigger     string // "size", "age", "hard_limit", or "manual"
 }
 
 // WALWriter interface for Write-Ahead Log support
@@ -2346,7 +2347,11 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 			// Release timeout context resources
 			task.cancel()
 			// Record flush record count distribution
-			metrics.Get().RecordBufferFlushRecords("size", task.recordCount)
+			trigger := task.trigger
+			if trigger == "" {
+				trigger = "size"
+			}
+			metrics.Get().RecordBufferFlushRecords(trigger, task.recordCount)
 		// Notify VIEW manager that flush is complete
 		if b.notifier != nil {
 			b.notifier.OnFlushComplete(task.bufferKey)

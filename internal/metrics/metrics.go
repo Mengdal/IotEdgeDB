@@ -258,6 +258,7 @@ func (m *Metrics) RecordBufferFlushRecords(trigger string, recordCount int) {
 	for i, boundary := range buckets {
 		if recordCount <= boundary {
 			dst[i].Add(1)
+			break // stop at first matching bucket (cumulative computed at exposition time)
 		}
 	}
 }

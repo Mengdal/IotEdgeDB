@@ -16,6 +16,7 @@ type flushCandidate struct {
 	shardIdx  int
 	bufferKey string
 	entry     *bufferEntry // direct reference, avoids copying fields
+	trigger   string       // "age", "hard_limit", or "pressure"
 }
 
 // AdaptiveFlushEngine 是内存压力驱动的自适应刷盘决策引擎。
@@ -101,10 +102,12 @@ func (e *AdaptiveFlushEngine) evaluate() {
 	switch pressure {
 	case PressureGreen:
 	case PressureYellow:
+		metrics.Get().IncAdaptiveFlush()
 		e.flushLargestUntil(candidates, func() bool {
 			return e.monitor.PressureLevel() == PressureGreen
 		})
 	case PressureRed:
+		metrics.Get().IncAdaptiveFlush()
 		e.flushLargestUntil(candidates, func() bool {
 			return e.monitor.PressureLevel() != PressureRed
 		})
@@ -134,6 +137,7 @@ func (e *AdaptiveFlushEngine) filterExpired(candidates []flushCandidate) []flush
 	var expired []flushCandidate
 	for _, c := range candidates {
 		if time.Since(c.entry.startTime) >= e.maxAge {
+		c.trigger = "age"
 			expired = append(expired, c)
 		}
 	}
@@ -202,6 +206,12 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	shard.mu.Unlock()
 
 	flushCtx, flushCancel := context.WithTimeout(context.Background(), e.buffer.flushTimeout)
+	// Determine trigger type: age-expired uses "age", hard-limit uses "hard_limit",
+	// pressure-driven (yellow/red) uses "pressure".
+	trigger := c.trigger
+	if trigger == "" {
+		trigger = "hard_limit"
+	}
 	task := flushTask{
 		ctx:         flushCtx,
 		cancel:      flushCancel,
@@ -210,6 +220,7 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 		measurement: measurement,
 		records:     records,
 		recordCount: recordCount,
+		trigger:     trigger,
 	}
 	e.buffer.tryEnqueueFlush(task, flushCancel, c.bufferKey, recordCount)
 }
