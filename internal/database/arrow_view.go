@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
@@ -147,7 +148,7 @@ func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ing
 		return
 	}
 
-	conn, err := m.db.DB().Conn(nil)
+	conn, err := m.db.DB().Conn(context.Background())
 	if err != nil {
 		m.logger.Error().Err(err).Str("table", viewName).Msg("Failed to get connection")
 		return
@@ -155,9 +156,9 @@ func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ing
 	defer conn.Close()
 
 	// DROP + CREATE
-	conn.ExecContext(nil, "DROP TABLE IF EXISTS "+viewName)
+	conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+viewName)
 	createSQL := m.buildCreateTableSQL(viewName, batches[0])
-	if _, err := conn.ExecContext(nil, createSQL); err != nil {
+	if _, err := conn.ExecContext(context.Background(), createSQL); err != nil {
 		m.logger.Error().Err(err).Str("sql", createSQL).Msg("Failed to create temp table")
 		return
 	}
@@ -180,7 +181,7 @@ func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ing
 // appendToTable 增量追加 batch 到已有临时表。
 func (m *ArrowViewManager) appendToTable(bufferKey string, batches []*ingest.TypedColumnBatch) {
 	viewName := ViewName(bufferKey)
-	conn, err := m.db.DB().Conn(nil)
+	conn, err := m.db.DB().Conn(context.Background())
 	if err != nil {
 		return
 	}
@@ -283,7 +284,7 @@ func (m *ArrowViewManager) buildCreateTableSQL(viewName string, batch *ingest.Ty
 	for i, name := range colNames {
 		colDefs[i] = fmt.Sprintf(`"%s" %s`, name, duckTypeFor(batch.Data[name]))
 	}
-	return fmt.Sprintf("CREATE TEMP TABLE %s (%s)", viewName, strings.Join(colDefs, ", "))
+	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)", viewName, strings.Join(colDefs, ", "))
 }
 
 func duckTypeFor(col interface{}) string {
