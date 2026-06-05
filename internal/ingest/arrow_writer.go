@@ -918,13 +918,70 @@ func schemaKey(database, measurement, signature string) string {
 	return database + "/" + measurement + "__" + schemaHash(signature)
 }
 
-// stripSchemaHash removes the "#hash" suffix from a buffer key if present.
+// stripSchemaHash removes the "__hash" suffix from a buffer key if present.
 // Returns the original key and an empty string if no hash suffix exists.
 func stripSchemaHash(bufferKey string) (baseKey string, hash string) {
 	if idx := strings.LastIndex(bufferKey, "__"); idx >= 0 {
 		return bufferKey[:idx], bufferKey[idx+1:]
 	}
 	return bufferKey, ""
+}
+
+// hasTypeConflict returns true if oldSig and newSig share any field name
+// with a different type. Field additions/removals are NOT conflicts — only
+// the same field changing type (e.g. float64→int64) qualifies.
+func hasTypeConflict(oldSig, newSig string) bool {
+	if oldSig == "" || newSig == "" || oldSig == newSig {
+		return false
+	}
+	oldFields := parseSignature(oldSig)
+	newFields := parseSignature(newSig)
+	for name, oldType := range oldFields {
+		if newType, exists := newFields[name]; exists && newType != oldType {
+			return true
+		}
+	}
+	return false
+}
+
+// parseSignature parses "name1:type1,name2:type2,..." into a map.
+func parseSignature(sig string) map[string]string {
+	result := make(map[string]string)
+	for _, pair := range strings.Split(sig, ",") {
+		parts := strings.SplitN(pair, ":", 2)
+		if len(parts) == 2 {
+			result[parts[0]] = parts[1]
+		}
+	}
+	return result
+}
+
+// flushTypeConflicts scans all shards for existing buffer entries under the
+// same measurement (base key) whose schema has a type conflict with newSig.
+// Conflicting entries are flushed before the new-schema data is written.
+func (b *ArrowBuffer) flushTypeConflicts(baseKey, newSig string) {
+	prefix := baseKey + "__"
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.Lock()
+		for key, entry := range shard.buffers {
+			if strings.HasPrefix(key, prefix) && hasTypeConflict(entry.schema, newSig) {
+				parts := splitBufferKey(key)
+				if len(parts) == 2 {
+					b.logger.Debug().
+						Str("buffer_key", key).
+						Str("old_schema", entry.schema).
+						Str("new_schema", newSig).
+						Msg("Type conflict detected, flushing old buffer")
+					// flushBufferLocked releases and re-acquires the lock
+					flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
+					_ = b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1])
+					flushCancel()
+				}
+			}
+		}
+		shard.mu.Unlock()
+	}
 }
 
 // getShard returns the shard for a given buffer key using FNV-1a hash
@@ -1569,6 +1626,11 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	// same measurement naturally get separate buffer entries.
 	bufferKey := schemaKey(database, record.Measurement, newSignature)
 
+	// Flush any existing buffer for this measurement whose schema has a
+	// type conflict with the new one (same field, different type).
+	baseKey := database + "/" + record.Measurement
+	b.flushTypeConflicts(baseKey, newSignature)
+
 	// OPTIMIZATION: Get shard for this buffer key (lock sharding)
 	shard := b.getShard(bufferKey)
 
@@ -1699,6 +1761,10 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 
 	// Construct schema-specific buffer key.
 	bufferKey := schemaKey(database, measurement, newSignature)
+
+	// Flush any existing buffer with type conflicts.
+	baseKey := database + "/" + measurement
+	b.flushTypeConflicts(baseKey, newSignature)
 
 	// Get shard for this buffer key (lock sharding)
 	shard := b.getShard(bufferKey)
