@@ -789,8 +789,9 @@ type ArrowBuffer struct {
 	// Optional buffer change notifier (injected by database package)
 	notifier BufferChangeNotifier
 
-	// Adaptive flush engine (replaces periodicFlush timer when set)
-	adaptiveFlush *AdaptiveFlushEngine
+	// Adaptive flush engine (replaces periodicFlush timer when set).
+	// atomic.Pointer for race-free read in periodicFlush / write paths.
+	adaptiveFlush atomic.Pointer[AdaptiveFlushEngine]
 	// OPTIMIZATION: Shard buffers to reduce lock contention
 	// Configurable via ingest.shard_count (default 32)
 	// Each shard handles ~1/N of measurements where N = shard count
@@ -1659,7 +1660,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	// Check if buffer needs flush (size-based).
 	// When adaptive flush engine is active, it owns all flush decisions and
 	// this fixed-size gate is skipped to allow memory-pressure-driven buffering.
-	if b.adaptiveFlush == nil && totalBuffered >= b.config.MaxBufferSize {
+	if b.adaptiveFlush.Load() == nil && totalBuffered >= b.config.MaxBufferSize {
 		// Extract records to flush (hold lock for microseconds only)
 		recordsToFlush = make([]interface{}, len(entry.batches))
 		for i, batch := range entry.batches {
@@ -1792,7 +1793,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	// Check if buffer needs flush (size-based).
 	// When adaptive flush engine is active, it owns all flush decisions and
 	// this fixed-size gate is skipped to allow memory-pressure-driven buffering.
-	if b.adaptiveFlush == nil && totalBuffered >= b.config.MaxBufferSize {
+	if b.adaptiveFlush.Load() == nil && totalBuffered >= b.config.MaxBufferSize {
 		recordsToFlush = make([]interface{}, len(entry.batches))
 		for i, batch := range entry.batches {
 			recordsToFlush[i] = batch
@@ -2196,7 +2197,7 @@ func (b *ArrowBuffer) periodicFlush() {
 	for {
 		// If adaptive flush engine is active, it owns all age-based flushing.
 		// Sleep until shutdown to avoid duplicate work and lock contention.
-		if b.adaptiveFlush != nil {
+		if b.adaptiveFlush.Load() != nil {
 			select {
 			case <-b.ctx.Done():
 				return
@@ -3385,16 +3386,16 @@ func (b *ArrowBuffer) FlushAll(ctx context.Context) error {
 
 // SetAdaptiveFlushEngine 设置自适应刷盘引擎。由 main.go 在启动时注入。
 func (b *ArrowBuffer) SetAdaptiveFlushEngine(engine *AdaptiveFlushEngine) {
-	b.adaptiveFlush = engine
+	b.adaptiveFlush.Store(engine)
 }
 
 // StartAdaptiveFlush 启动自适应刷盘引擎的后台循环。
 func (b *ArrowBuffer) StartAdaptiveFlush() {
-	if b.adaptiveFlush != nil {
+	if e := b.adaptiveFlush.Load(); e != nil {
 		b.wg.Add(1)
 		go func() {
 			defer b.wg.Done()
-			b.adaptiveFlush.Run(b.ctx)
+			e.Run(b.ctx)
 		}()
 	}
 }
