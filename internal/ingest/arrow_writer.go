@@ -1054,8 +1054,6 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 	go buffer.periodicFlush()
 
 	buffer.logger.Info().
-		Int("max_buffer_size", cfg.MaxBufferSize).
-		Int("max_buffer_age_ms", cfg.MaxBufferAgeMS).
 		Str("compression", cfg.Compression).
 		Int("shards", shardCount).
 		Int("flush_workers", flushWorkers).
@@ -1658,8 +1656,10 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	entry.estimatedBytes = uint64(entry.recordCount) * estimateBytesPerRow(typedColumns)
 	totalBuffered := entry.recordCount
 
-	// Check if buffer needs flush (size-based)
-	if totalBuffered >= b.config.MaxBufferSize {
+	// Check if buffer needs flush (size-based).
+	// When adaptive flush engine is active, it owns all flush decisions and
+	// this fixed-size gate is skipped to allow memory-pressure-driven buffering.
+	if b.adaptiveFlush == nil && totalBuffered >= b.config.MaxBufferSize {
 		// Extract records to flush (hold lock for microseconds only)
 		recordsToFlush = make([]interface{}, len(entry.batches))
 		for i, batch := range entry.batches {
@@ -1789,8 +1789,10 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	entry.estimatedBytes = uint64(entry.recordCount) * estimateBytesPerRow(typedColumns)
 	totalBuffered := entry.recordCount
 
-	// Check if buffer needs flush (size-based)
-	if totalBuffered >= b.config.MaxBufferSize {
+	// Check if buffer needs flush (size-based).
+	// When adaptive flush engine is active, it owns all flush decisions and
+	// this fixed-size gate is skipped to allow memory-pressure-driven buffering.
+	if b.adaptiveFlush == nil && totalBuffered >= b.config.MaxBufferSize {
 		recordsToFlush = make([]interface{}, len(entry.batches))
 		for i, batch := range entry.batches {
 			recordsToFlush[i] = batch

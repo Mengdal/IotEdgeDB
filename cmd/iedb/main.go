@@ -328,13 +328,21 @@ func main() {
 
 		// === Adaptive buffer wiring ===
 		// 1. Memory monitor (cgroup-aware memory pressure detection)
+		// Parse DuckDB memory_limit to properly compute buffer ceiling:
+		//   bufferLimit = totalMemory * 50% - duckdbMemoryLimit
+		duckdbLimitMB := 0
+		if cfg.Database.MemoryLimit != "" {
+			if limitBytes, err := config.ParseSize(cfg.Database.MemoryLimit); err == nil {
+				duckdbLimitMB = int(limitBytes / (1024 * 1024))
+			}
+		}
 		memoryMonitor := ingest.NewMemoryMonitor(ingest.MemoryMonitorConfig{
 			MaxBufferMemoryMB: cfg.Ingest.MaxBufferMemoryMB,
 			MinBufferMemoryMB: cfg.Ingest.MinBufferMemoryMB,
 			GreenPct:          cfg.Ingest.MemoryPressureGreenPct,
 			RedPct:            cfg.Ingest.MemoryPressureRedPct,
 			CheckIntervalMS:   cfg.Ingest.MemoryCheckIntervalMS,
-		}, 0, logger.Get("memory-monitor")) // duckdbLimitMB: 0 uses auto-detect
+		}, duckdbLimitMB, logger.Get("memory-monitor"))
 		go memoryMonitor.Run(context.Background())
 
 		// 2. Adaptive flush engine (replaces fixed-size periodic flush)
