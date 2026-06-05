@@ -27,6 +27,7 @@ import (
 	"iedb/internal/logger"
 	"iedb/internal/metrics"
 	"iedb/internal/mqtt"
+	"iedb/internal/query"
 	"iedb/internal/queryregistry"
 	"iedb/internal/reconciliation"
 	"iedb/internal/scheduler"
@@ -347,7 +348,8 @@ func main() {
 		arrowBuffer.SetNotifier(arrowViewMgr)
 
 		// 4. Query rewriter (transparent Parquet + buffer UNION queries)
-
+		queryRewriter := query.NewQueryRewriter(arrowViewMgr)
+		_ = queryRewriter // held for future direct use; currently integrated via buildReadParquetExpr
 
 	// After ArrowBuffer flushes (priority 30) but before WAL closes (priority 40),
 	// purge WAL files since all data has been flushed to storage.
@@ -1178,6 +1180,10 @@ func main() {
 	queryHandler := api.NewQueryHandler(db, storageBackend, logger.Get("query"), cfg.Query.Timeout, cfg.Query.SlowQueryThresholdMs)
 	if authManager != nil && rbacManager != nil {
 		queryHandler.SetAuthAndRBAC(authManager, rbacManager)
+	}
+	// Wire buffer VIEW for transparent in-memory data visibility in queries
+	if arrowViewMgr != nil {
+		queryHandler.SetArrowViewManager(arrowViewMgr)
 	}
 	queryHandler.RegisterRoutes(server.GetApp())
 

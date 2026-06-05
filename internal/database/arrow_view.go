@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"iedb/internal/ingest"
 
+	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/rs/zerolog"
 )
 
@@ -201,7 +203,7 @@ func (m *ArrowViewManager) appendToTable(bufferKey string, batches []*ingest.Typ
 	m.mu.Unlock()
 }
 
-// appendBatchToTable 使用 DuckDB Appender 列式写入单个 batch 到临时表。
+// appendBatchToTable 使用 DuckDB Appender API 批量列式写入单个 batch 到临时表。
 func (m *ArrowViewManager) appendBatchToTable(conn *sql.Conn, viewName string, batch *ingest.TypedColumnBatch) (int, error) {
 	colNames := make([]string, 0, len(batch.Data))
 	for name := range batch.Data {
@@ -228,20 +230,41 @@ func (m *ArrowViewManager) appendBatchToTable(conn *sql.Conn, viewName string, b
 		break
 	}
 
-	// 构建 INSERT 语句
-	placeholders := make([]string, len(colNames))
-	for i := range placeholders {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	if rowCount == 0 {
+		return 0, nil
 	}
-	insertSQL := fmt.Sprintf("INSERT INTO %s VALUES (%s)", viewName, strings.Join(placeholders, ", "))
 
-	// 逐行插入（后续可优化为 Appender API）
-	for row := 0; row < rowCount; row++ {
-		values := make([]interface{}, len(colNames))
-		for i, name := range colNames {
-			values[i] = columnValue(batch.Data[name], batch.Validity[name], row)
+	var appender *duckdb.Appender
+	err := conn.Raw(func(driverConn any) error {
+		dc, ok := driverConn.(driver.Conn)
+		if !ok {
+			return fmt.Errorf("connection does not implement driver.Conn")
 		}
-		conn.ExecContext(nil, insertSQL, values...)
+		var appErr error
+		appender, appErr = duckdb.NewAppenderFromConn(dc, "", viewName)
+		if appErr != nil {
+			return fmt.Errorf("failed to create appender for %s: %w", viewName, appErr)
+		}
+
+		// Batch append all rows via the Appender API
+		for row := 0; row < rowCount; row++ {
+			values := make([]driver.Value, len(colNames))
+			for i, name := range colNames {
+				values[i] = columnValue(batch.Data[name], batch.Validity[name], row)
+			}
+			if err := appender.AppendRow(values...); err != nil {
+				_ = appender.Close()
+				return fmt.Errorf("appender row %d: %w", row, err)
+			}
+		}
+		return nil
+	})
+
+	if appender != nil {
+		_ = appender.Close() // Flush + close
+	}
+	if err != nil {
+		return 0, err
 	}
 
 	return rowCount, nil

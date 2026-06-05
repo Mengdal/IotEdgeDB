@@ -2175,6 +2175,15 @@ func (b *ArrowBuffer) periodicFlush() {
 	defer b.wg.Done()
 
 	for {
+		// If adaptive flush engine is active, it owns all age-based flushing.
+		// Sleep until shutdown to avoid duplicate work and lock contention.
+		if b.adaptiveFlush != nil {
+			select {
+			case <-b.ctx.Done():
+				return
+			}
+		}
+
 		select {
 		case <-b.ctx.Done():
 			return
@@ -2596,6 +2605,11 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 		// This prevents memory growth during prolonged S3 outages
 		// WAL will be replayed on restart or via periodic recovery
 		return err
+	}
+
+	// Notify VIEW manager after synchronous flush
+	if b.notifier != nil {
+		b.notifier.OnFlushComplete(bufferKey)
 	}
 
 	// Re-acquire lock for caller

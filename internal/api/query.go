@@ -491,6 +491,9 @@ type QueryHandler struct {
 
 	// Query management (Enterprise feature - active query tracking and cancellation)
 	queryRegistry *queryregistry.Registry
+
+	// Buffer VIEW integration (adaptive buffer — makes in-memory data queryable)
+	viewMgr *database.ArrowViewManager
 }
 
 // isDebugEnabled returns true if debug logging is enabled.
@@ -783,6 +786,13 @@ func (h *QueryHandler) SetGovernance(manager *governance.Manager, lc *license.Cl
 // SetQueryRegistry sets the query registry for long-running query management.
 func (h *QueryHandler) SetQueryRegistry(registry *queryregistry.Registry) {
 	h.queryRegistry = registry
+}
+
+// SetArrowViewManager wires the Arrow VIEW manager for buffer data visibility.
+// When set, queries automatically UNION buffer data with Parquet data for
+// measurements that have unflushed buffered records.
+func (h *QueryHandler) SetArrowViewManager(vm *database.ArrowViewManager) {
+	h.viewMgr = vm
 }
 
 // InvalidateCaches clears all internal caches (partition pruner and SQL transform cache).
@@ -2036,7 +2046,8 @@ func (h *QueryHandler) buildReadParquetExpr(path, originalSQL, keyword string) s
 						Str("database", database).
 						Str("measurement", measurement).
 						Msg("Tiering enabled: building multi-tier query")
-					return h.buildMultiTierReadParquet(database, measurement, tieredPaths, keyword)
+					expr := h.buildMultiTierReadParquet(database, measurement, tieredPaths, keyword)
+					return h.wrapWithBufferView(expr, keyword, database, measurement)
 				}
 			}
 		}
@@ -2044,6 +2055,7 @@ func (h *QueryHandler) buildReadParquetExpr(path, originalSQL, keyword string) s
 
 	// Fall back to single-tier behavior (original logic)
 	options := buildReadParquetOptions()
+	var expr string
 
 	// Apply partition pruning
 	optimizedPath, wasOptimized := h.pruner.OptimizeTablePath(path, originalSQL)
@@ -2062,14 +2074,40 @@ func (h *QueryHandler) buildReadParquetExpr(path, originalSQL, keyword string) s
 			}
 			pathsStr.WriteString("]")
 			h.logger.Info().Int("partition_count", len(pathList)).Str("keyword", keyword).Msg("Partition pruning: Using targeted paths")
-			return keyword + " read_parquet(" + pathsStr.String() + ", " + options + ")"
+			expr = keyword + " read_parquet(" + pathsStr.String() + ", " + options + ")"
 		} else if pathStr, ok := optimizedPath.(string); ok {
 			h.logger.Info().Str("optimized_path", pathStr).Str("keyword", keyword).Msg("Partition pruning: Using optimized path")
-			return keyword + " read_parquet(" + quotePath(pathStr) + ", " + options + ")"
+			expr = keyword + " read_parquet(" + quotePath(pathStr) + ", " + options + ")"
 		}
 	}
 
-	return keyword + " read_parquet(" + quotePath(path) + ", " + options + ")"
+	if expr == "" {
+		expr = keyword + " read_parquet(" + quotePath(path) + ", " + options + ")"
+	}
+
+	// Wrap with buffer VIEW if data is still in-memory
+	if h.viewMgr != nil {
+		database, measurement := h.extractDBMeasurementFromPath(path)
+		if database != "" && measurement != "" {
+			expr = h.wrapWithBufferView(expr, keyword, database, measurement)
+		}
+	}
+	return expr
+}
+
+// wrapWithBufferView wraps a read_parquet expression with a UNION ALL to the buffer
+// temporary VIEW when the buffer has unflushed data for the measurement.
+func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement string) string {
+	if h.viewMgr == nil {
+		return expr
+	}
+	bufferKey := dbName + "/" + measurement
+	if !h.viewMgr.HasData(bufferKey) {
+		return expr
+	}
+	viewName := database.ViewName(bufferKey)
+	innerExpr := strings.TrimPrefix(expr, keyword+" ")
+	return keyword + " (SELECT * FROM (" + innerExpr + ") UNION ALL SELECT * FROM " + viewName + ")"
 }
 
 // buildReadParquetExprForMeasurement builds a read_parquet expression for a database/measurement pair.
@@ -2089,7 +2127,8 @@ func (h *QueryHandler) buildReadParquetExprForMeasurement(database, measurement,
 					Str("database", database).
 					Str("measurement", measurement).
 					Msg("Tiering enabled: building multi-tier query (fast path)")
-				return h.buildMultiTierReadParquet(database, measurement, tieredPaths, keyword)
+				expr := h.buildMultiTierReadParquet(database, measurement, tieredPaths, keyword)
+				return h.wrapWithBufferView(expr, keyword, database, measurement)
 			}
 		}
 	}
