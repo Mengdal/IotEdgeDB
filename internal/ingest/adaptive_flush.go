@@ -6,16 +6,16 @@ import (
 	"strings"
 	"time"
 
+	"iedb/internal/metrics"
+
 	"github.com/rs/zerolog"
 )
 
 // flushCandidate 是自适应决策引擎收集的缓冲快照。
 type flushCandidate struct {
-	shardIdx       uint32
-	bufferKey      string
-	recordCount    int
-	estimatedBytes uint64
-	age            time.Duration
+	shardIdx  int
+	bufferKey string
+	entry     *bufferEntry // direct reference, avoids copying fields
 }
 
 // AdaptiveFlushEngine 是内存压力驱动的自适应刷盘决策引擎。
@@ -68,13 +68,18 @@ func (e *AdaptiveFlushEngine) evaluate() {
 	// 硬上限检查
 	var totalBytes uint64
 	for _, c := range candidates {
-		totalBytes += c.estimatedBytes
+		totalBytes += c.entry.estimatedBytes
 	}
+
+	// Update buffer estimated bytes metric
+	metrics.Get().SetBufferEstimatedBytes(int64(totalBytes))
+
 	if totalBytes > e.maxBufferBytes {
 		e.logger.Debug().
 			Uint64("total_bytes", totalBytes).
 			Uint64("limit_bytes", e.maxBufferBytes).
 			Msg("Buffer hard limit exceeded, flushing largest")
+		metrics.Get().IncHardLimitFlush()
 		e.flushUntilBelow(candidates, totalBytes, e.maxBufferBytes)
 		return
 	}
@@ -82,6 +87,7 @@ func (e *AdaptiveFlushEngine) evaluate() {
 	// 15 分钟兜底
 	expired := e.filterExpired(candidates)
 	for _, c := range expired {
+		metrics.Get().IncAgeExpiredFlush()
 		e.flushCandidate(c)
 	}
 
@@ -91,6 +97,7 @@ func (e *AdaptiveFlushEngine) evaluate() {
 
 	// 按压力等级决策
 	pressure := e.monitor.PressureLevel()
+	metrics.Get().SetMemoryPressureLevel(int64(pressure))
 	switch pressure {
 	case PressureGreen:
 	case PressureYellow:
@@ -110,13 +117,11 @@ func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 	for i := uint32(0); i < e.buffer.shardCount; i++ {
 		shard := e.buffer.shards[i]
 		shard.mu.RLock()
-		for key := range shard.buffers {
+		for key, entry := range shard.buffers {
 			e.candidatesBuf = append(e.candidatesBuf, flushCandidate{
-				shardIdx:       i,
-				bufferKey:      key,
-				recordCount:    shard.bufferRecordCounts[key],
-				estimatedBytes: shard.bufferEstimatedBytes[key],
-				age:            time.Since(shard.bufferStartTimes[key]),
+				shardIdx:  int(i),
+				bufferKey: key,
+				entry:     entry,
 			})
 		}
 		shard.mu.RUnlock()
@@ -128,7 +133,7 @@ func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 func (e *AdaptiveFlushEngine) filterExpired(candidates []flushCandidate) []flushCandidate {
 	var expired []flushCandidate
 	for _, c := range candidates {
-		if c.age >= e.maxAge {
+		if time.Since(c.entry.startTime) >= e.maxAge {
 			expired = append(expired, c)
 		}
 	}
@@ -141,7 +146,7 @@ func (e *AdaptiveFlushEngine) flushLargestUntil(
 	shouldStop func() bool,
 ) {
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].recordCount > candidates[j].recordCount
+		return candidates[i].entry.recordCount > candidates[j].entry.recordCount
 	})
 
 	minPerMeasurement := e.minBufferBytes / uint64(max(len(candidates), 1))
@@ -150,7 +155,7 @@ func (e *AdaptiveFlushEngine) flushLargestUntil(
 		if shouldStop() {
 			break
 		}
-		if c.estimatedBytes < minPerMeasurement {
+		if c.entry.estimatedBytes < minPerMeasurement {
 			continue
 		}
 		e.flushCandidate(c)
@@ -164,7 +169,7 @@ func (e *AdaptiveFlushEngine) flushUntilBelow(
 	targetBytes uint64,
 ) {
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].recordCount > candidates[j].recordCount
+		return candidates[i].entry.recordCount > candidates[j].entry.recordCount
 	})
 
 	remaining := currentTotal
@@ -172,7 +177,7 @@ func (e *AdaptiveFlushEngine) flushUntilBelow(
 		if remaining <= targetBytes {
 			break
 		}
-		remaining -= c.estimatedBytes
+		remaining -= c.entry.estimatedBytes
 		e.flushCandidate(c)
 	}
 }
@@ -181,19 +186,19 @@ func (e *AdaptiveFlushEngine) flushUntilBelow(
 func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	shard := e.buffer.shards[c.shardIdx]
 	shard.mu.Lock()
-	records, exists := shard.buffers[c.bufferKey]
-	if !exists || len(records) == 0 {
+	entry, exists := shard.buffers[c.bufferKey]
+	if !exists || len(entry.batches) == 0 {
 		shard.mu.Unlock()
 		return
 	}
-	recordCount := shard.bufferRecordCounts[c.bufferKey]
+	recordCount := entry.recordCount
 	database, measurement := splitKeyToDBAndMeas(c.bufferKey)
+	// Extract batch references before deleting entry
+	records := make([]interface{}, len(entry.batches))
+	for i, batch := range entry.batches {
+		records[i] = batch
+	}
 	delete(shard.buffers, c.bufferKey)
-	delete(shard.bufferRecordCounts, c.bufferKey)
-	delete(shard.bufferStartTimes, c.bufferKey)
-	delete(shard.bufferSchemas, c.bufferKey)
-	delete(shard.bufferEstimatedBytes, c.bufferKey)
-	delete(shard.bufferRefreshIndex, c.bufferKey)
 	shard.mu.Unlock()
 
 	flushCtx, flushCancel := context.WithTimeout(context.Background(), e.buffer.flushTimeout)

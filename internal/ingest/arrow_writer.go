@@ -686,14 +686,22 @@ type TypedColumnBatch struct {
 	Signature  string                 // sorted column-name string; cached to avoid per-write recomputation
 }
 
+// bufferEntry holds all buffered data and metadata for a single measurement key.
+// Replaces 6 separate maps (buffers, bufferStartTimes, bufferRecordCounts,
+// bufferSchemas, bufferEstimatedBytes, bufferRefreshIndex) with a single struct,
+// reducing 5+ hash lookups to 1 on the write path.
+type bufferEntry struct {
+	batches        []*TypedColumnBatch // buffered data batches (immutable)
+	startTime      time.Time           // first record arrival time
+	recordCount    int                 // total record count
+	estimatedBytes uint64              // estimated memory usage
+	schema         string              // column signature for schema evolution
+	refreshIndex   int                 // Arrow VIEW incremental refresh cursor
+}
+
 type bufferShard struct {
-	buffers              map[string][]interface{}
-	bufferStartTimes     map[string]time.Time
-	bufferRecordCounts   map[string]int
-	bufferSchemas        map[string]string // Column signature for schema evolution detection
-	bufferEstimatedBytes map[string]uint64 // Estimated memory usage per buffer key
-	bufferRefreshIndex   map[string]int    // Arrow VIEW incremental refresh cursor
-	mu                   sync.RWMutex
+	mu      sync.RWMutex
+	buffers map[string]*bufferEntry // bufferKey → merged buffer state
 }
 
 // estimateBytesPerRow 估算 TypedColumnBatch 中每行的内存占用。
@@ -1030,12 +1038,7 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 	// Initialize shards
 	for i := 0; i < shardCount; i++ {
 		buffer.shards[i] = &bufferShard{
-			buffers:            make(map[string][]interface{}),
-			bufferStartTimes:   make(map[string]time.Time),
-			bufferRecordCounts: make(map[string]int),
-			bufferSchemas:      make(map[string]string),
-				bufferEstimatedBytes: make(map[string]uint64),
-				bufferRefreshIndex:   make(map[string]int),
+			buffers: make(map[string]*bufferEntry),
 		}
 	}
 
@@ -1519,7 +1522,11 @@ func (b *ArrowBuffer) flushOnSchemaChangeLocked(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		existingSignature, exists := shard.bufferSchemas[bufferKey]
+		entry, entryExists := shard.buffers[bufferKey]
+		existingSignature, exists := "", entryExists
+		if entryExists {
+			existingSignature = entry.schema
+		}
 		if !exists || existingSignature == newSignature {
 			return nil
 		}
@@ -1628,10 +1635,13 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	}
 
 	// Initialize buffer and record count if needed
-	if _, exists := shard.buffers[bufferKey]; !exists {
-		shard.bufferStartTimes[bufferKey] = time.Now().UTC()
-		shard.bufferRecordCounts[bufferKey] = 0
-		shard.bufferSchemas[bufferKey] = newSignature // Store schema for evolution detection
+	entry, exists := shard.buffers[bufferKey]
+	if !exists {
+		entry = &bufferEntry{
+			startTime: time.Now().UTC(),
+			schema:    newSignature,
+		}
+		shard.buffers[bufferKey] = entry
 		// Tell periodicFlush to recompute its wakeup time for this new buffer.
 		select {
 		case b.newBufferCh <- struct{}{}:
@@ -1640,26 +1650,25 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	}
 
 	// Add typed columns to buffer (already converted via zero-copy fast paths)
-	shard.buffers[bufferKey] = append(shard.buffers[bufferKey], typedColumns)
+	entry.batches = append(entry.batches, typedColumns)
 
 	// CRITICAL FIX: Track count incrementally instead of O(n) loop
-	shard.bufferRecordCounts[bufferKey] += numRecords
-	shard.bufferEstimatedBytes[bufferKey] = uint64(shard.bufferRecordCounts[bufferKey]) * estimateBytesPerRow(typedColumns)
-	totalBuffered := shard.bufferRecordCounts[bufferKey]
+	entry.recordCount += numRecords
+	entry.estimatedBytes = uint64(entry.recordCount) * estimateBytesPerRow(typedColumns)
+	totalBuffered := entry.recordCount
 
 	// Check if buffer needs flush (size-based)
 	if totalBuffered >= b.config.MaxBufferSize {
 		// Extract records to flush (hold lock for microseconds only)
-		recordsToFlush = make([]interface{}, len(shard.buffers[bufferKey]))
-		copy(recordsToFlush, shard.buffers[bufferKey])
+		recordsToFlush = make([]interface{}, len(entry.batches))
+		for i, batch := range entry.batches {
+			recordsToFlush[i] = batch
+		}
 
 		// Clear buffer completely so next write re-initializes bufferStartTimes
 		// Using delete() instead of = nil ensures the key doesn't exist,
 		// so the next WriteColumnar properly sets a fresh start time
 		delete(shard.buffers, bufferKey)
-		delete(shard.bufferStartTimes, bufferKey)
-		delete(shard.bufferRecordCounts, bufferKey)
-		delete(shard.bufferSchemas, bufferKey)
 
 		shouldFlush = true
 
@@ -1758,10 +1767,13 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	}
 
 	// Initialize buffer and record count if needed
-	if _, exists := shard.buffers[bufferKey]; !exists {
-		shard.bufferStartTimes[bufferKey] = time.Now().UTC()
-		shard.bufferRecordCounts[bufferKey] = 0
-		shard.bufferSchemas[bufferKey] = newSignature
+	entry, exists := shard.buffers[bufferKey]
+	if !exists {
+		entry = &bufferEntry{
+			startTime: time.Now().UTC(),
+			schema:    newSignature,
+		}
+		shard.buffers[bufferKey] = entry
 		// Tell periodicFlush to recompute its wakeup time for this new buffer.
 		select {
 		case b.newBufferCh <- struct{}{}:
@@ -1770,21 +1782,20 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	}
 
 	// Add typed columns to buffer directly (no conversion needed)
-	shard.buffers[bufferKey] = append(shard.buffers[bufferKey], typedColumns)
+	entry.batches = append(entry.batches, typedColumns)
 
-	shard.bufferRecordCounts[bufferKey] += numRecords
-	shard.bufferEstimatedBytes[bufferKey] = uint64(shard.bufferRecordCounts[bufferKey]) * estimateBytesPerRow(typedColumns)
-	totalBuffered := shard.bufferRecordCounts[bufferKey]
+	entry.recordCount += numRecords
+	entry.estimatedBytes = uint64(entry.recordCount) * estimateBytesPerRow(typedColumns)
+	totalBuffered := entry.recordCount
 
 	// Check if buffer needs flush (size-based)
 	if totalBuffered >= b.config.MaxBufferSize {
-		recordsToFlush = make([]interface{}, len(shard.buffers[bufferKey]))
-		copy(recordsToFlush, shard.buffers[bufferKey])
+		recordsToFlush = make([]interface{}, len(entry.batches))
+		for i, batch := range entry.batches {
+			recordsToFlush[i] = batch
+		}
 
 		delete(shard.buffers, bufferKey)
-		delete(shard.bufferStartTimes, bufferKey)
-		delete(shard.bufferRecordCounts, bufferKey)
-		delete(shard.bufferSchemas, bufferKey)
 
 		shouldFlush = true
 
@@ -1821,6 +1832,11 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		if b.tryEnqueueFlush(task, flushCancel, bufferKey, totalBuffered) == flushSkipClosing {
 			return nil
 		}
+	}
+
+	// Notify VIEW manager of new data (TLE path)
+	if b.notifier != nil {
+		b.notifier.OnNewData(bufferKey)
 	}
 
 	return nil
@@ -2228,8 +2244,8 @@ func (b *ArrowBuffer) computeNextFlushDeadline() time.Time {
 
 	for _, shard := range b.shards {
 		shard.mu.RLock()
-		for _, startTime := range shard.bufferStartTimes {
-			if expiry := startTime.Add(maxAge); expiry.Before(earliest) {
+		for _, entry := range shard.buffers {
+			if expiry := entry.startTime.Add(maxAge); expiry.Before(earliest) {
 				earliest = expiry
 			}
 		}
@@ -2257,8 +2273,8 @@ func (b *ArrowBuffer) flushAgedBuffers() {
 		shard.mu.Lock()
 
 		// Check each buffer in this shard for age
-		for key, startTime := range shard.bufferStartTimes {
-			age := now.Sub(startTime)
+		for key, entry := range shard.buffers {
+			age := now.Sub(entry.startTime)
 			if age >= threshold {
 				b.logger.Info().
 					Str("buffer_key", key).
@@ -2329,6 +2345,8 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 			b.flushRecordsAsync(task.ctx, task.bufferKey, task.database, task.measurement, task.records, task.recordCount)
 			// Release timeout context resources
 			task.cancel()
+			// Record flush record count distribution
+			metrics.Get().RecordBufferFlushRecords("size", task.recordCount)
 		// Notify VIEW manager that flush is complete
 		if b.notifier != nil {
 			b.notifier.OnFlushComplete(task.bufferKey)
@@ -2554,31 +2572,28 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 // flushBufferLocked writes buffered data to Parquet and storage (synchronous version for periodic flush)
 // Note: Caller must hold shard.mu lock
 func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard, bufferKey, database, measurement string) error {
-	batches, exists := shard.buffers[bufferKey]
-	if !exists || len(batches) == 0 {
-		// Clean up stale tracking entries even if buffer is empty
-		delete(shard.bufferStartTimes, bufferKey)
-		delete(shard.bufferRecordCounts, bufferKey)
-		delete(shard.bufferSchemas, bufferKey)
-	// Notify VIEW manager after synchronous flush
-	if b.notifier != nil {
-		b.notifier.OnFlushComplete(bufferKey)
-	}
+	entry, exists := shard.buffers[bufferKey]
+	if !exists || len(entry.batches) == 0 {
+		// Clean up stale tracking entry even if buffer is empty
+		delete(shard.buffers, bufferKey)
+		// Notify VIEW manager after synchronous flush
+		if b.notifier != nil {
+			b.notifier.OnFlushComplete(bufferKey)
+		}
 		return nil
 	}
 
 	// Get record count before clearing buffer
-	recordCount := shard.bufferRecordCounts[bufferKey]
+	recordCount := entry.recordCount
 
 	// Extract records to flush (hold lock for minimal time)
-	recordsToFlush := make([]interface{}, len(batches))
-	copy(recordsToFlush, batches)
+	recordsToFlush := make([]interface{}, len(entry.batches))
+	for i, batch := range entry.batches {
+		recordsToFlush[i] = batch
+	}
 
 	// Clear buffer immediately
 	delete(shard.buffers, bufferKey)
-	delete(shard.bufferStartTimes, bufferKey)
-	delete(shard.bufferRecordCounts, bufferKey)
-	delete(shard.bufferSchemas, bufferKey)
 
 	// Release lock before expensive operations
 	shard.mu.Unlock()
@@ -2611,6 +2626,9 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 	if b.notifier != nil {
 		b.notifier.OnFlushComplete(bufferKey)
 	}
+
+	// Record flush record count distribution
+	metrics.Get().RecordBufferFlushRecords("age", recordCount)
 
 	// Re-acquire lock for caller
 	shard.mu.Lock()
@@ -3467,13 +3485,10 @@ func (b *ArrowBuffer) SinceRefresh(bufferKey string) ([]*TypedColumnBatch, error
 	for i := uint32(0); i < b.shardCount; i++ {
 		shard := b.shards[i]
 		shard.mu.RLock()
-		batches, ok := shard.buffers[bufferKey]
-		refreshIdx := shard.bufferRefreshIndex[bufferKey]
-		if ok && refreshIdx < len(batches) {
-			for _, b := range batches[refreshIdx:] {
-				if tb, ok := b.(*TypedColumnBatch); ok {
-					result = append(result, tb)
-				}
+		entry, ok := shard.buffers[bufferKey]
+		if ok && entry.refreshIndex < len(entry.batches) {
+			for _, b := range entry.batches[entry.refreshIndex:] {
+				result = append(result, b)
 			}
 		}
 		shard.mu.RUnlock()
@@ -3486,8 +3501,8 @@ func (b *ArrowBuffer) MarkRefreshed(bufferKey string) {
 	for i := uint32(0); i < b.shardCount; i++ {
 		shard := b.shards[i]
 		shard.mu.Lock()
-		if batches, ok := shard.buffers[bufferKey]; ok {
-			shard.bufferRefreshIndex[bufferKey] = len(batches)
+		if entry, ok := shard.buffers[bufferKey]; ok {
+			entry.refreshIndex = len(entry.batches)
 		}
 		shard.mu.Unlock()
 	}
@@ -3499,7 +3514,9 @@ func (b *ArrowBuffer) TotalBufferedRecords(bufferKey string) int {
 	for i := uint32(0); i < b.shardCount; i++ {
 		shard := b.shards[i]
 		shard.mu.RLock()
-		total += shard.bufferRecordCounts[bufferKey]
+		if entry, ok := shard.buffers[bufferKey]; ok {
+			total += entry.recordCount
+		}
 		shard.mu.RUnlock()
 	}
 	return total
@@ -3511,8 +3528,8 @@ func (b *ArrowBuffer) TotalBufferedBytes() uint64 {
 	for i := uint32(0); i < b.shardCount; i++ {
 		shard := b.shards[i]
 		shard.mu.RLock()
-		for _, bytes := range shard.bufferEstimatedBytes {
-			total += bytes
+		for _, entry := range shard.buffers {
+			total += entry.estimatedBytes
 		}
 		shard.mu.RUnlock()
 	}

@@ -28,7 +28,7 @@ type ArrowViewManager struct {
 	db     *DuckDB
 	buffer *ingest.ArrowBuffer
 
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	views map[string]*arrowViewState
 
 	notifyCh chan string
@@ -70,8 +70,8 @@ func (m *ArrowViewManager) OnFlushComplete(bufferKey string) {
 
 // HasData 判断指定 bufferKey 是否有活跃的缓冲 VIEW。
 func (m *ArrowViewManager) HasData(bufferKey string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	_, exists := m.views[bufferKey]
 	return exists
 }

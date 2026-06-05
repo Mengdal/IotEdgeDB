@@ -717,6 +717,17 @@ func Load() (*Config, error) {
 	if cfg.Database.MemoryLimit != "" && !memoryLimitRe.MatchString(cfg.Database.MemoryLimit) {
 		return nil, fmt.Errorf("invalid database.memory_limit value: %q", cfg.Database.MemoryLimit)
 	}
+
+	// Warn if deprecated ingest config fields are explicitly configured.
+	// v.IsSet returns true only when the key was set by the user (config file,
+	// env var, or flag), not when it was set by SetDefault.
+	if v.IsSet("ingest.max_buffer_size") {
+		fmt.Fprintf(os.Stderr, "WARN: ingest.max_buffer_size is deprecated and no longer used; use ingest.max_buffer_memory_mb instead\n")
+	}
+	if v.IsSet("ingest.max_buffer_age_ms") {
+		fmt.Fprintf(os.Stderr, "WARN: ingest.max_buffer_age_ms is deprecated and no longer used; use ingest.max_buffer_age_seconds instead\n")
+	}
+
 	return cfg, nil
 }
 
