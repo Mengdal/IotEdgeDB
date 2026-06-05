@@ -32,6 +32,10 @@ type ArrowViewManager struct {
 	mu    sync.RWMutex
 	views map[string]*arrowViewState
 
+	// measurementViews maps "db/measurement" → set of schema-specific buffer keys.
+	// Enables query-time UNION of all schema variants for a measurement.
+	measurementViews map[string]map[string]struct{}
+
 	notifyCh chan string
 	dirty    map[string]struct{}
 	closeCh  chan struct{}
@@ -41,13 +45,14 @@ type ArrowViewManager struct {
 // NewArrowViewManager 创建 VIEW 管理器并启动后台刷新循环。
 func NewArrowViewManager(db *DuckDB, buffer *ingest.ArrowBuffer, logger zerolog.Logger) *ArrowViewManager {
 	m := &ArrowViewManager{
-		db:       db,
-		buffer:   buffer,
-		views:    make(map[string]*arrowViewState),
-		notifyCh: make(chan string, 256),
-		dirty:    make(map[string]struct{}),
-		closeCh:  make(chan struct{}),
-		logger:   logger,
+		db:               db,
+		buffer:           buffer,
+		views:            make(map[string]*arrowViewState),
+		measurementViews: make(map[string]map[string]struct{}),
+		notifyCh:         make(chan string, 256),
+		dirty:            make(map[string]struct{}),
+		closeCh:          make(chan struct{}),
+		logger:           logger,
 	}
 	go m.refreshLoop()
 	return m
@@ -65,6 +70,7 @@ func (m *ArrowViewManager) OnNewData(bufferKey string) {
 func (m *ArrowViewManager) OnFlushComplete(bufferKey string) {
 	m.mu.Lock()
 	delete(m.views, bufferKey)
+	m.removeFromMeasurementIndexLocked(bufferKey)
 	m.mu.Unlock()
 	m.OnNewData(bufferKey)
 }
@@ -75,6 +81,66 @@ func (m *ArrowViewManager) HasData(bufferKey string) bool {
 	defer m.mu.RUnlock()
 	_, exists := m.views[bufferKey]
 	return exists
+}
+
+// HasMeasurementData 判断指定 (database, measurement) 下是否有任何活跃 VIEW。
+// 用于查询端快速判断是否需要 UNION 缓冲数据。
+func (m *ArrowViewManager) HasMeasurementData(database, measurement string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	key := database + "/" + measurement
+	keys, exists := m.measurementViews[key]
+	return exists && len(keys) > 0
+}
+
+// MeasurementViewNames 返回指定 (database, measurement) 下所有活跃 schema 的 VIEW 名称。
+// 用于查询端构造 multi-schema UNION ALL 子句。
+func (m *ArrowViewManager) MeasurementViewNames(database, measurement string) []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	key := database + "/" + measurement
+	keys := m.measurementViews[key]
+	result := make([]string, 0, len(keys))
+	for k := range keys {
+		if _, ok := m.views[k]; ok {
+			result = append(result, ViewName(k))
+		}
+	}
+	return result
+}
+
+// registerInMeasurementIndex adds the buffer key to the measurement index.
+// Must be called with m.mu held.
+func (m *ArrowViewManager) registerInMeasurementIndexLocked(bufferKey string) {
+	// Extract "db/measurement" from "db/measurement#hash"
+	baseKey, _ := stripHashFromKey(bufferKey)
+	if baseKey == "" {
+		return
+	}
+	if m.measurementViews[baseKey] == nil {
+		m.measurementViews[baseKey] = make(map[string]struct{})
+	}
+	m.measurementViews[baseKey][bufferKey] = struct{}{}
+}
+
+// removeFromMeasurementIndex removes the buffer key from the measurement index.
+// Must be called with m.mu held.
+func (m *ArrowViewManager) removeFromMeasurementIndexLocked(bufferKey string) {
+	baseKey, _ := stripHashFromKey(bufferKey)
+	if keys, ok := m.measurementViews[baseKey]; ok {
+		delete(keys, bufferKey)
+		if len(keys) == 0 {
+			delete(m.measurementViews, baseKey)
+		}
+	}
+}
+
+// stripHashFromKey strips the "#hash" suffix from a buffer key.
+func stripHashFromKey(bufferKey string) (string, string) {
+	if idx := strings.LastIndex(bufferKey, "__"); idx >= 0 {
+		return bufferKey[:idx], bufferKey[idx+1:]
+	}
+	return bufferKey, ""
 }
 
 // ViewName 将 bufferKey 转为 DuckDB 临时表名称。
@@ -175,6 +241,7 @@ func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ing
 		rowCount:  totalRows,
 		createdAt: time.Now(),
 	}
+	m.registerInMeasurementIndexLocked(bufferKey)
 	m.mu.Unlock()
 }
 
@@ -336,6 +403,10 @@ func (m *ArrowViewManager) Close() error {
 		viewName := ViewName(bufferKey)
 		m.db.DB().Exec("DROP TABLE IF EXISTS " + viewName)
 		delete(m.views, bufferKey)
+	}
+	// Clear measurement index
+	for k := range m.measurementViews {
+		delete(m.measurementViews, k)
 	}
 	return nil
 }

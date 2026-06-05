@@ -225,11 +225,13 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	e.buffer.tryEnqueueFlush(task, flushCancel, c.bufferKey, recordCount)
 }
 
-// splitKeyToDBAndMeas 将 "database/measurement" 拆分为 database 和 measurement。
+// splitKeyToDBAndMeas 将 bufferKey 拆分为 database 和 measurement，
+// 同时剥离 schema hash 后缀（例如 "db/cpu#abc123" → ("db", "cpu")）。
 func splitKeyToDBAndMeas(key string) (database, measurement string) {
-	idx := strings.LastIndex(key, "/")
+	cleanKey, _ := stripSchemaHash(key)
+	idx := strings.LastIndex(cleanKey, "/")
 	if idx < 0 {
-		return key, key
+		return cleanKey, cleanKey
 	}
-	return key[:idx], key[idx+1:]
+	return cleanKey[:idx], cleanKey[idx+1:]
 }

@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"sync"
@@ -13,6 +15,12 @@ import (
 
 	"github.com/rs/zerolog"
 )
+
+// bufKey computes the schema-specific buffer key matching production schemaKey().
+func bufKey(db, meas, sig string) string {
+	h := sha256.Sum256([]byte(sig))
+	return db + "/" + meas + "__" + hex.EncodeToString(h[:4])
+}
 
 // capturingIngestStorage records writes so tests can verify flush output.
 type capturingIngestStorage struct {
@@ -147,12 +155,15 @@ func TestWrite_Buffer_View_QueryVisibility(t *testing.T) {
 	// Wait for VIEW refresh loop (100ms ticker + processing time)
 	time.Sleep(300 * time.Millisecond)
 
-	bufferKey := "test/cpu"
-	if !viewMgr.HasData(bufferKey) {
+	if !viewMgr.HasMeasurementData("test", "cpu") {
 		t.Fatal("expected VIEW to have data after write")
 	}
 
-	viewName := ViewName(bufferKey)
+	vns := viewMgr.MeasurementViewNames("test", "cpu")
+	if len(vns) == 0 {
+		t.Fatal("no VIEW names returned")
+	}
+	viewName := vns[0]
 	rows, err := db.QueryContext(ctx, `SELECT COUNT(*) FROM `+viewName)
 	if err != nil {
 		t.Fatalf("Query VIEW: %v", err)
@@ -200,13 +211,11 @@ func TestWrite_Buffer_View_QueryVisibility(t *testing.T) {
 func TestWrite_Incremental_ViewAppendsRows(t *testing.T) {
 	_, buf, viewMgr, _ := setupIntegrationTest(t)
 	ctx := context.Background()
-	bufferKey := "test/mem"
-
 	// Write first batch
 	buf.WriteColumnarDirect(ctx, "test", "mem", makeColumns("mem", 3, map[string]string{"host": "a"}))
 	time.Sleep(300 * time.Millisecond)
 
-	if !viewMgr.HasData(bufferKey) {
+	if !viewMgr.HasMeasurementData("test", "mem") {
 		t.Fatal("expected VIEW after first write")
 	}
 
@@ -215,6 +224,10 @@ func TestWrite_Incremental_ViewAppendsRows(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Total should be 7
+	vns := viewMgr.MeasurementViewNames("test", "mem")
+	if len(vns) == 0 {
+		t.Fatal("no VIEWs for mem")
+	}
 	conn, err := viewMgr.db.DB().Conn(ctx)
 	if err != nil {
 		t.Fatalf("get conn: %v", err)
@@ -222,7 +235,7 @@ func TestWrite_Incremental_ViewAppendsRows(t *testing.T) {
 	defer conn.Close()
 
 	var count int
-	err = conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+ViewName(bufferKey)).Scan(&count)
+	err = conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+vns[0]).Scan(&count)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -279,7 +292,7 @@ func TestFlush_ViewCleared(t *testing.T) {
 // Test: schema change → VIEW rebuilt
 // ---------------------------------------------------------------------------
 func TestSchemaChange_ViewRebuilt(t *testing.T) {
-	db, buf, _, _ := setupIntegrationTest(t)
+	db, buf, viewMgr, _ := setupIntegrationTest(t)
 	ctx := context.Background()
 
 	// Write with schema A: time, value, host
@@ -295,7 +308,7 @@ func TestSchemaChange_ViewRebuilt(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify schema A columns
-	cols, err := db.QueryContext(ctx, `SELECT column_name FROM information_schema.columns WHERE table_name='`+ViewName("test/schema_evolve")+`' ORDER BY column_name`)
+	cols, err := db.QueryContext(ctx, `SELECT column_name FROM information_schema.columns WHERE table_name='`+viewMgr.MeasurementViewNames("test","schema_evolve")[0]+`' ORDER BY column_name`)
 	if err != nil {
 		t.Fatalf("query schema: %v", err)
 	}
@@ -320,18 +333,22 @@ func TestSchemaChange_ViewRebuilt(t *testing.T) {
 	}
 	time.Sleep(300 * time.Millisecond)
 
-	// The schema evolution should have triggered a flush of the old schema
-	// and re-created the VIEW with the new schema (including "region")
-	var count int
-	err = db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+ViewName("test/schema_evolve")).Scan(&count)
-	if err != nil {
-		t.Fatalf("query after schema change: %v", err)
+	// Schema-per-buffer: both schema A (2 rows) and schema B (1 row) coexist
+	vns := viewMgr.MeasurementViewNames("test", "schema_evolve")
+	if len(vns) < 2 {
+		t.Fatalf("expected at least 2 VIEWs (one per schema), got %d: %v", len(vns), vns)
 	}
-	if count != 1 {
-		t.Errorf("expected 1 row after schema change (old schema flushed), got %d", count)
+	var count int
+	err = db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+vns[0]).Scan(&count)
+	if err != nil {
+		t.Fatalf("query schema A VIEW: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 rows in schema A VIEW, got %d", count)
 	}
 
-	t.Log("CONFIRMED: schema change triggers flush + VIEW rebuild")
+	t.Logf("Schema-per-buffer: %d VIEWs coexist (schemas: %v)", len(vns), vns)
+	t.Log("CONFIRMED: schema change creates separate VIEW per schema variant (no flush needed)")
 }
 
 // ---------------------------------------------------------------------------
@@ -374,21 +391,25 @@ func TestConcurrentWrites_ViewDataIntegrity(t *testing.T) {
 
 	// Wait for VIEW refresh with retry
 	expected := numGoroutines * batchesPerGoroutine * recordsPerBatch
-	if !viewMgr.HasData("test/concurrent") {
+	if !viewMgr.HasMeasurementData("test", "concurrent") {
 		// Retry a few times
 		for i := 0; i < 30; i++ {
 			time.Sleep(100 * time.Millisecond)
-			if viewMgr.HasData("test/concurrent") {
+			if viewMgr.HasMeasurementData("test", "concurrent") {
 				break
 			}
 		}
 	}
-	if !viewMgr.HasData("test/concurrent") {
+	if !viewMgr.HasMeasurementData("test", "concurrent") {
 		t.Fatal("VIEW was never created after concurrent writes")
 	}
 
+	vns := viewMgr.MeasurementViewNames("test", "concurrent")
+	if len(vns) == 0 {
+		t.Fatal("no VIEW names for concurrent")
+	}
 	var count int
-	err := db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+ViewName("test/concurrent")).Scan(&count)
+	err := db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+vns[0]).Scan(&count)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -421,7 +442,7 @@ func TestNotifier_ChannelOverflow_DataStillRefreshed(t *testing.T) {
 		// Check first 26 keys (a0 through z0)
 		for i := 0; i < 26; i++ {
 			measName := "overflow_" + string(rune('a'+i)) + "0"
-			if viewMgr.HasData("test/" + measName) {
+			if viewMgr.HasMeasurementData("test", measName) {
 				found = true
 				break
 			}
@@ -434,16 +455,16 @@ func TestNotifier_ChannelOverflow_DataStillRefreshed(t *testing.T) {
 		count := 0
 		for i := 0; i < numKeys; i++ {
 			measName := "overflow_" + string(rune('a'+i%26)) + string(rune('0'+i/26%10))
-			if viewMgr.HasData("test/" + measName) {
+			if viewMgr.HasMeasurementData("test", measName) {
 				count++
 			}
 		}
 		t.Fatalf("no VIEWs created after writing %d keys (notifyCh capacity=256). "+
-			"Actually created: %d VIEWs", numKeys, count)
+			"Actually created: %d measurement groups", numKeys, count)
 	}
 
 	// Verify one specific VIEW has correct data
-	viewName := ViewName("test/overflow_a0")
+	viewName := viewMgr.MeasurementViewNames("test","overflow_a0")[0]
 	var count int
 	db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+viewName).Scan(&count) //nolint:errcheck
 	t.Logf("Overflow test: %s has %d rows", viewName, count)

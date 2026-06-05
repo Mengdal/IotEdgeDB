@@ -906,6 +906,27 @@ func getColumnSignature(columns map[string]interface{}) string {
 	return sb.String()
 }
 
+// schemaHash returns the first 8 hex chars of the SHA-256 of the column signature.
+func schemaHash(signature string) string {
+	h := sha256.Sum256([]byte(signature))
+	return hex.EncodeToString(h[:4]) // 8 hex chars
+}
+
+// schemaKey constructs a buffer key that includes the schema hash, so different
+// schemas for the same (database, measurement) naturally get separate buffer entries.
+func schemaKey(database, measurement, signature string) string {
+	return database + "/" + measurement + "__" + schemaHash(signature)
+}
+
+// stripSchemaHash removes the "#hash" suffix from a buffer key if present.
+// Returns the original key and an empty string if no hash suffix exists.
+func stripSchemaHash(bufferKey string) (baseKey string, hash string) {
+	if idx := strings.LastIndex(bufferKey, "__"); idx >= 0 {
+		return bufferKey[:idx], bufferKey[idx+1:]
+	}
+	return bufferKey, ""
+}
+
 // getShard returns the shard for a given buffer key using FNV-1a hash
 func (b *ArrowBuffer) getShard(bufferKey string) *bufferShard {
 	// FNV-1a hash (fast, good distribution)
@@ -1491,83 +1512,12 @@ const schemaEvolutionMaxIters = 8
 // failure under sustained schema-rotation churn.
 var ErrSchemaChurnExceeded = errors.New("schema-evolution loop exceeded max iterations: sustained concurrent schema churn against the same (database, measurement)")
 
-// flushOnSchemaChangeLocked is the shared helper used by both columnar
-// write paths to handle schema evolution under the shard lock.
-//
-// Caller MUST hold shard.mu. The loop terminates when either:
-//  1. The bufferSchemas entry is absent or matches newSignature (steady
-//     state — single iteration).
-//  2. ctx is cancelled — return ctx.Err() so the caller can abort the
-//     write entirely.
-//  3. schemaEvolutionMaxIters is reached — return ErrSchemaChurnExceeded
-//     so the caller can reject the write with a retryable status (HTTP
-//     503). The per-iteration flushes inside the loop already wrote
-//     older schemas' rows to durable Parquet, so there is no data loss —
-//     only the current request fails under sustained schema-rotation
-//     churn.
-//
-// flushBufferLocked is called inside the loop; it releases-and-
-// reacquires shard.mu around its I/O. On flush error the buffer
-// entry is still deleted, so the next iteration sees !exists and
-// terminates cleanly.
-func (b *ArrowBuffer) flushOnSchemaChangeLocked(
-	ctx context.Context,
-	shard *bufferShard,
-	bufferKey, database, measurement, newSignature string,
-) error {
-	for i := 0; i < schemaEvolutionMaxIters; i++ {
-		// ctx-aware: a cancelled request shouldn't be starved by
-		// rotating-schema racers. Caller releases lock before
-		// surfacing the error.
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		entry, entryExists := shard.buffers[bufferKey]
-		existingSignature, exists := "", entryExists
-		if entryExists {
-			existingSignature = entry.schema
-		}
-		if !exists || existingSignature == newSignature {
-			return nil
-		}
-		b.logger.Debug().
-			Str("buffer_key", bufferKey).
-			Str("old_schema", existingSignature).
-			Str("new_schema", newSignature).
-			Msg("Schema evolution detected, flushing buffer")
-
-		if err := b.flushBufferLocked(ctx, shard, bufferKey, database, measurement); err != nil {
-			b.logger.Error().Err(err).
-				Str("buffer_key", bufferKey).
-				Msg("Failed to flush buffer on schema change")
-			// flushBufferLocked deletes the buffer entry even on
-			// error — the next iteration sees !exists and exits.
-		}
-	}
-	// Reached the iteration cap. Surface as a typed error so callers can
-	// reject the request with a retryable 503 rather than silently
-	// committing a wide schema-mixed buffer to disk. The per-iteration
-	// flushes inside the loop already wrote the older schemas' rows to
-	// durable Parquet, so there is no data loss — only this single
-	// request fails under sustained schema-rotation churn.
-	b.totalSchemaChurnExceeded.Add(1)
-	b.logger.Warn().
-		Str("buffer_key", bufferKey).
-		Int("max_iters", schemaEvolutionMaxIters).
-		Msg("Schema-evolution loop hit max iterations; rejecting write with ErrSchemaChurnExceeded")
-	return ErrSchemaChurnExceeded
-}
-
 // writeColumnar writes a columnar record to the buffer
 func (b *ArrowBuffer) writeColumnar(ctx context.Context, database string, record *models.ColumnarRecord) error {
 	return b.writeColumnarInternal(ctx, database, record, false)
 }
 
 func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string, record *models.ColumnarRecord, skipWAL bool) error {
-	// Create buffer key: database/measurement
-	// OPTIMIZATION: String concatenation is faster than fmt.Sprintf (no reflection)
-	bufferKey := database + "/" + record.Measurement
-
 	// WAL: Write to WAL before buffering (if enabled)
 	// Skip WAL during recovery to avoid re-writing recovered data
 	if b.wal != nil && !skipWAL {
@@ -1615,6 +1565,10 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		newSignature = getColumnSignature(typedColumns.Data)
 	}
 
+	// Construct schema-specific buffer key so different schemas for the
+	// same measurement naturally get separate buffer entries.
+	bufferKey := schemaKey(database, record.Measurement, newSignature)
+
 	// OPTIMIZATION: Get shard for this buffer key (lock sharding)
 	shard := b.getShard(bufferKey)
 
@@ -1624,15 +1578,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	var shouldFlush bool
 
 	shard.mu.Lock()
-
-	// Schema evolution detection: flush buffer if columns changed.
-	// The loop guards against the I/O window inside flushBufferLocked
-	// where a concurrent writer can install a third schema; see
-	// flushOnSchemaChangeLocked for the full rationale.
-	if err := b.flushOnSchemaChangeLocked(ctx, shard, bufferKey, database, record.Measurement, newSignature); err != nil {
-		shard.mu.Unlock()
-		return err
-	}
 
 	// Initialize buffer and record count if needed
 	entry, exists := shard.buffers[bufferKey]
@@ -1732,8 +1677,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 // is already typed ([]int64, []float64, []string). Used by format-specific parsers
 // that know column types at compile time.
 func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, measurement string, typedColumns *TypedColumnBatch, numRecords int, skipWAL bool) error {
-	bufferKey := database + "/" + measurement
-
 	// WAL: Convert typed batch to row format for WAL storage
 	if b.wal != nil && !skipWAL {
 		walRecords := typedBatchToWALRecords(database, measurement, typedColumns, numRecords, b.getDecimalColumns(measurement))
@@ -1754,6 +1697,9 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		newSignature = getColumnSignature(typedColumns.Data)
 	}
 
+	// Construct schema-specific buffer key.
+	bufferKey := schemaKey(database, measurement, newSignature)
+
 	// Get shard for this buffer key (lock sharding)
 	shard := b.getShard(bufferKey)
 
@@ -1761,12 +1707,6 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	var shouldFlush bool
 
 	shard.mu.Lock()
-
-	// Schema evolution detection: see flushOnSchemaChangeLocked.
-	if err := b.flushOnSchemaChangeLocked(ctx, shard, bufferKey, database, measurement, newSignature); err != nil {
-		shard.mu.Unlock()
-		return err
-	}
 
 	// Initialize buffer and record count if needed
 	entry, exists := shard.buffers[bufferKey]
@@ -2308,13 +2248,15 @@ func (b *ArrowBuffer) flushAgedBuffers() {
 
 // splitBufferKey splits "database/measurement" into [database, measurement]
 func splitBufferKey(key string) []string {
+	// Strip schema hash suffix if present (e.g. "db/cpu#abc123" -> "db/cpu")
+	cleanKey, _ := stripSchemaHash(key)
 	// Find first slash to split database/measurement
-	for i, c := range key {
+	for i, c := range cleanKey {
 		if c == '/' {
-			return []string{key[:i], key[i+1:]}
+			return []string{cleanKey[:i], cleanKey[i+1:]}
 		}
 	}
-	return []string{key}
+	return []string{cleanKey}
 }
 
 // flushRecordsAsync performs fire-and-forget flush in background goroutine

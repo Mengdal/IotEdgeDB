@@ -2095,19 +2095,32 @@ func (h *QueryHandler) buildReadParquetExpr(path, originalSQL, keyword string) s
 	return expr
 }
 
-// wrapWithBufferView wraps a read_parquet expression with a UNION ALL to the buffer
-// temporary VIEW when the buffer has unflushed data for the measurement.
+// wrapWithBufferView wraps a read_parquet expression with a UNION ALL to all
+// buffer VIEWs for the measurement (one per schema variant). When the buffer has
+// no data for this measurement, returns the expression unchanged.
 func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement string) string {
 	if h.viewMgr == nil {
 		return expr
 	}
-	bufferKey := dbName + "/" + measurement
-	if !h.viewMgr.HasData(bufferKey) {
+	if !h.viewMgr.HasMeasurementData(dbName, measurement) {
 		return expr
 	}
-	viewName := database.ViewName(bufferKey)
+	viewNames := h.viewMgr.MeasurementViewNames(dbName, measurement)
+	if len(viewNames) == 0 {
+		return expr
+	}
 	innerExpr := strings.TrimPrefix(expr, keyword+" ")
-	return keyword + " (SELECT * FROM (" + innerExpr + ") UNION ALL SELECT * FROM " + viewName + ")"
+	var b strings.Builder
+	b.WriteString(keyword)
+	b.WriteString(" (SELECT * FROM (")
+	b.WriteString(innerExpr)
+	b.WriteByte(')')
+	for _, vn := range viewNames {
+		b.WriteString(" UNION ALL SELECT * FROM ")
+		b.WriteString(vn)
+	}
+	b.WriteByte(')')
+	return b.String()
 }
 
 // buildReadParquetExprForMeasurement builds a read_parquet expression for a database/measurement pair.
