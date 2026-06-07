@@ -39,6 +39,14 @@ const (
 	// Enveloped format: [0x01][2-byte db name length][db name][original msgpack]
 	// Since msgpack maps/arrays always start with bytes >= 0x80, 0x01 is unambiguous.
 	WALEnvelopeMarker = 0x01
+
+	// WALFlushOK is the payload marker for a FLUSH_OK control record.
+	// Format: [0x00][db_len 2B BE][db_name][meas_len 2B BE][meas_name]
+	WALFlushOK byte = 0x00
+
+	// WALFlushFail is the payload marker for a FLUSH_FAIL control record.
+	// Format: [0x02][db_len 2B BE][db_name][meas_len 2B BE][meas_name]
+	WALFlushFail byte = 0x02
 )
 
 // ParseEnvelope extracts the database name and msgpack payload from a WAL entry.
@@ -76,6 +84,21 @@ var ErrPayloadTooLarge = errors.New("WAL payload exceeds maximum allowed size")
 // surface accurate operator-facing messages. Use errors.Is to detect.
 var ErrWALDropped = errors.New("WAL entry dropped: async buffer full")
 
+// ControlType identifies the type of a WAL control record.
+type ControlType uint8
+
+const (
+	FlushOK   ControlType = 0x00 // measurement data successfully flushed to Parquet
+	FlushFail ControlType = 0x02 // measurement flush failed (audit only, no-op on recovery)
+)
+
+// ControlRecord is a WAL entry that marks flush completion for a measurement.
+type ControlRecord struct {
+	Type        ControlType
+	Database    string
+	Measurement string
+}
+
 // walEntry is a pre-serialized WAL entry ready for writing
 type walEntry struct {
 	data []byte // Complete entry: header + payload
@@ -86,8 +109,8 @@ type WriterConfig struct {
 	WALDir       string        // Directory for WAL files
 	SyncMode     SyncMode      // Sync mode: fsync, fdatasync, async
 	MaxSizeBytes int64         // Rotate WAL when it reaches this size (default: 100MB)
-	MaxAge       time.Duration // Rotate WAL after this duration (default: 1 hour)
-	SyncInterval time.Duration // Sync at most this often (default: 100ms, 0 = sync every write)
+	MaxAge       time.Duration // Rotate WAL after this duration (default: 45min = 3 × MaxBufferAgeSeconds)
+	SyncInterval time.Duration // Sync at most this often (default: 1s, 0 = sync every write)
 	SyncBytes    int64         // Sync after this many bytes written (default: 1MB, 0 = no byte threshold)
 	BufferSize   int           // Size of async write buffer (default: 10000)
 	Logger       zerolog.Logger
@@ -154,12 +177,13 @@ func NewWriter(cfg *WriterConfig) (*Writer, error) {
 		cfg.MaxSizeBytes = 100 * 1024 * 1024 // 100MB
 	}
 	if cfg.MaxAge == 0 {
-		cfg.MaxAge = time.Hour
+		cfg.MaxAge = 45 * time.Minute // 3 × MaxBufferAgeSeconds (default 15min)
 	}
-	// Default batched sync: every 100ms OR every 1MB, whichever comes first
-	// This significantly reduces fsync overhead while maintaining reasonable durability
+	// Default batched sync: every 1s OR every 1MB, whichever comes first.
+	// 1s is a balanced default across storage media — NVMe/cloud SSD can go
+	// lower (100-500ms); HDD/slow cloud disk may need 2-5s via config.
 	if cfg.SyncInterval == 0 {
-		cfg.SyncInterval = 100 * time.Millisecond
+		cfg.SyncInterval = 1 * time.Second
 	}
 	if cfg.SyncBytes == 0 {
 		cfg.SyncBytes = 1024 * 1024 // 1MB
@@ -454,6 +478,103 @@ func (w *Writer) AppendRaw(payload []byte) error {
 	copy(entryData[WALEntryHeaderSize:], payload)
 
 	return w.tryEnqueue(entryData)
+}
+
+// buildControlEntry constructs a complete WAL entry for a control record.
+// Format: header(16B) + [marker 1B][db_len 2B BE][db_name][meas_len 2B BE][meas_name]
+func (w *Writer) buildControlEntry(ctrlType ControlType, database, measurement string) []byte {
+	dbBytes := []byte(database)
+	measBytes := []byte(measurement)
+	payloadLen := 1 + 2 + len(dbBytes) + 2 + len(measBytes)
+
+	payload := make([]byte, payloadLen)
+	payload[0] = byte(ctrlType)
+	binary.BigEndian.PutUint16(payload[1:3], uint16(len(dbBytes)))
+	copy(payload[3:], dbBytes)
+	binary.BigEndian.PutUint16(payload[3+len(dbBytes):], uint16(len(measBytes)))
+	copy(payload[3+len(dbBytes)+2:], measBytes)
+
+	checksum := crc32.ChecksumIEEE(payload)
+	timestampUS := uint64(time.Now().UnixMicro())
+
+	entryData := make([]byte, WALEntryHeaderSize+payloadLen)
+	binary.BigEndian.PutUint32(entryData[0:4], uint32(payloadLen))
+	binary.BigEndian.PutUint64(entryData[4:12], timestampUS)
+	binary.BigEndian.PutUint32(entryData[12:16], checksum)
+	copy(entryData[WALEntryHeaderSize:], payload)
+
+	return entryData
+}
+
+// AppendControl writes a control record (FLUSH_OK or FLUSH_FAIL) to the WAL.
+// Control records MUST not be dropped — they are essential for correct recovery.
+// The method first tries the async channel (with retry backoff), then falls back
+// to a synchronous write under the writer lock.
+func (w *Writer) AppendControl(ctrlType ControlType, database, measurement string) error {
+	entryData := w.buildControlEntry(ctrlType, database, measurement)
+
+	// Try async send with exponential backoff (1ms, 2ms, 4ms, 8ms, 16ms)
+	for attempt := 0; attempt < 5; attempt++ {
+		select {
+		case w.entryChan <- walEntry{data: entryData}:
+			return nil
+		default:
+			if attempt < 4 {
+				time.Sleep(time.Millisecond << attempt)
+			}
+		}
+	}
+
+	// Fallback: synchronous write under lock
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.logger.Warn().
+		Str("database", database).
+		Str("measurement", measurement).
+		Uint8("ctrl_type", uint8(ctrlType)).
+		Msg("Control record channel full, writing synchronously")
+
+	n, err := w.currentFile.Write(entryData)
+	if err != nil {
+		return fmt.Errorf("failed to write control record synchronously: %w", err)
+	}
+
+	bytesWritten := int64(n)
+	w.currentSize += bytesWritten
+	w.bytesSinceSync += bytesWritten
+
+	atomic.AddInt64(&w.TotalEntries, 1)
+	atomic.AddInt64(&w.TotalBytes, bytesWritten)
+
+	// Check rotation
+	if w.currentSize >= w.config.MaxSizeBytes || time.Since(w.startTime) >= w.config.MaxAge {
+		if err := w.rotate(); err != nil {
+			w.logger.Error().Err(err).Msg("Failed to rotate WAL after control record")
+		}
+	}
+
+	return nil
+}
+
+// parseControlPayload extracts database and measurement from a control record payload.
+// Payload format: [marker 1B][db_len 2B BE][db_name][meas_len 2B BE][meas_name]
+func parseControlPayload(payload []byte) (database, measurement string) {
+	if len(payload) < 4 {
+		return "", ""
+	}
+	dbLen := binary.BigEndian.Uint16(payload[1:3])
+	if int(3+dbLen+2) > len(payload) {
+		return "", ""
+	}
+	database = string(payload[3 : 3+dbLen])
+	measOffset := 3 + int(dbLen)
+	measLen := binary.BigEndian.Uint16(payload[measOffset : measOffset+2])
+	if measOffset+2+int(measLen) > len(payload) {
+		return database, ""
+	}
+	measurement = string(payload[measOffset+2 : measOffset+2+int(measLen)])
+	return database, measurement
 }
 
 // sync syncs the WAL file to disk based on sync mode

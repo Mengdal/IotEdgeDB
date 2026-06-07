@@ -402,23 +402,19 @@ func main() {
 		}
 
 		// Start periodic WAL maintenance goroutine.
-		// Two modes:
-		//   Normal:   purge rotated WAL files older than safeAge (data already in parquet)
-		//   Recovery: when a flush failure is detected (S3 outage), replay WAL files
-		//             to re-buffer data that was cleared from buffers after failed flush
+		// With FLUSH_OK-based recovery, periodic maintenance only purges old WAL files.
+		// Flush failures are handled by restoring data back into the buffer at failure time,
+		// so no periodic recovery loop is needed.
 		walMaintenanceCtx, walMaintenanceCancel := context.WithCancel(context.Background())
 		shutdownCoordinator.RegisterHook("wal-periodic-maintenance", func(ctx context.Context) error {
 			walMaintenanceCancel()
 			return nil
 		}, shutdown.PriorityBuffer)
 
-		// Safe age threshold: after this duration, a rotated WAL file's data MUST have
-		// been flushed to parquet by the normal buffer flush cycle (MaxBufferAgeMS).
-		// We use 3x margin to account for flush worker delays and clock skew.
-		safeAge := time.Duration(cfg.Ingest.MaxBufferAgeMS) * time.Millisecond * 3
-		if safeAge < 30*time.Second {
-			safeAge = 30 * time.Second
-		}
+		// Safe age threshold: MaxBufferAgeSeconds × 3.  The 3× margin covers flush worker
+		// queueing, Parquet write latency, and FLUSH_OK writing.  PurgeOlderThan only
+		// deletes non-active files, so the active file is always safe.
+		safeAge := time.Duration(cfg.Ingest.MaxBufferAgeSeconds) * time.Second * 3
 
 		recoveryInterval := time.Duration(cfg.WAL.RecoveryIntervalSeconds) * time.Second
 		go func() {
@@ -431,54 +427,11 @@ func main() {
 				case <-walMaintenanceCtx.Done():
 					return
 				case <-ticker.C:
-					if arrowBuffer.HasFlushFailure() {
-						// Storage failure detected — replay WAL files to recover data
-						// that was cleared from buffers after failed flush
-						walLogger.Info().Msg("Flush failure detected, attempting WAL recovery")
-
-						// Purge old WAL files first (same as normal path) to avoid replaying
-						// data that was already successfully flushed to parquet before the failure.
-						if walWriter != nil {
-							deleted, purgeErr := walWriter.PurgeOlderThan(safeAge)
-							if purgeErr != nil {
-								walLogger.Error().Err(purgeErr).Msg("WAL purge before recovery failed")
-							} else if deleted > 0 {
-								walLogger.Info().Int("deleted", deleted).Msg("Purged old WAL files before recovery")
-							}
-						}
-
-						recovery := wal.NewRecovery(cfg.WAL.Directory, walLogger)
-						activeFile := ""
-						if walWriter != nil {
-							activeFile = walWriter.CurrentFile()
-						}
-						stats, err := recovery.RecoverWithOptions(context.Background(), recoveryCallback, &wal.RecoveryOptions{
-							SkipActiveFile:   activeFile,
-							BatchSize:        cfg.WAL.RecoveryBatchSize,
-							ColumnarCallback: columnarCallback,
-						})
-						if err != nil {
-							walLogger.Error().Err(err).Msg("WAL recovery after flush failure failed")
-						} else {
-							if stats.RecoveredFiles > 0 {
-								metrics.Get().IncWALRecoveryTotal()
-								metrics.Get().IncWALRecoveryRecords(int64(stats.RecoveredEntries))
-								walLogger.Info().
-									Int("files", stats.RecoveredFiles).
-									Int("entries", stats.RecoveredEntries).
-									Msg("WAL recovery after flush failure complete")
-							}
-							arrowBuffer.ResetFlushFailure()
-						}
-					} else {
-						// Normal operation — purge WAL files old enough that their data
-						// has been flushed to parquet by the normal buffer flush cycle
-						deleted, err := walWriter.PurgeOlderThan(safeAge)
-						if err != nil {
-							walLogger.Error().Err(err).Msg("Periodic WAL purge failed")
-						} else if deleted > 0 {
-							walLogger.Info().Int("deleted", deleted).Msg("Periodic WAL cleanup complete")
-						}
+					deleted, err := walWriter.PurgeOlderThan(safeAge)
+					if err != nil {
+						walLogger.Error().Err(err).Msg("Periodic WAL purge failed")
+					} else if deleted > 0 {
+						walLogger.Info().Int("deleted", deleted).Msg("Periodic WAL cleanup complete")
 					}
 				}
 			}

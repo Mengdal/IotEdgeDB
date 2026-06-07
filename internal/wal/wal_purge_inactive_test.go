@@ -79,9 +79,7 @@ func TestDuplication_OldPeriodicCycleReplaysAllEntries(t *testing.T) {
 		return nil
 	}
 
-	stats, err := recovery.RecoverWithOptions(context.Background(), callback, &RecoveryOptions{
-		SkipActiveFile: newActiveFile,
-	})
+	stats, err := recovery.RecoverWithOptions(context.Background(), callback, nil)
 	if err != nil {
 		t.Fatalf("recovery failed: %v", err)
 	}

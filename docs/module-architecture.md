@@ -525,7 +525,7 @@ type WriterConfig struct {
     SyncMode     SyncMode        // fsync / fdatasync / async
     MaxSizeBytes int64           // 轮转大小 (默认 100MB)
     MaxAge       time.Duration   // 轮转时间 (默认 1h)
-    SyncInterval time.Duration   // 同步间隔 (默认 100ms)
+    SyncInterval time.Duration   // 同步间隔 (默认 1s)
     SyncBytes    int64           // 字节同步阈值 (默认 1MB)
     BufferSize   int             // 异步通道容量 (默认 10000)
 }

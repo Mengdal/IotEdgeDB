@@ -753,6 +753,7 @@ type WALWriter interface {
 	Append(records []map[string]interface{}) error
 	AppendRaw(payload []byte) error                          // Zero-copy: write raw msgpack bytes directly
 	AppendRawWithMeta(database string, payload []byte) error // Zero-copy with database metadata envelope
+	AppendControl(ctrlType wal.ControlType, database, measurement string) error
 	Stats() map[string]interface{}
 	Close() error
 }
@@ -2371,40 +2372,150 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 	}
 }
 
+// restoreBufferEntry rebuilds a bufferEntry from batch references when mergeBatches fails.
+// The entry was deleted by flushCandidate before the task was created; this puts it back.
+func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}) {
+	if len(batches) == 0 {
+		return
+	}
+
+	shard := b.getShard(bufferKey)
+
+	typedBatches := make([]*TypedColumnBatch, 0, len(batches))
+	recordCount := 0
+	estimatedBytes := uint64(0)
+
+	for _, r := range batches {
+		if batch, ok := r.(*TypedColumnBatch); ok {
+			typedBatches = append(typedBatches, batch)
+			if len(batch.Data) > 0 {
+				for _, col := range batch.Data {
+					switch v := col.(type) {
+					case []int64:
+						recordCount = len(v)
+					case []float64:
+						recordCount = len(v)
+					case []string:
+						recordCount = len(v)
+					case []bool:
+						recordCount = len(v)
+					}
+					break
+				}
+			}
+			estimatedBytes += estimateBytesPerRow(batch) * uint64(recordCount)
+		}
+	}
+
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	// Only restore if the bufferKey doesn't already have new data
+	if _, exists := shard.buffers[bufferKey]; !exists {
+		shard.buffers[bufferKey] = &bufferEntry{
+			batches:        typedBatches,
+			startTime:      time.Now(), // reset timer: retry on next adaptive cycle
+			recordCount:    recordCount,
+			estimatedBytes: estimatedBytes,
+		}
+	}
+}
+
+// typedBatchToColumns converts a TypedColumnBatch's typed arrays back to
+// map[string][]interface{} for re-ingestion via WriteColumnarDirectNoWAL.
+func typedBatchToColumns(merged *TypedColumnBatch) map[string][]interface{} {
+	columns := make(map[string][]interface{}, len(merged.Data))
+	for colName, typedCol := range merged.Data {
+		switch v := typedCol.(type) {
+		case []int64:
+			out := make([]interface{}, len(v))
+			for i, val := range v {
+				out[i] = val
+			}
+			columns[colName] = out
+		case []float64:
+			out := make([]interface{}, len(v))
+			for i, val := range v {
+				out[i] = val
+			}
+			columns[colName] = out
+		case []string:
+			out := make([]interface{}, len(v))
+			for i, val := range v {
+				out[i] = val
+			}
+			columns[colName] = out
+		case []bool:
+			out := make([]interface{}, len(v))
+			for i, val := range v {
+				out[i] = val
+			}
+			columns[colName] = out
+		}
+	}
+	return columns
+}
+
+// writeBackMergedData re-ingests merged (TypedColumnBatch) data into the buffer
+// after a flushPartitionedData failure. Uses WriteColumnarDirectNoWAL to skip
+// double-WAL-writing — the data is already in WAL from the original ingest.
+func (b *ArrowBuffer) writeBackMergedData(ctx context.Context, database, measurement string, merged *TypedColumnBatch) {
+	columns := typedBatchToColumns(merged)
+	if err := b.WriteColumnarDirectNoWAL(ctx, database, measurement, columns); err != nil {
+		b.logger.Error().Err(err).
+			Str("database", database).
+			Str("measurement", measurement).
+			Msg("Failed to restore merged data after flush failure — data remains in WAL")
+	}
+}
+
 func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database, measurement string, records []interface{}, recordCount int) {
 	startTime := time.Now()
 
 	// Merge typed column batches
 	merged, err := b.mergeBatches(records)
 
-	// MEMORY FIX: Clear batch references immediately after merge to allow GC
-	// The merged map now owns all the data, original batches can be collected
+	if err != nil {
+		// mergeBatches failed — restore the original batch references back to buffer.
+		// records has not been nilled yet, batch refs are still valid.
+		b.restoreBufferEntry(bufferKey, records)
+		b.logger.Error().
+			Err(err).
+			Str("buffer_key", bufferKey).
+			Msg("Failed to merge batches — buffer entry restored, will retry")
+		return
+	}
+
+	// Only clear batch references AFTER confirming merge succeeded.
+	// This keeps batch refs alive for restoreBufferEntry on merge failure.
 	for i := range records {
 		records[i] = nil
 	}
 
-	if err != nil {
-		b.logger.Error().
-			Err(err).
-			Str("buffer_key", bufferKey).
-			Msg("Failed to merge batches during async flush")
-
-		b.markFlushFailure()
-		// Data is already in WAL (written at ingest time) - no need to restore to buffer
-		// WAL will be replayed on restart or via periodic recovery
-		return
-	}
-
 	// Flush with data timestamp partitioning
 	if err := b.flushWithDataTimePartitioning(ctx, bufferKey, database, measurement, merged, recordCount, startTime); err != nil {
+		// flushPartitionedData failed — put merged data back into buffer
+		b.writeBackMergedData(ctx, database, measurement, merged)
 		b.logger.Error().
 			Err(err).
 			Str("buffer_key", bufferKey).
 			Int("records", recordCount).
-			Msg("Failed to flush - data preserved in WAL for recovery")
-		b.markFlushFailure()
-		// Data is already in WAL (written at ingest time) - no memory growth
-		// WAL will be replayed on restart or via periodic recovery
+			Msg("Failed to flush — merged data restored to buffer, will retry")
+
+		// Write FLUSH_FAIL control record for audit trail
+		if b.wal != nil {
+			if cerr := b.wal.AppendControl(wal.FlushFail, database, measurement); cerr != nil {
+				b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_FAIL control record")
+			}
+		}
+		return
+	}
+
+	// Flush succeeded — write FLUSH_OK to mark data as confirmed in Parquet
+	if b.wal != nil {
+		if cerr := b.wal.AppendControl(wal.FlushOK, database, measurement); cerr != nil {
+			b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_OK control record")
+		}
 	}
 }
 
@@ -2617,25 +2728,38 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 	// Merge typed column batches
 	merged, err := b.mergeBatches(recordsToFlush)
 	if err != nil {
+		// Restore original batch references back to buffer
+		b.restoreBufferEntry(bufferKey, recordsToFlush)
 		shard.mu.Lock() // Re-acquire lock for caller
-		b.markFlushFailure()
 		return fmt.Errorf("failed to merge batches: %w", err)
 	}
 
 	// Flush with data timestamp partitioning
 	startTime := time.Now().UTC()
 	if err := b.flushBufferLockedDataTime(ctx, bufferKey, database, measurement, merged, recordCount, startTime); err != nil {
-		shard.mu.Lock() // Re-acquire lock for caller
-		b.markFlushFailure()
+		// Put merged data back into buffer
+		b.writeBackMergedData(ctx, database, measurement, merged)
 		b.logger.Warn().
 			Err(err).
 			Str("buffer_key", bufferKey).
 			Int("records", recordCount).
-			Msg("Flush failed - data preserved in WAL for recovery")
-		// Data is already in WAL (written at ingest time) - no need to restore to buffer
-		// This prevents memory growth during prolonged S3 outages
-		// WAL will be replayed on restart or via periodic recovery
+			Msg("Flush failed — merged data restored to buffer, will retry")
+
+		// Write FLUSH_FAIL control record for audit trail
+		if b.wal != nil {
+			if cerr := b.wal.AppendControl(wal.FlushFail, database, measurement); cerr != nil {
+				b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_FAIL control record")
+			}
+		}
+		shard.mu.Lock() // Re-acquire lock for caller
 		return err
+	}
+
+	// Flush succeeded — write FLUSH_OK to mark data as confirmed in Parquet
+	if b.wal != nil {
+		if cerr := b.wal.AppendControl(wal.FlushOK, database, measurement); cerr != nil {
+			b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_OK control record")
+		}
 	}
 
 	// Notify VIEW manager after synchronous flush
