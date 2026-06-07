@@ -30,7 +30,11 @@ type RecoveryStats struct {
 // DefaultMaxStagingRecords is the default per-measurement staging threshold.
 // When staging for a single measurement exceeds this count, its data is
 // replayed immediately to bound recovery memory usage.
-const DefaultMaxStagingRecords = 500000
+// Set high (5M) so incremental replay fires only in extreme memory-pressure
+// scenarios, not during normal cross-file FLUSH_OK operation. A too-low value
+// risks duplicate replay if oversized data is replayed before its FLUSH_OK
+// appears in a later WAL file.
+const DefaultMaxStagingRecords = 5000000
 
 // RecoveryOptions configures WAL recovery behavior
 type RecoveryOptions struct {
@@ -113,13 +117,14 @@ func replayOversizedStaging(
 		}
 
 		// Clear the replayed staging
+		replayedCount := se.recordCount
 		se.records = nil
 		se.columns = nil
 		se.recordCount = 0
 
 		logger.Debug().
 			Str("measurement", key).
-			Int("records", se.recordCount).
+			Int("records", replayedCount).
 			Msg("Incrementally replayed oversized staging entry")
 	}
 }
@@ -244,14 +249,14 @@ func (r *Recovery) RecoverWithOptions(ctx context.Context, callback RecoveryCall
 					}
 					staging[key] = se
 				}
-				// Merge columnar data into staging
+				// Merge columnar data into staging and count rows
+				first := true
 				for colName, values := range entry.ColumnarData.Columns {
 					se.columns[colName] = append(se.columns[colName], values...)
-				}
-				// Count rows from first column
-				for _, values := range entry.ColumnarData.Columns {
-					se.recordCount += len(values)
-					break
+					if first {
+						se.recordCount += len(values)
+						first = false
+					}
 				}
 			} else if entry.Records != nil {
 				// Row records carry _database and _measurement keys

@@ -2433,8 +2433,8 @@ func (b *ArrowBuffer) ensureBufferSpace(newEntryBytes uint64) error {
 	// Layer 2: if still over hard limit, reject with backpressure
 	total = b.estimateTotalBufferBytes()
 	if total+newEntryBytes > b.hardLimit {
-		return fmt.Errorf("buffer hard limit exceeded: %d bytes buffered, %d limit",
-			total+newEntryBytes, b.hardLimit)
+		return fmt.Errorf("buffer hard limit exceeded: %d bytes (current %d + new %d), limit %d",
+			total+newEntryBytes, total, newEntryBytes, b.hardLimit)
 	}
 
 	return nil
@@ -2475,10 +2475,9 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 		}
 	}
 
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
-
-	// Check buffer overflow before restoring
+	// Check buffer overflow BEFORE acquiring shard lock.
+	// ensureBufferSpace scans all shards (RLock); must not be called
+	// while holding a shard write lock or it will deadlock.
 	if err := b.ensureBufferSpace(estimatedBytes); err != nil {
 		b.logger.Error().Err(err).
 			Str("buffer_key", bufferKey).
@@ -2486,6 +2485,9 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 			Msg("Buffer hard limit exceeded — data preserved in WAL, will recover on restart")
 		return
 	}
+
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
 	// Only restore if the bufferKey doesn't already have new data
 	if _, exists := shard.buffers[bufferKey]; !exists {
