@@ -177,7 +177,11 @@ func NewWriter(cfg *WriterConfig) (*Writer, error) {
 		cfg.MaxSizeBytes = 100 * 1024 * 1024 // 100MB
 	}
 	if cfg.MaxAge == 0 {
-		cfg.MaxAge = 45 * time.Minute // 3 × MaxBufferAgeSeconds (default 15min)
+		// 45min = 3 × default MaxBufferAgeSeconds (15min). Hardcoded because
+		// WAL WriterConfig and IngestConfig are independent — the WAL writer
+		// does not know MaxBufferAgeSeconds. Operators who tune MaxBufferAgeSeconds
+		// should also set max_age_seconds in the [wal] config section.
+		cfg.MaxAge = 45 * time.Minute
 	}
 	// Default batched sync: every 1s OR every 1MB, whichever comes first.
 	// 1s is a balanced default across storage media — NVMe/cloud SSD can go

@@ -351,6 +351,10 @@ func main() {
 		arrowBuffer.SetAdaptiveFlushEngine(adaptiveEngine)
 		arrowBuffer.StartAdaptiveFlush()
 
+		// 2b. Buffer overflow protection: hard limit = memory limit × 2.
+		// When exceeded, oldest entries are evicted; if still over, 503 backpressure.
+		arrowBuffer.SetBufferHardLimit(memoryMonitor.BufferLimit() * 2)
+
 		// 3. Arrow VIEW manager (buffer data queryable via DuckDB temp tables)
 		arrowViewMgr := database.NewArrowViewManager(db, arrowBuffer, logger.Get("arrow-view"))
 		arrowBuffer.SetNotifier(arrowViewMgr)
@@ -414,7 +418,11 @@ func main() {
 		// Safe age threshold: MaxBufferAgeSeconds × 3.  The 3× margin covers flush worker
 		// queueing, Parquet write latency, and FLUSH_OK writing.  PurgeOlderThan only
 		// deletes non-active files, so the active file is always safe.
+		// Minimum 30s floor prevents premature purge with small MaxBufferAgeSeconds values.
 		safeAge := time.Duration(cfg.Ingest.MaxBufferAgeSeconds) * time.Second * 3
+		if safeAge < 30*time.Second {
+			safeAge = 30 * time.Second
+		}
 
 		recoveryInterval := time.Duration(cfg.WAL.RecoveryIntervalSeconds) * time.Second
 		go func() {

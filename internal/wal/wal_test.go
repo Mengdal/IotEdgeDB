@@ -1031,3 +1031,100 @@ func TestRecovery_FlushFailDoesNotClearStaging(t *testing.T) {
 		t.Errorf("expected 1 recovered entry (FLUSH_FAIL no-op), got %d", recoveredCount)
 	}
 }
+
+// TestRecovery_CrossFileFlushOK verifies that FLUSH_OK in a later WAL file
+// correctly clears staging accumulated from an earlier file. This covers
+// the scenario where data and its FLUSH_OK are in different files due to
+// WAL rotation between ingest and flush.
+func TestRecovery_CrossFileFlushOK(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "wal-cross-file-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// File 1: write data for cpu and memory measurements.
+	writer1, err := NewWriter(&WriterConfig{
+		WALDir:       tmpDir,
+		SyncMode:     SyncModeAsync,
+		MaxSizeBytes: 100 * 1024 * 1024,
+		Logger:       zerolog.Nop(),
+	})
+	if err != nil {
+		t.Fatalf("failed to create writer1: %v", err)
+	}
+
+	writer1.Append([]map[string]interface{}{
+		{"_measurement": "cpu", "value": 1.0},
+		{"_measurement": "cpu", "value": 2.0},
+	})
+	time.Sleep(30 * time.Millisecond)
+
+	writer1.Append([]map[string]interface{}{
+		{"_measurement": "memory", "value": 10.0},
+	})
+	time.Sleep(30 * time.Millisecond)
+	writer1.Close()
+
+	// Wait to ensure file timestamp difference.
+	time.Sleep(1100 * time.Millisecond)
+
+	// File 2: write FLUSH_OK for cpu (confirming file 1 data).
+	// Then write more cpu data (unconfirmed).
+	writer2, err := NewWriter(&WriterConfig{
+		WALDir:       tmpDir,
+		SyncMode:     SyncModeAsync,
+		MaxSizeBytes: 100 * 1024 * 1024,
+		Logger:       zerolog.Nop(),
+	})
+	if err != nil {
+		t.Fatalf("failed to create writer2: %v", err)
+	}
+
+	writer2.AppendControl(FlushOK, "default", "cpu")
+	time.Sleep(30 * time.Millisecond)
+
+	writer2.Append([]map[string]interface{}{
+		{"_measurement": "cpu", "value": 3.0},
+	})
+	time.Sleep(30 * time.Millisecond)
+	writer2.Close()
+
+	// Recover — should only replay:
+	//   - cpu value 3.0 (post-FLUSH_OK in file 2)
+	//   - memory value 10.0 (never got FLUSH_OK)
+	recovery := NewRecovery(tmpDir, zerolog.Nop())
+	recoveredByMeasurement := make(map[string][]float64)
+	callback := func(ctx context.Context, records []map[string]interface{}) error {
+		for _, r := range records {
+			m, _ := r["_measurement"].(string)
+			v, _ := r["value"].(float64)
+			recoveredByMeasurement[m] = append(recoveredByMeasurement[m], v)
+		}
+		return nil
+	}
+
+	stats, err := recovery.RecoverWithOptions(context.Background(), callback, nil)
+	if err != nil {
+		t.Fatalf("RecoverWithOptions failed: %v", err)
+	}
+
+	// cpu: only post-FLUSH_OK value 3.0 should survive
+	cpuVals := recoveredByMeasurement["cpu"]
+	if len(cpuVals) != 1 || cpuVals[0] != 3.0 {
+		t.Errorf("expected cpu=[3.0] (cross-file FLUSH_OK cleared file-1 data), got %v", cpuVals)
+	}
+
+	// memory: never got FLUSH_OK, should still be staged
+	memVals := recoveredByMeasurement["memory"]
+	if len(memVals) != 1 || memVals[0] != 10.0 {
+		t.Errorf("expected memory=[10.0] (no FLUSH_OK), got %v", memVals)
+	}
+
+	// One staging cleared (cpu), one replayed entry
+	if stats.StagingCleared != 1 {
+		t.Errorf("expected 1 staging cleared, got %d", stats.StagingCleared)
+	}
+
+	t.Logf("Cross-file FLUSH_OK: cpu staging cleared, memory replayed")
+}

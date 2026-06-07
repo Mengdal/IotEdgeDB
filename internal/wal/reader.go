@@ -145,7 +145,12 @@ func (r *Reader) readEntry(f *os.File) (*Entry, error) {
 		return nil, fmt.Errorf("empty WAL entry payload")
 	}
 
-	// Control records: FLUSH_OK (0x00) or FLUSH_FAIL (0x02)
+	// Control records: FLUSH_OK (0x00) or FLUSH_FAIL (0x02).
+	// NOTE: Rolling back to a pre-FLUSH_OK binary will see these as
+	// "corrupted entries" since 0x00 and 0x02 are not valid msgpack.
+	// This is harmless — the entries are skipped and the counter is
+	// informational. Upgrade path: run the new binary to recover, then
+	// the control records are properly parsed.
 	if payload[0] == WALFlushOK || payload[0] == WALFlushFail {
 		db, meas := parseControlPayload(payload)
 		return &Entry{

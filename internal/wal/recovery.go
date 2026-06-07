@@ -27,12 +27,22 @@ type RecoveryStats struct {
 	RecoveryDuration  time.Duration
 }
 
+// DefaultMaxStagingRecords is the default per-measurement staging threshold.
+// When staging for a single measurement exceeds this count, its data is
+// replayed immediately to bound recovery memory usage.
+const DefaultMaxStagingRecords = 500000
+
 // RecoveryOptions configures WAL recovery behavior
 type RecoveryOptions struct {
 	// BatchSize limits how many records are replayed per callback invocation
 	// This provides backpressure during mass recovery after prolonged outages
 	// 0 means no limit (all records in an entry replayed at once)
 	BatchSize int
+
+	// MaxStagingRecords limits per-measurement staging accumulation before
+	// incremental replay. 0 means use DefaultMaxStagingRecords.
+	// This prevents OOM when recovering many WAL files without FLUSH_OK markers.
+	MaxStagingRecords int
 
 	// ColumnarCallback handles columnar WAL entries from the zero-copy write path
 	ColumnarCallback ColumnarRecoveryCallback
@@ -63,8 +73,88 @@ func measurementKey(database, measurement string) string {
 // stagingEntry holds accumulated data for a single measurement during recovery.
 // Records are row-format (from Append path), Columns are columnar (from AppendRaw path).
 type stagingEntry struct {
-	records []map[string]interface{}
-	columns map[string][]interface{} // merged columnar data
+	records     []map[string]interface{}
+	columns     map[string][]interface{} // merged columnar data
+	recordCount int                      // tracked to bound staging memory
+}
+
+// replayOversizedStaging replays staging entries whose record count exceeds the
+// configured threshold. Called after each WAL file is processed to bound memory.
+func replayOversizedStaging(
+	ctx context.Context,
+	staging map[string]*stagingEntry,
+	opts *RecoveryOptions,
+	callback RecoveryCallback,
+	recoveredEntries *int,
+	recoveredBatches *int,
+	logger zerolog.Logger,
+) {
+	for key, se := range staging {
+		if se.recordCount <= opts.MaxStagingRecords {
+			continue
+		}
+
+		database, measurement := splitMeasurementKey(key)
+
+		// Replay columnar data
+		if len(se.columns) > 0 && opts.ColumnarCallback != nil {
+			if err := opts.ColumnarCallback(ctx, database, measurement, se.columns); err != nil {
+				logger.Error().Err(err).Str("measurement", key).Msg("Failed to replay oversized columnar staging")
+				continue
+			}
+			*recoveredBatches++
+		}
+
+		// Replay row data
+		if len(se.records) > 0 {
+			replayed := replayRowStaging(ctx, callback, se.records, opts.BatchSize, logger, key)
+			*recoveredEntries += replayed
+			*recoveredBatches++
+		}
+
+		// Clear the replayed staging
+		se.records = nil
+		se.columns = nil
+		se.recordCount = 0
+
+		logger.Debug().
+			Str("measurement", key).
+			Int("records", se.recordCount).
+			Msg("Incrementally replayed oversized staging entry")
+	}
+}
+
+// replayRowStaging replays a batch of row records through the callback.
+// Returns the number of records successfully replayed.
+func replayRowStaging(
+	ctx context.Context,
+	callback RecoveryCallback,
+	records []map[string]interface{},
+	batchSize int,
+	logger zerolog.Logger,
+	key string,
+) int {
+	recovered := 0
+	if batchSize > 0 && len(records) > batchSize {
+		for i := 0; i < len(records); i += batchSize {
+			end := i + batchSize
+			if end > len(records) {
+				end = len(records)
+			}
+			if err := callback(ctx, records[i:end]); err != nil {
+				logger.Error().Err(err).Str("measurement", key).Msg("Failed to replay row staging batch")
+				break
+			}
+			recovered += end - i
+		}
+	} else {
+		if err := callback(ctx, records); err != nil {
+			logger.Error().Err(err).Str("measurement", key).Msg("Failed to replay row staging data")
+			return 0
+		}
+		recovered = len(records)
+	}
+	return recovered
 }
 
 // Recover scans the WAL directory and replays all WAL files
@@ -81,6 +171,9 @@ func (r *Recovery) RecoverWithOptions(ctx context.Context, callback RecoveryCall
 
 	if opts == nil {
 		opts = &RecoveryOptions{}
+	}
+	if opts.MaxStagingRecords <= 0 {
+		opts.MaxStagingRecords = DefaultMaxStagingRecords
 	}
 
 	// Check if WAL directory exists
@@ -125,8 +218,6 @@ func (r *Recovery) RecoverWithOptions(ctx context.Context, callback RecoveryCall
 			continue
 		}
 
-		fileRecoveredEntries := 0
-
 		for _, entry := range entries {
 			// Control records
 			if entry.Control != nil {
@@ -157,12 +248,12 @@ func (r *Recovery) RecoverWithOptions(ctx context.Context, callback RecoveryCall
 				for colName, values := range entry.ColumnarData.Columns {
 					se.columns[colName] = append(se.columns[colName], values...)
 				}
-				for range entry.ColumnarData.Columns {
-					fileRecoveredEntries += len(entry.ColumnarData.Columns[colNameForCount(entry.ColumnarData.Columns)])
+				// Count rows from first column
+				for _, values := range entry.ColumnarData.Columns {
+					se.recordCount += len(values)
 					break
 				}
 			} else if entry.Records != nil {
-				key := measurementKey("", "") // will be determined from records
 				// Row records carry _database and _measurement keys
 				for _, rec := range entry.Records {
 					db, _ := rec["_database"].(string)
@@ -182,19 +273,25 @@ func (r *Recovery) RecoverWithOptions(ctx context.Context, callback RecoveryCall
 					if db == "" {
 						db = "default"
 					}
-					key = measurementKey(db, meas)
+					key := measurementKey(db, meas)
 					se, ok := staging[key]
 					if !ok {
 						se = &stagingEntry{}
 						staging[key] = se
 					}
 					se.records = append(se.records, rec)
+					se.recordCount++
 				}
-				fileRecoveredEntries += len(entry.Records)
 			}
 		}
 
 		stats.CorruptedEntries += int(reader.CorruptedEntries)
+
+		// Incremental replay: flush oversized staging entries to bound memory.
+		// Without FLUSH_OK markers (first boot, no flushes yet), staging can
+		// accumulate O(total unconfirmed data). Replaying large measurements
+		// after each file avoids OOM.
+		replayOversizedStaging(ctx, staging, opts, callback, &stats.RecoveredEntries, &stats.RecoveredBatches, r.logger)
 
 		// Track file for deferred deletion
 		if len(entries) > 0 {
@@ -235,29 +332,13 @@ func (r *Recovery) RecoverWithOptions(ctx context.Context, callback RecoveryCall
 
 		// Replay row data
 		if len(se.records) > 0 {
-			if opts.BatchSize > 0 && len(se.records) > opts.BatchSize {
-				for i := 0; i < len(se.records); i += opts.BatchSize {
-					end := i + opts.BatchSize
-					if end > len(se.records) {
-						end = len(se.records)
-					}
-					batch := se.records[i:end]
-					if err := callback(ctx, batch); err != nil {
-						r.logger.Error().Err(err).Str("measurement", key).Msg("Failed to replay row staging batch")
-						replayFailed = true
-						break
-					}
-					recoveredBatches++
-					recoveredEntries += len(batch)
-				}
-			} else {
-				if err := callback(ctx, se.records); err != nil {
-					r.logger.Error().Err(err).Str("measurement", key).Msg("Failed to replay row staging data")
-					replayFailed = true
-					continue
-				}
+			replayed := replayRowStaging(ctx, callback, se.records, opts.BatchSize, r.logger, key)
+			if replayed < len(se.records) {
+				replayFailed = true
+			}
+			if replayed > 0 {
 				recoveredBatches++
-				recoveredEntries += len(se.records)
+				recoveredEntries += replayed
 			}
 		}
 	}
@@ -305,14 +386,6 @@ func splitMeasurementKey(key string) (database, measurement string) {
 		}
 	}
 	return key, key
-}
-
-// colNameForCount returns the first column name for counting rows.
-func colNameForCount(columns map[string][]interface{}) string {
-	for name := range columns {
-		return name
-	}
-	return ""
 }
 
 // findWALFiles finds all WAL files in the directory, sorted by modification time

@@ -793,6 +793,13 @@ type ArrowBuffer struct {
 	// Adaptive flush engine (replaces periodicFlush timer when set).
 	// atomic.Pointer for race-free read in periodicFlush / write paths.
 	adaptiveFlush atomic.Pointer[AdaptiveFlushEngine]
+
+	// Buffer overflow protection: hard limit in bytes.
+	// When total buffer estimated bytes exceeds hardLimit, oldest entries
+	// are evicted. If still over, writeColumnarInternal returns 503.
+	// Set via SetBufferHardLimit; 0 means no limit (backward compatible).
+	hardLimit uint64
+
 	// OPTIMIZATION: Shard buffers to reduce lock contention
 	// Configurable via ingest.shard_count (default 32)
 	// Each shard handles ~1/N of measurements where N = shard count
@@ -852,10 +859,6 @@ type ArrowBuffer struct {
 	// counter; the log line is for human-readable signal that the
 	// degraded state is in effect.
 	walDropLastLogNano atomic.Int64
-	// Flush failure tracking for WAL maintenance.
-	// Set when a storage write fails (S3 outage etc.), cleared after successful recovery.
-	// The periodic WAL goroutine checks this to decide whether WAL replay is needed.
-	hasFlushFailure atomic.Bool
 
 	logger zerolog.Logger
 }
@@ -994,27 +997,6 @@ func (b *ArrowBuffer) getShard(bufferKey string) *bufferShard {
 		hash *= 16777619
 	}
 	return b.shards[hash%b.shardCount]
-}
-
-// HasFlushFailure returns true if any flush has failed since the last reset.
-// Used by the periodic WAL maintenance goroutine to decide whether WAL replay
-// is needed (e.g., after an S3 outage where data was cleared from buffers).
-func (b *ArrowBuffer) HasFlushFailure() bool {
-	return b.hasFlushFailure.Load()
-}
-
-// ResetFlushFailure clears the flush failure flag.
-// Called after successful WAL recovery replay.
-func (b *ArrowBuffer) ResetFlushFailure() {
-	b.hasFlushFailure.Store(false)
-}
-
-// markFlushFailure records that buffered data could not be persisted and must
-// be recovered from WAL.
-func (b *ArrowBuffer) markFlushFailure() {
-	b.totalErrors.Add(1)
-	b.hasFlushFailure.Store(true)
-	metrics.Get().IncBufferFlushFailures()
 }
 
 // getSortKeys returns sort keys for a measurement.
@@ -2372,6 +2354,92 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 	}
 }
 
+// SetBufferHardLimit sets the buffer overflow hard limit.
+// When total estimated buffer bytes exceeds this limit, oldest entries are evicted
+// (Layer 1), and if still over, new writes are rejected with 503 (Layer 2).
+// A value of 0 disables overflow protection.
+func (b *ArrowBuffer) SetBufferHardLimit(limitBytes uint64) {
+	b.hardLimit = limitBytes
+}
+
+// estimateTotalBufferBytes scans all shards and returns the total estimated bytes.
+func (b *ArrowBuffer) estimateTotalBufferBytes() uint64 {
+	var total uint64
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.RLock()
+		for _, entry := range shard.buffers {
+			total += entry.estimatedBytes
+		}
+		shard.mu.RUnlock()
+	}
+	return total
+}
+
+// evictOldestEntries evicts the oldest buffer entries until total estimated bytes
+// is below targetBytes. Returns true if any entries were evicted.
+func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64) bool {
+	evicted := false
+	now := time.Now()
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.Lock()
+		var oldestKey string
+		var oldestTime time.Time
+		for key, entry := range shard.buffers {
+			if oldestKey == "" || entry.startTime.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = entry.startTime
+			}
+		}
+		if oldestKey != "" && now.Sub(oldestTime) > 0 {
+			delete(shard.buffers, oldestKey)
+			evicted = true
+			b.logger.Warn().
+				Str("buffer_key", oldestKey).
+				Dur("age", now.Sub(oldestTime)).
+				Msg("Buffer overflow: evicted oldest entry (data preserved in WAL)")
+			metrics.Get().IncBufferFlushFailures() // tracks overflow evictions
+		}
+		shard.mu.Unlock()
+		if evicted && b.estimateTotalBufferBytes() <= targetBytes {
+			return true
+		}
+	}
+	return evicted
+}
+
+// ensureBufferSpace checks the buffer hard limit and applies overflow protection.
+// Returns nil if there is space (possibly after eviction), or error if the hard
+// limit is exceeded even after eviction.
+func (b *ArrowBuffer) ensureBufferSpace(newEntryBytes uint64) error {
+	if b.hardLimit == 0 {
+		return nil // no limit configured
+	}
+
+	total := b.estimateTotalBufferBytes()
+	if total+newEntryBytes <= b.hardLimit {
+		return nil
+	}
+
+	// Layer 1: evict oldest entries until below 80% hard limit
+	target := b.hardLimit * 80 / 100
+	for i := 0; i < 100 && b.estimateTotalBufferBytes() > target; i++ {
+		if !b.evictOldestEntries(target) {
+			break // nothing left to evict
+		}
+	}
+
+	// Layer 2: if still over hard limit, reject with backpressure
+	total = b.estimateTotalBufferBytes()
+	if total+newEntryBytes > b.hardLimit {
+		return fmt.Errorf("buffer hard limit exceeded: %d bytes buffered, %d limit",
+			total+newEntryBytes, b.hardLimit)
+	}
+
+	return nil
+}
+
 // restoreBufferEntry rebuilds a bufferEntry from batch references when mergeBatches fails.
 // The entry was deleted by flushCandidate before the task was created; this puts it back.
 func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}) {
@@ -2409,6 +2477,15 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
+
+	// Check buffer overflow before restoring
+	if err := b.ensureBufferSpace(estimatedBytes); err != nil {
+		b.logger.Error().Err(err).
+			Str("buffer_key", bufferKey).
+			Int("records", recordCount).
+			Msg("Buffer hard limit exceeded — data preserved in WAL, will recover on restart")
+		return
+	}
 
 	// Only restore if the bufferKey doesn't already have new data
 	if _, exists := shard.buffers[bufferKey]; !exists {
@@ -2460,6 +2537,32 @@ func typedBatchToColumns(merged *TypedColumnBatch) map[string][]interface{} {
 // after a flushPartitionedData failure. Uses WriteColumnarDirectNoWAL to skip
 // double-WAL-writing — the data is already in WAL from the original ingest.
 func (b *ArrowBuffer) writeBackMergedData(ctx context.Context, database, measurement string, merged *TypedColumnBatch) {
+	// Estimate memory for the merged batch
+	var estBytes uint64
+	for _, col := range merged.Data {
+		switch v := col.(type) {
+		case []int64:
+			estBytes += 8 * uint64(len(v))
+		case []float64:
+			estBytes += 8 * uint64(len(v))
+		case []string:
+			for _, s := range v {
+				estBytes += uint64(len(s))
+			}
+		case []bool:
+			estBytes += uint64(len(v))
+		}
+	}
+
+	// Check buffer overflow before restoring
+	if err := b.ensureBufferSpace(estBytes); err != nil {
+		b.logger.Error().Err(err).
+			Str("database", database).
+			Str("measurement", measurement).
+			Msg("Buffer hard limit exceeded — merged data preserved in WAL, will recover on restart")
+		return
+	}
+
 	columns := typedBatchToColumns(merged)
 	if err := b.WriteColumnarDirectNoWAL(ctx, database, measurement, columns); err != nil {
 		b.logger.Error().Err(err).
