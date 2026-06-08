@@ -9,7 +9,6 @@
 
 # Test binary, built with `go test -c`
 *.test
-benchmarks
 
 # Output of the go coverage tool
 *.out
@@ -45,6 +44,7 @@ go.work.sum
 # Claude Code
 .claude/
 CLAUDE.md
+AGENTS.md
 
 # OS
 .DS_Store
