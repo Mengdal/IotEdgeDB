@@ -359,7 +359,11 @@ func (w *Writer) rotate() error {
 			w.sync()
 			atomic.AddInt64(&w.TotalSyncs, 1)
 		}
-		w.currentFile.Close()
+		if err := w.currentFile.Close(); err != nil {
+			w.logger.Error().Err(err).
+				Str("old_file", oldPath).
+				Msg("Failed to close old WAL file after rotation")
+		}
 	}
 
 	// Switch to the new file

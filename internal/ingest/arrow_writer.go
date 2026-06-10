@@ -986,12 +986,12 @@ func (b *ArrowBuffer) flushTypeConflicts(baseKey, newSig string) {
 					// flushBufferLocked releases and re-acquires the lock
 					flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
 					if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
-					b.logger.Warn().Err(err).
-						Str("buffer_key", key).
-						Str("old_schema", entry.schema).
-						Str("new_schema", newSig).
-						Msg("Type conflict flush failed — data restored to buffer or WAL")
-				}
+						b.logger.Warn().Err(err).
+							Str("buffer_key", key).
+							Str("old_schema", entry.schema).
+							Str("new_schema", newSig).
+							Msg("Type conflict flush failed — data restored to buffer or WAL")
+					}
 					flushCancel()
 				}
 			}
@@ -2478,22 +2478,24 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 	for _, r := range batches {
 		if batch, ok := r.(*TypedColumnBatch); ok {
 			typedBatches = append(typedBatches, batch)
+			batchRows := 0
 			if len(batch.Data) > 0 {
 				for _, col := range batch.Data {
 					switch v := col.(type) {
 					case []int64:
-						recordCount = len(v)
+						batchRows = len(v)
 					case []float64:
-						recordCount = len(v)
+						batchRows = len(v)
 					case []string:
-						recordCount = len(v)
+						batchRows = len(v)
 					case []bool:
-						recordCount = len(v)
+						batchRows = len(v)
 					}
 					break
 				}
 			}
-			estimatedBytes += estimateBytesPerRow(batch) * uint64(recordCount)
+			recordCount += batchRows
+			estimatedBytes += estimateBytesPerRow(batch) * uint64(batchRows)
 		}
 	}
 
