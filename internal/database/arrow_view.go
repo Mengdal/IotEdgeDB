@@ -112,8 +112,8 @@ func (m *ArrowViewManager) MeasurementViewNames(database, measurement string) []
 // registerInMeasurementIndex adds the buffer key to the measurement index.
 // Must be called with m.mu held.
 func (m *ArrowViewManager) registerInMeasurementIndexLocked(bufferKey string) {
-	// Extract "db/measurement" from "db/measurement#hash"
-	baseKey, _ := stripHashFromKey(bufferKey)
+	// Extract "db/measurement" from "db/measurement__hash"
+	baseKey, _ := ingest.StripSchemaHash(bufferKey)
 	if baseKey == "" {
 		return
 	}
@@ -126,21 +126,13 @@ func (m *ArrowViewManager) registerInMeasurementIndexLocked(bufferKey string) {
 // removeFromMeasurementIndex removes the buffer key from the measurement index.
 // Must be called with m.mu held.
 func (m *ArrowViewManager) removeFromMeasurementIndexLocked(bufferKey string) {
-	baseKey, _ := stripHashFromKey(bufferKey)
+	baseKey, _ := ingest.StripSchemaHash(bufferKey)
 	if keys, ok := m.measurementViews[baseKey]; ok {
 		delete(keys, bufferKey)
 		if len(keys) == 0 {
 			delete(m.measurementViews, baseKey)
 		}
 	}
-}
-
-// stripHashFromKey strips the "#hash" suffix from a buffer key.
-func stripHashFromKey(bufferKey string) (string, string) {
-	if idx := strings.LastIndex(bufferKey, "__"); idx >= 0 {
-		return bufferKey[:idx], bufferKey[idx+1:]
-	}
-	return bufferKey, ""
 }
 
 // ViewName 将 bufferKey 转为 DuckDB 临时表名称。
@@ -222,10 +214,12 @@ func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ing
 	defer conn.Close()
 
 	// DROP + CREATE
-	conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+viewName)
+	if _, err := conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+viewName); err != nil {
+		m.logger.Warn().Err(err).Str("table", viewName).Msg("Failed to drop old VIEW table — CREATE may be skipped by IF NOT EXISTS")
+	}
 	createSQL := m.buildCreateTableSQL(viewName, batches[0])
 	if _, err := conn.ExecContext(context.Background(), createSQL); err != nil {
-		m.logger.Error().Err(err).Str("sql", createSQL).Msg("Failed to create temp table")
+		m.logger.Error().Err(err).Str("sql", createSQL).Msg("Failed to create VIEW table")
 		return
 	}
 

@@ -137,7 +137,7 @@ func (e *AdaptiveFlushEngine) filterExpired(candidates []flushCandidate) []flush
 	var expired []flushCandidate
 	for _, c := range candidates {
 		if time.Since(c.entry.startTime) >= e.maxAge {
-		c.trigger = "age"
+			c.trigger = "age"
 			expired = append(expired, c)
 		}
 	}
@@ -155,14 +155,17 @@ func (e *AdaptiveFlushEngine) flushLargestUntil(
 
 	minPerMeasurement := e.minBufferBytes / uint64(max(len(candidates), 1))
 
-	for _, c := range candidates {
+	for i := range candidates {
 		if shouldStop() {
 			break
 		}
-		if c.entry.estimatedBytes < minPerMeasurement {
+		if candidates[i].entry.estimatedBytes < minPerMeasurement {
 			continue
 		}
-		e.flushCandidate(c)
+		if candidates[i].trigger == "" {
+			candidates[i].trigger = "pressure"
+		}
+		e.flushCandidate(candidates[i])
 	}
 }
 
@@ -177,12 +180,15 @@ func (e *AdaptiveFlushEngine) flushUntilBelow(
 	})
 
 	remaining := currentTotal
-	for _, c := range candidates {
+	for i := range candidates {
 		if remaining <= targetBytes {
 			break
 		}
-		remaining -= c.entry.estimatedBytes
-		e.flushCandidate(c)
+		remaining -= candidates[i].entry.estimatedBytes
+		if candidates[i].trigger == "" {
+			candidates[i].trigger = "hard_limit"
+		}
+		e.flushCandidate(candidates[i])
 	}
 }
 
@@ -235,9 +241,9 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 }
 
 // splitKeyToDBAndMeas 将 bufferKey 拆分为 database 和 measurement，
-// 同时剥离 schema hash 后缀（例如 "db/cpu#abc123" → ("db", "cpu")）。
+// 同时剥离 schema hash 后缀（例如 "db/cpu__abc123" → ("db", "cpu")）。
 func splitKeyToDBAndMeas(key string) (database, measurement string) {
-	cleanKey, _ := stripSchemaHash(key)
+	cleanKey, _ := StripSchemaHash(key)
 	idx := strings.LastIndex(cleanKey, "/")
 	if idx < 0 {
 		return cleanKey, cleanKey

@@ -928,9 +928,9 @@ func schemaKey(database, measurement, signature string) string {
 	return database + "/" + measurement + "__" + schemaHash(signature)
 }
 
-// stripSchemaHash removes the "__hash" suffix from a buffer key if present.
+// StripSchemaHash removes the "__hash" suffix from a buffer key if present.
 // Returns the original key and an empty string if no hash suffix exists.
-func stripSchemaHash(bufferKey string) (baseKey string, hash string) {
+func StripSchemaHash(bufferKey string) (baseKey string, hash string) {
 	if idx := strings.LastIndex(bufferKey, "__"); idx >= 0 {
 		return bufferKey[:idx], bufferKey[idx+1:]
 	}
@@ -973,30 +973,58 @@ func (b *ArrowBuffer) flushTypeConflicts(baseKey, newSig string) {
 	prefix := baseKey + "__"
 	for i := uint32(0); i < b.shardCount; i++ {
 		shard := b.shards[i]
+
+		// Collect conflict keys under the lock, then release before
+		// calling flushBufferLocked (which releases and re-acquires the
+		// lock during I/O).  Iterating the map while the lock is released
+		// causes a fatal "concurrent map iteration and map write" panic
+		// when a concurrent ingest inserts into the same shard.
 		shard.mu.Lock()
+		var conflictKeys []string
 		for key, entry := range shard.buffers {
 			if strings.HasPrefix(key, prefix) && hasTypeConflict(entry.schema, newSig) {
-				parts := splitBufferKey(key)
-				if len(parts) == 2 {
-					b.logger.Debug().
-						Str("buffer_key", key).
-						Str("old_schema", entry.schema).
-						Str("new_schema", newSig).
-						Msg("Type conflict detected, flushing old buffer")
-					// flushBufferLocked releases and re-acquires the lock
-					flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-					if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
-						b.logger.Warn().Err(err).
-							Str("buffer_key", key).
-							Str("old_schema", entry.schema).
-							Str("new_schema", newSig).
-							Msg("Type conflict flush failed — data restored to buffer or WAL")
-					}
-					flushCancel()
-				}
+				conflictKeys = append(conflictKeys, key)
 			}
 		}
 		shard.mu.Unlock()
+
+		for _, key := range conflictKeys {
+			// Re-check under lock: the entry may have been flushed
+			// or deleted between collection and now.
+			shard.mu.Lock()
+			entry, exists := shard.buffers[key]
+			if !exists || !hasTypeConflict(entry.schema, newSig) {
+				shard.mu.Unlock()
+				continue
+			}
+			parts := splitBufferKey(key)
+			if len(parts) != 2 {
+				shard.mu.Unlock()
+				continue
+			}
+
+			b.logger.Debug().
+				Str("buffer_key", key).
+				Str("old_schema", entry.schema).
+				Str("new_schema", newSig).
+				Msg("Type conflict detected, flushing old buffer")
+
+			// flushBufferLocked releases and re-acquires the lock.
+			// We are holding shard.mu — flushBufferLocked will
+			// Unlock for I/O and Lock before returning.
+			flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
+			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
+				b.logger.Warn().Err(err).
+					Str("buffer_key", key).
+					Str("old_schema", entry.schema).
+					Str("new_schema", newSig).
+					Msg("Type conflict flush failed — data restored to buffer or WAL")
+			}
+			flushCancel()
+			// flushBufferLocked returns with the lock re-acquired;
+			// release it so the next iteration can lock cleanly.
+			shard.mu.Unlock()
+		}
 	}
 }
 
@@ -2251,42 +2279,62 @@ func (b *ArrowBuffer) flushAgedBuffers() {
 	for shardIdx := range b.shards {
 		shard := b.shards[shardIdx]
 
+		// Collect aged keys under the lock, then release before
+		// calling flushBufferLocked.  See flushTypeConflicts for
+		// the full rationale — iterating while the lock is released
+		// causes a fatal concurrent-map panic.
 		shard.mu.Lock()
-
-		// Check each buffer in this shard for age
+		var agedKeys []string
 		for key, entry := range shard.buffers {
 			age := now.Sub(entry.startTime)
 			if age >= threshold {
-				b.logger.Info().
-					Str("buffer_key", key).
-					Dur("age", age).
-					Dur("threshold", threshold).
-					Int("shard", shardIdx).
-					Msg("Flushing aged buffer")
-
-				// Parse buffer key to get database and measurement
-				parts := splitBufferKey(key)
-				if len(parts) != 2 {
-					b.logger.Error().Str("buffer_key", key).Msg("Invalid buffer key format")
-					continue
-				}
-
-				flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-				if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
-					b.logger.Error().Err(err).Str("buffer_key", key).Msg("Failed to flush aged buffer")
-				}
-				flushCancel()
+				agedKeys = append(agedKeys, key)
 			}
 		}
-
 		shard.mu.Unlock()
+
+		for _, key := range agedKeys {
+			shard.mu.Lock()
+			entry, exists := shard.buffers[key]
+			if !exists {
+				shard.mu.Unlock()
+				continue
+			}
+			if now.Sub(entry.startTime) < threshold {
+				shard.mu.Unlock()
+				continue
+			}
+
+			b.logger.Info().
+				Str("buffer_key", key).
+				Dur("age", now.Sub(entry.startTime)).
+				Dur("threshold", threshold).
+				Int("shard", shardIdx).
+				Msg("Flushing aged buffer")
+
+			// Parse buffer key to get database and measurement
+			parts := splitBufferKey(key)
+			if len(parts) != 2 {
+				b.logger.Error().Str("buffer_key", key).Msg("Invalid buffer key format")
+				shard.mu.Unlock()
+				continue
+			}
+
+			flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
+			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
+				b.logger.Error().Err(err).Str("buffer_key", key).Msg("Failed to flush aged buffer")
+			}
+			flushCancel()
+			// flushBufferLocked returns with the lock re-acquired.
+			shard.mu.Unlock()
+		}
 	}
 }
 
 // splitBufferKey splits "database/measurement" into [database, measurement]
 func splitBufferKey(key string) []string {
 	// Strip schema hash suffix if present (e.g. "db/cpu#abc123" -> "db/cpu")
-	cleanKey, _ := stripSchemaHash(key)
+	cleanKey, _ := StripSchemaHash(key)
 	// Find first slash to split database/measurement
 	for i, c := range cleanKey {
 		if c == '/' {
@@ -2518,6 +2566,18 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 		return
 	}
 
+	// Extract schema from the first batch so that type-conflict detection
+	// (hasTypeConflict) works correctly for restored entries. Without this,
+	// schema="" would short-circuit every check and never trigger a flush.
+	var schema string
+	if len(typedBatches) > 0 {
+		if typedBatches[0].Signature != "" {
+			schema = typedBatches[0].Signature
+		} else if typedBatches[0].Data != nil {
+			schema = getColumnSignature(typedBatches[0].Data)
+		}
+	}
+
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
@@ -2528,6 +2588,7 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 			startTime:      time.Now(), // reset timer: retry on next adaptive cycle
 			recordCount:    recordCount,
 			estimatedBytes: estimatedBytes,
+			schema:         schema,
 		}
 	}
 }
