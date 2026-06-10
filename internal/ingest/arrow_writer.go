@@ -64,6 +64,12 @@ func getFlushMessageType(flushType string) string {
 	}
 }
 
+// ctxKeyRestoreFallback is a context value key used to break the recursion
+// cycle: restoreBufferEntry → flushRecordsAsync → [fail] → restoreBufferEntry.
+// When present in the context, flushRecordsAsync skips restore calls and logs
+// a critical error instead.
+type ctxKeyRestoreFallback struct{}
+
 // schemaCacheEntry holds a cached schema with LRU tracking
 type schemaCacheEntry struct {
 	schema     *arrow.Schema
@@ -979,7 +985,13 @@ func (b *ArrowBuffer) flushTypeConflicts(baseKey, newSig string) {
 						Msg("Type conflict detected, flushing old buffer")
 					// flushBufferLocked releases and re-acquires the lock
 					flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-					_ = b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1])
+					if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
+					b.logger.Warn().Err(err).
+						Str("buffer_key", key).
+						Str("old_schema", entry.schema).
+						Str("new_schema", newSig).
+						Msg("Type conflict flush failed — data restored to buffer or WAL")
+				}
 					flushCancel()
 				}
 			}
@@ -1657,17 +1669,29 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 			recordsToFlush[i] = batch
 		}
 
-		// Clear buffer completely so next write re-initializes bufferStartTimes
-		// Using delete() instead of = nil ensures the key doesn't exist,
-		// so the next WriteColumnar properly sets a fresh start time
-		delete(shard.buffers, bufferKey)
+		// Try to enqueue BEFORE deleting the entry. tryEnqueueFlush is
+		// non-blocking (select with default) and does not acquire any
+		// shard locks — safe to call while holding shard.mu.
+		flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
+		task := flushTask{
+			ctx:         flushCtx,
+			cancel:      flushCancel,
+			bufferKey:   bufferKey,
+			database:    database,
+			measurement: record.Measurement,
+			records:     recordsToFlush,
+			recordCount: totalBuffered,
+		}
+		outcome := b.tryEnqueueFlush(task, flushCancel, bufferKey, totalBuffered)
 
-		shouldFlush = true
-
-		b.logger.Debug().
-			Str("buffer_key", bufferKey).
-			Int("total_records", totalBuffered).
-			Msg("Extracted records for flush (fire-and-forget)")
+		if outcome == flushQueued {
+			// Only delete after confirmed enqueue — avoids data loss
+			// when flushQueue is full or buffer is closing.
+			delete(shard.buffers, bufferKey)
+			shouldFlush = true
+		}
+		// On any non-queued outcome: keep entry in buffer for retry.
+		// flushCancel has already been called by tryEnqueueFlush.
 	}
 
 	// Release lock IMMEDIATELY (lock held for <1ms)
@@ -1683,33 +1707,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		Bool("flushing", shouldFlush).
 		Msg("Added columnar data to buffer")
 
-	// OPTIMIZATION: Queue flush to worker pool (bounded concurrency)
-	// This prevents goroutine explosion under sustained load
-	if shouldFlush {
-		// Use buffer ctx as parent so Close() cancels in-flight writes,
-		// with a timeout to prevent workers from blocking forever on slow storage
-		flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-		task := flushTask{
-			ctx:         flushCtx,
-			cancel:      flushCancel,
-			bufferKey:   bufferKey,
-			database:    database,
-			measurement: record.Measurement,
-			records:     recordsToFlush,
-			recordCount: totalBuffered,
-		}
-
-		// Non-blocking enqueue. tryEnqueueFlush handles the closing-
-		// flag short-circuit, the ctx.Done() defense-in-depth, and
-		// the queue-full path uniformly across both write paths.
-		// The flushSkipClosing outcome short-circuits the rest of
-		// the write — Close() is in progress, no point continuing.
-		if b.tryEnqueueFlush(task, flushCancel, bufferKey, totalBuffered) == flushSkipClosing {
-			return nil
-		}
-	}
-
-	// Return immediately (don't wait for flush to complete!)
 	// Notify VIEW manager of new data
 	if b.notifier != nil {
 		b.notifier.OnNewData(bufferKey)
@@ -1788,14 +1785,23 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 			recordsToFlush[i] = batch
 		}
 
-		delete(shard.buffers, bufferKey)
+		// Try to enqueue BEFORE deleting — safe inside lock (non-blocking).
+		flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
+		task := flushTask{
+			ctx:         flushCtx,
+			cancel:      flushCancel,
+			bufferKey:   bufferKey,
+			database:    database,
+			measurement: measurement,
+			records:     recordsToFlush,
+			recordCount: totalBuffered,
+		}
+		outcome := b.tryEnqueueFlush(task, flushCancel, bufferKey, totalBuffered)
 
-		shouldFlush = true
-
-		b.logger.Debug().
-			Str("buffer_key", bufferKey).
-			Int("total_records", totalBuffered).
-			Msg("Extracted records for flush (fire-and-forget)")
+		if outcome == flushQueued {
+			delete(shard.buffers, bufferKey)
+			shouldFlush = true
+		}
 	}
 
 	shard.mu.Unlock()
@@ -1808,24 +1814,6 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		Int("total_buffered", totalBuffered).
 		Bool("flushing", shouldFlush).
 		Msg("Added typed columnar data to buffer")
-
-	// Queue flush to worker pool if needed
-	if shouldFlush {
-		flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-		task := flushTask{
-			ctx:         flushCtx,
-			cancel:      flushCancel,
-			bufferKey:   bufferKey,
-			database:    database,
-			measurement: measurement,
-			records:     recordsToFlush,
-			recordCount: totalBuffered,
-		}
-
-		if b.tryEnqueueFlush(task, flushCancel, bufferKey, totalBuffered) == flushSkipClosing {
-			return nil
-		}
-	}
 
 	// Notify VIEW manager of new data (TLE path)
 	if b.notifier != nil {
@@ -2378,7 +2366,11 @@ func (b *ArrowBuffer) estimateTotalBufferBytes() uint64 {
 
 // evictOldestEntries evicts the oldest buffer entries until total estimated bytes
 // is below targetBytes. Returns true if any entries were evicted.
-func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64) bool {
+// When inlineFlushCount is below maxInlineFlushes, evicted entries are flushed
+// inline to Parquet instead of being silently deleted. Beyond the cap, entries
+// are deleted without flush (data preserved only in WAL).
+func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *int) bool {
+	const maxInlineFlushes = 5
 	evicted := false
 	now := time.Now()
 	for i := uint32(0); i < b.shardCount; i++ {
@@ -2393,15 +2385,42 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64) bool {
 			}
 		}
 		if oldestKey != "" && now.Sub(oldestTime) > 0 {
+			// Extract batch references before deleting
+			entry := shard.buffers[oldestKey]
+			records := make([]interface{}, len(entry.batches))
+			for j, batch := range entry.batches {
+				records[j] = batch
+			}
+			recordCount := entry.recordCount
 			delete(shard.buffers, oldestKey)
+			parts := splitBufferKey(oldestKey)
+			shard.mu.Unlock()
+
+			if *inlineFlushCount < maxInlineFlushes && len(parts) == 2 {
+				*inlineFlushCount++
+				b.logger.Warn().
+					Str("buffer_key", oldestKey).
+					Dur("age", now.Sub(oldestTime)).
+					Int("inline_flush", *inlineFlushCount).
+					Msg("Buffer overflow: flushing oldest entry inline")
+				b.flushRecordsAsync(context.Background(), oldestKey, parts[0], parts[1], records, recordCount)
+			} else {
+				if *inlineFlushCount >= maxInlineFlushes {
+					b.logger.Error().
+						Str("buffer_key", oldestKey).
+						Int("max_inline_flushes", maxInlineFlushes).
+						Msg("Buffer overflow: inline flush cap reached, evicting without flush — data in WAL only")
+				}
+				b.logger.Warn().
+					Str("buffer_key", oldestKey).
+					Dur("age", now.Sub(oldestTime)).
+					Msg("Buffer overflow: evicted oldest entry (data preserved in WAL)")
+				metrics.Get().IncBufferFlushFailures() // tracks overflow evictions
+			}
 			evicted = true
-			b.logger.Warn().
-				Str("buffer_key", oldestKey).
-				Dur("age", now.Sub(oldestTime)).
-				Msg("Buffer overflow: evicted oldest entry (data preserved in WAL)")
-			metrics.Get().IncBufferFlushFailures() // tracks overflow evictions
+		} else {
+			shard.mu.Unlock()
 		}
-		shard.mu.Unlock()
 		if evicted && b.estimateTotalBufferBytes() <= targetBytes {
 			return true
 		}
@@ -2422,10 +2441,13 @@ func (b *ArrowBuffer) ensureBufferSpace(newEntryBytes uint64) error {
 		return nil
 	}
 
-	// Layer 1: evict oldest entries until below 80% hard limit
+	// Layer 1: evict oldest entries until below 80% hard limit.
+	// inlineFlushCount caps the number of inline flushes to bound latency;
+	// beyond the cap, entries are evicted without flush (WAL-only).
+	inlineFlushCount := 0
 	target := b.hardLimit * 80 / 100
 	for i := 0; i < 100 && b.estimateTotalBufferBytes() > target; i++ {
-		if !b.evictOldestEntries(target) {
+		if !b.evictOldestEntries(target, &inlineFlushCount) {
 			break // nothing left to evict
 		}
 	}
@@ -2479,10 +2501,18 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 	// ensureBufferSpace scans all shards (RLock); must not be called
 	// while holding a shard write lock or it will deadlock.
 	if err := b.ensureBufferSpace(estimatedBytes); err != nil {
-		b.logger.Error().Err(err).
+		// Hard limit exceeded even after eviction — flush inline as last resort.
+		// Use a context value to prevent recursive restore if inline flush fails.
+		b.logger.Warn().Err(err).
 			Str("buffer_key", bufferKey).
 			Int("records", recordCount).
-			Msg("Buffer hard limit exceeded — data preserved in WAL, will recover on restart")
+			Msg("Buffer full, flushing restored data inline to avoid data loss")
+
+		parts := splitBufferKey(bufferKey)
+		if len(parts) == 2 {
+			ctx := context.WithValue(context.Background(), ctxKeyRestoreFallback{}, true)
+			b.flushRecordsAsync(ctx, bufferKey, parts[0], parts[1], batches, recordCount)
+		}
 		return
 	}
 
@@ -2558,10 +2588,23 @@ func (b *ArrowBuffer) writeBackMergedData(ctx context.Context, database, measure
 
 	// Check buffer overflow before restoring
 	if err := b.ensureBufferSpace(estBytes); err != nil {
-		b.logger.Error().Err(err).
+		// Hard limit exceeded even after eviction — flush inline as last resort.
+		// Use the recursion-guard context to prevent unbounded retry loops.
+		b.logger.Warn().Err(err).
 			Str("database", database).
 			Str("measurement", measurement).
-			Msg("Buffer hard limit exceeded — merged data preserved in WAL, will recover on restart")
+			Msg("Buffer full, flushing merged data inline to avoid data loss")
+
+		// Build bufferKey and extract recordCount from the merged batch.
+		sig := getColumnSignature(merged.Data)
+		bufferKey := schemaKey(database, measurement, sig)
+		recordCount := 0
+		if times, ok := merged.Data["time"].([]int64); ok {
+			recordCount = len(times)
+		}
+		records := []interface{}{merged}
+		ctx := context.WithValue(context.Background(), ctxKeyRestoreFallback{}, true)
+		b.flushRecordsAsync(ctx, bufferKey, database, measurement, records, recordCount)
 		return
 	}
 
@@ -2581,6 +2624,14 @@ func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database
 	merged, err := b.mergeBatches(records)
 
 	if err != nil {
+		// When called from the restoreBufferEntry inline-flush fallback, skip
+		// restore to prevent unbounded recursion. Data remains in WAL.
+		if ctx.Value(ctxKeyRestoreFallback{}) != nil {
+			b.logger.Error().Err(err).
+				Str("buffer_key", bufferKey).
+				Msg("CRITICAL: inline restore flush merge failed — data may be lost")
+			return
+		}
 		// mergeBatches failed — restore the original batch references back to buffer.
 		// records has not been nilled yet, batch refs are still valid.
 		b.restoreBufferEntry(bufferKey, records)
@@ -2599,6 +2650,21 @@ func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database
 
 	// Flush with data timestamp partitioning
 	if err := b.flushWithDataTimePartitioning(ctx, bufferKey, database, measurement, merged, recordCount, startTime); err != nil {
+		// When called from the restoreBufferEntry inline-flush fallback, skip
+		// restore to prevent unbounded recursion. Data remains in WAL.
+		if ctx.Value(ctxKeyRestoreFallback{}) != nil {
+			b.logger.Error().Err(err).
+				Str("buffer_key", bufferKey).
+				Int("records", recordCount).
+				Msg("CRITICAL: inline restore flush write failed — data may be lost")
+			// Still write FLUSH_FAIL for audit trail
+			if b.wal != nil {
+				if cerr := b.wal.AppendControl(wal.FlushFail, database, measurement); cerr != nil {
+					b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_FAIL control record")
+				}
+			}
+			return
+		}
 		// flushPartitionedData failed — put merged data back into buffer
 		b.writeBackMergedData(ctx, database, measurement, merged)
 		b.logger.Error().

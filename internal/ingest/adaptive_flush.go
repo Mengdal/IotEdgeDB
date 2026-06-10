@@ -202,16 +202,19 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	for i, batch := range entry.batches {
 		records[i] = batch
 	}
-	delete(shard.buffers, c.bufferKey)
-	shard.mu.Unlock()
 
-	flushCtx, flushCancel := context.WithTimeout(context.Background(), e.buffer.flushTimeout)
 	// Determine trigger type: age-expired uses "age", hard-limit uses "hard_limit",
 	// pressure-driven (yellow/red) uses "pressure".
 	trigger := c.trigger
 	if trigger == "" {
 		trigger = "hard_limit"
 	}
+
+	// Try to enqueue BEFORE deleting the entry. tryEnqueueFlush is non-blocking
+	// and does not acquire shard locks — safe to call while holding shard.mu.
+	// Only delete the entry on successful enqueue; on failure the entry stays
+	// in buffer for retry on the next evaluate() cycle.
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), e.buffer.flushTimeout)
 	task := flushTask{
 		ctx:         flushCtx,
 		cancel:      flushCancel,
@@ -222,7 +225,13 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 		recordCount: recordCount,
 		trigger:     trigger,
 	}
-	e.buffer.tryEnqueueFlush(task, flushCancel, c.bufferKey, recordCount)
+	outcome := e.buffer.tryEnqueueFlush(task, flushCancel, c.bufferKey, recordCount)
+
+	if outcome == flushQueued {
+		// Only delete after confirmed enqueue.
+		delete(shard.buffers, c.bufferKey)
+	}
+	shard.mu.Unlock()
 }
 
 // splitKeyToDBAndMeas 将 bufferKey 拆分为 database 和 measurement，
