@@ -163,6 +163,8 @@ type Writer struct {
 	TotalSyncs     int64
 	TotalRotations int64
 	DroppedEntries int64 // Entries dropped due to full buffer
+	WriteErrors    int64 // Entries lost due to disk write failure
+	SyncErrors     int64 // fsync/fdatasync failures
 
 	mu sync.Mutex
 }
@@ -285,7 +287,10 @@ func (w *Writer) writeEntry(entry walEntry) {
 	// Write entry
 	n, err := w.currentFile.Write(entry.data)
 	if err != nil {
-		w.logger.Error().Err(err).Msg("Failed to write WAL entry")
+		atomic.AddInt64(&w.WriteErrors, 1)
+		w.logger.Error().Err(err).
+			Int64("total_write_errors", atomic.LoadInt64(&w.WriteErrors)).
+			Msg("Failed to write WAL entry — data lost")
 		return
 	}
 
@@ -314,9 +319,41 @@ func (w *Writer) writeEntry(entry walEntry) {
 	}
 }
 
-// rotate creates a new WAL file
+// rotate creates a new WAL file. The old file is kept open until the new
+// file is successfully created and its header written — if the new file
+// cannot be opened, writes continue to the old file and rotation is
+// retried on the next trigger. This prevents the nil-pointer crash that
+// would occur if old file were closed before the new one is ready.
 func (w *Writer) rotate() error {
-	// Close current file (sync any pending data first)
+	// Generate new filename
+	timestamp := time.Now().UTC().Format("20060102_150405.000000000")
+	filename := fmt.Sprintf("iedb-%s.wal", timestamp)
+	newPath := filepath.Join(w.config.WALDir, filename)
+
+	// Open new file with owner-only permissions (WAL contains sensitive data)
+	newFile, err := os.OpenFile(newPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create WAL file: %w", err)
+	}
+
+	// Write WAL header (check byte count to guard against short writes)
+	header := make([]byte, WALFileHeaderSize)
+	copy(header[0:4], WALMagic)
+	binary.BigEndian.PutUint16(header[4:6], WALVersion)
+	header[6] = WALChecksumCRC32
+
+	n, err := newFile.Write(header)
+	if err != nil {
+		newFile.Close()
+		return fmt.Errorf("failed to write WAL header: %w", err)
+	}
+	if n != WALFileHeaderSize {
+		newFile.Close()
+		return fmt.Errorf("short write on WAL header: wrote %d of %d bytes", n, WALFileHeaderSize)
+	}
+
+	// New file is ready — now safely close the old one.
+	oldPath := w.currentPath
 	if w.currentFile != nil {
 		if w.bytesSinceSync > 0 {
 			w.sync()
@@ -325,37 +362,19 @@ func (w *Writer) rotate() error {
 		w.currentFile.Close()
 	}
 
-	// Generate new filename
-	timestamp := time.Now().UTC().Format("20060102_150405.000000000")
-	filename := fmt.Sprintf("iedb-%s.wal", timestamp)
-	w.currentPath = filepath.Join(w.config.WALDir, filename)
-
-	// Open new file with owner-only permissions (WAL contains sensitive data)
-	var err error
-	w.currentFile, err = os.OpenFile(w.currentPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to create WAL file: %w", err)
-	}
-
-	w.currentSize = 0
+	// Switch to the new file
+	w.currentFile = newFile
+	w.currentPath = newPath
+	w.currentSize = int64(WALFileHeaderSize)
 	w.startTime = time.Now()
 	w.lastSyncTime = time.Now()
 	w.bytesSinceSync = 0
 	atomic.AddInt64(&w.TotalRotations, 1)
 
-	// Write WAL header
-	header := make([]byte, WALFileHeaderSize)
-	copy(header[0:4], WALMagic)
-	binary.BigEndian.PutUint16(header[4:6], WALVersion)
-	header[6] = WALChecksumCRC32
-
-	n, err := w.currentFile.Write(header)
-	if err != nil {
-		return fmt.Errorf("failed to write WAL header: %w", err)
-	}
-	w.currentSize += int64(n)
-
-	w.logger.Info().Str("file", filename).Msg("WAL rotated")
+	w.logger.Info().
+		Str("file", filename).
+		Str("old_file", oldPath).
+		Msg("WAL rotated")
 	return nil
 }
 
@@ -513,15 +532,21 @@ func (w *Writer) buildControlEntry(ctrlType ControlType, database, measurement s
 // AppendControl writes a control record (FLUSH_OK or FLUSH_FAIL) to the WAL.
 // Control records MUST not be dropped — they are essential for correct recovery.
 // The method first tries the async channel (with retry backoff), then falls back
-// to a synchronous write under the writer lock.
+// to a synchronous write under the writer lock. The synchronous write includes an
+// immediate fsync to guarantee the control record is durable before the caller
+// proceeds (e.g., before PurgeAll deletes the WAL file on clean shutdown).
 func (w *Writer) AppendControl(ctrlType ControlType, database, measurement string) error {
 	entryData := w.buildControlEntry(ctrlType, database, measurement)
 
-	// Try async send with exponential backoff (1ms, 2ms, 4ms, 8ms, 16ms)
+	// Try async send with exponential backoff (1ms, 2ms, 4ms, 8ms, 16ms).
+	// Check w.done on each attempt so we don't spin during shutdown.
 	for attempt := 0; attempt < 5; attempt++ {
 		select {
 		case w.entryChan <- walEntry{data: entryData}:
 			return nil
+		case <-w.done:
+			// Shutting down — exit retry loop to fall through to synchronous write.
+			attempt = 5 // break out of for loop
 		default:
 			if attempt < 4 {
 				time.Sleep(time.Millisecond << attempt)
@@ -529,7 +554,7 @@ func (w *Writer) AppendControl(ctrlType ControlType, database, measurement strin
 		}
 	}
 
-	// Fallback: synchronous write under lock
+	// Fallback: synchronous write under lock, with immediate fsync.
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -538,6 +563,10 @@ func (w *Writer) AppendControl(ctrlType ControlType, database, measurement strin
 		Str("measurement", measurement).
 		Uint8("ctrl_type", uint8(ctrlType)).
 		Msg("Control record channel full, writing synchronously")
+
+	if w.currentFile == nil {
+		return fmt.Errorf("cannot write control record: no WAL file open")
+	}
 
 	n, err := w.currentFile.Write(entryData)
 	if err != nil {
@@ -550,6 +579,13 @@ func (w *Writer) AppendControl(ctrlType ControlType, database, measurement strin
 
 	atomic.AddInt64(&w.TotalEntries, 1)
 	atomic.AddInt64(&w.TotalBytes, bytesWritten)
+
+	// Sync immediately: control records must be durable before caller
+	// considers the operation complete (e.g., before WAL PurgeAll).
+	w.sync()
+	w.lastSyncTime = time.Now()
+	w.bytesSinceSync = 0
+	atomic.AddInt64(&w.TotalSyncs, 1)
 
 	// Check rotation
 	if w.currentSize >= w.config.MaxSizeBytes || time.Since(w.startTime) >= w.config.MaxAge {
@@ -581,21 +617,29 @@ func parseControlPayload(payload []byte) (database, measurement string) {
 	return database, measurement
 }
 
-// sync syncs the WAL file to disk based on sync mode
+// sync syncs the WAL file to disk based on sync mode.
+// Errors are logged and tracked via SyncErrors counter — callers do not
+// receive the error because sync is advisory (the OS will eventually
+// flush even if fsync fails).
 func (w *Writer) sync() {
 	if w.currentFile == nil {
 		return
 	}
 
+	var err error
 	switch w.config.SyncMode {
 	case SyncModeFsync:
-		// Full sync: data + metadata
-		w.currentFile.Sync()
+		err = w.currentFile.Sync()
 	case SyncModeFdatasync:
-		// Data sync only (use Sync on systems without fdatasync)
-		w.currentFile.Sync()
+		err = w.currentFile.Sync()
 	case SyncModeAsync:
-		// No explicit sync, rely on OS buffer cache
+		return
+	}
+	if err != nil {
+		atomic.AddInt64(&w.SyncErrors, 1)
+		w.logger.Error().Err(err).
+			Int64("total_sync_errors", atomic.LoadInt64(&w.SyncErrors)).
+			Msg("WAL fsync failed — data may not be durable")
 	}
 }
 
@@ -714,6 +758,8 @@ func (w *Writer) Stats() map[string]interface{} {
 		"total_syncs":         atomic.LoadInt64(&w.TotalSyncs),
 		"total_rotations":     atomic.LoadInt64(&w.TotalRotations),
 		"dropped_entries":     atomic.LoadInt64(&w.DroppedEntries),
+		"write_errors":        atomic.LoadInt64(&w.WriteErrors),
+		"sync_errors":         atomic.LoadInt64(&w.SyncErrors),
 		"buffer_size":         w.config.BufferSize,
 		"buffer_used":         len(w.entryChan),
 	}
