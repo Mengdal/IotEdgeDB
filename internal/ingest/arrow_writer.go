@@ -2333,7 +2333,7 @@ func (b *ArrowBuffer) flushAgedBuffers() {
 
 // splitBufferKey splits "database/measurement" into [database, measurement]
 func splitBufferKey(key string) []string {
-	// Strip schema hash suffix if present (e.g. "db/cpu#abc123" -> "db/cpu")
+	// Strip schema hash suffix if present (e.g. "db/cpu__abc123" -> "db/cpu")
 	cleanKey, _ := StripSchemaHash(key)
 	// Find first slash to split database/measurement
 	for i, c := range cleanKey {
