@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"github.com/rs/zerolog"
@@ -109,17 +110,23 @@ func (c *ReloadCoordinator) Reload() error {
 }
 
 // parseIngestConfig 重新解析 TOML 文件，只提取 [ingest] 段中的可热加载字段。
+// 使用与 Load() 一致的 viper 默认值和环境变量绑定。
 func parseIngestConfig(configPath string) (*IngestReloadConfig, error) {
 	v := viper.New()
 	v.SetConfigFile(configPath)
 	v.SetConfigType("toml")
 
-	// 复用与 Load() 一致的默认值
+	// 与 Load() 一致的默认值
 	v.SetDefault("ingest.max_buffer_memory_mb", 0)
 	v.SetDefault("ingest.min_buffer_memory_mb", 128)
 	v.SetDefault("ingest.max_buffer_age_seconds", 900)
 	v.SetDefault("ingest.memory_pressure_green_pct", 50)
 	v.SetDefault("ingest.memory_pressure_red_pct", 20)
+
+	// 与 Load() 一致的环境变量绑定
+	v.SetEnvPrefix("IEDB")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
