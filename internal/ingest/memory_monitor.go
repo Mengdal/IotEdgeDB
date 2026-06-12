@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"runtime"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"iedb/internal/config"
 )
 
 // PressureLevel 内存压力等级
@@ -213,4 +216,41 @@ func (m *MemoryMonitor) MinBufferBytes() uint64 {
 // Stop 停止监控循环。
 func (m *MemoryMonitor) Stop() {
 	close(m.stopCh)
+}
+
+// ValidateConfig 实现 config.Reloadable 接口。
+func (m *MemoryMonitor) ValidateConfig(payload *config.ReloadPayload) error {
+	if payload == nil || payload.Ingest == nil {
+		return nil
+	}
+	ic := payload.Ingest
+	if ic.GreenPct <= ic.RedPct {
+		return fmt.Errorf("green_pct (%d) must be > red_pct (%d)", ic.GreenPct, ic.RedPct)
+	}
+	if ic.MinBufferMemoryMB < 16 {
+		return fmt.Errorf("min_buffer_memory_mb must be >= 16, got %d", ic.MinBufferMemoryMB)
+	}
+	if ic.MaxBufferMemoryMB > 0 && ic.MaxBufferMemoryMB < ic.MinBufferMemoryMB {
+		return fmt.Errorf("max_buffer_memory_mb (%d) must be >= min_buffer_memory_mb (%d)",
+			ic.MaxBufferMemoryMB, ic.MinBufferMemoryMB)
+	}
+	return nil
+}
+
+// ReloadConfig 实现 config.Reloadable 接口。
+func (m *MemoryMonitor) ReloadConfig(payload *config.ReloadPayload) error {
+	if payload == nil || payload.Ingest == nil {
+		return nil
+	}
+	ic := payload.Ingest
+	m.greenPct.Store(int64(ic.GreenPct))
+	m.redPct.Store(int64(ic.RedPct))
+	m.minBufferBytes.Store(uint64(ic.MinBufferMemoryMB) * 1024 * 1024)
+	m.bufferLimit.Store(m.computeBufferLimitFor(ic.MaxBufferMemoryMB))
+	m.logger.Info().
+		Int("green_pct", ic.GreenPct).
+		Int("red_pct", ic.RedPct).
+		Uint64("buffer_limit_mb", m.BufferLimit()/(1024*1024)).
+		Msg("内存监控器配置已热加载")
+	return nil
 }
