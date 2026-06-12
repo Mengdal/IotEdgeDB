@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"iedb/internal/config"
+
 	"github.com/rs/zerolog"
 )
 
@@ -227,5 +229,88 @@ func TestSplitKeyToDBAndMeas(t *testing.T) {
 			t.Errorf("splitKeyToDBAndMeas(%q) = (%q, %q), want (%q, %q)",
 				tt.key, db, meas, tt.expectedDB, tt.expectedMeas)
 		}
+	}
+}
+
+func TestAdaptiveFlushEngine_ValidateConfig(t *testing.T) {
+	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+
+	tests := []struct {
+		name    string
+		payload *config.ReloadPayload
+		wantErr bool
+	}{
+		{name: "nil payload", payload: nil, wantErr: false},
+		{name: "valid config", payload: &config.ReloadPayload{
+			Ingest: &config.IngestReloadConfig{MaxBufferAgeSeconds: 900},
+		}, wantErr: false},
+		{name: "max age too small", payload: &config.ReloadPayload{
+			Ingest: &config.IngestReloadConfig{MaxBufferAgeSeconds: 5},
+		}, wantErr: true},
+		{name: "max age at boundary", payload: &config.ReloadPayload{
+			Ingest: &config.IngestReloadConfig{MaxBufferAgeSeconds: 10},
+		}, wantErr: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := &AdaptiveFlushEngine{logger: logger}
+			err := engine.ValidateConfig(tt.payload)
+			if tt.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestAdaptiveFlushEngine_ReloadConfig(t *testing.T) {
+	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+
+	monitor := NewMemoryMonitor(MemoryMonitorConfig{
+		MaxBufferMemoryMB: 512,
+		MinBufferMemoryMB: 128,
+		GreenPct:          50,
+		RedPct:            20,
+	}, 0, logger)
+
+	engine := NewAdaptiveFlushEngine(nil, monitor, 900*time.Second, logger)
+
+	initialMaxAge := time.Duration(engine.maxAge.Load())
+	if initialMaxAge != 900*time.Second {
+		t.Fatalf("expected initial maxAge=900s, got %v", initialMaxAge)
+	}
+
+	payload := &config.ReloadPayload{
+		Ingest: &config.IngestReloadConfig{
+			MaxBufferAgeSeconds: 600,
+			MaxBufferMemoryMB:   1024,
+			MinBufferMemoryMB:   256,
+			GreenPct:            60,
+			RedPct:              25,
+		},
+	}
+
+	_ = monitor.ReloadConfig(payload)
+
+	if err := engine.ReloadConfig(payload); err != nil {
+		t.Fatalf("ReloadConfig failed: %v", err)
+	}
+
+	newMaxAge := time.Duration(engine.maxAge.Load())
+	if newMaxAge != 600*time.Second {
+		t.Errorf("expected maxAge=600s, got %v", newMaxAge)
+	}
+
+	expectedLimit := monitor.BufferLimit()
+	if engine.maxBufferBytes.Load() != expectedLimit {
+		t.Errorf("expected maxBufferBytes=%d, got %d", expectedLimit, engine.maxBufferBytes.Load())
+	}
+
+	expectedMin := monitor.MinBufferBytes()
+	if engine.minBufferBytes.Load() != expectedMin {
+		t.Errorf("expected minBufferBytes=%d, got %d", expectedMin, engine.minBufferBytes.Load())
 	}
 }
