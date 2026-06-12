@@ -66,19 +66,16 @@ func TestAdaptiveFlushEngine_CollectCandidates(t *testing.T) {
 
 	// Verify each candidate has valid entry reference
 	for _, c := range candidates {
-		if c.entry == nil {
-			t.Errorf("candidate %s has nil entry", c.bufferKey)
-		}
-		if c.entry.recordCount == 0 {
+		if c.recordCount == 0 {
 			t.Errorf("candidate %s has zero recordCount", c.bufferKey)
 		}
-		if c.entry.startTime.IsZero() {
+		if c.startTime.IsZero() {
 			t.Errorf("candidate %s has zero startTime", c.bufferKey)
 		}
 	}
 
 	t.Logf("Collected %d candidates, total bytes ~%d", len(candidates),
-		candidates[0].entry.estimatedBytes+candidates[1].entry.estimatedBytes+candidates[2].entry.estimatedBytes)
+		candidates[0].estimatedBytes+candidates[1].estimatedBytes+candidates[2].estimatedBytes)
 
 	_ = now
 }
@@ -101,7 +98,7 @@ func TestAdaptiveFlushEngine_FilterExpired(t *testing.T) {
 	}
 
 	for _, c := range expired {
-		age := time.Since(c.entry.startTime)
+		age := time.Since(c.startTime)
 		if age < time.Duration(engine.maxAge.Load()) {
 			t.Errorf("expired entry %s has age %v < maxAge %v", c.bufferKey, age, time.Duration(engine.maxAge.Load()))
 		}
@@ -152,7 +149,7 @@ func TestAdaptiveFlushEngine_FlushUntilBelow(t *testing.T) {
 	candidates := engine.collectCandidates()
 	totalBytes := uint64(0)
 	for _, c := range candidates {
-		totalBytes += c.entry.estimatedBytes
+		totalBytes += c.estimatedBytes
 	}
 
 	if totalBytes <= engine.maxBufferBytes.Load() {
@@ -165,7 +162,7 @@ func TestAdaptiveFlushEngine_FlushUntilBelow(t *testing.T) {
 	// The largest was db/y (2000 bytes), so after removing it: 1000 + 500 = 1500 <= 2000
 	remaining := uint64(0)
 	for _, c := range engine.collectCandidates() {
-		remaining += c.entry.estimatedBytes
+		remaining += c.estimatedBytes
 	}
 	if remaining > engine.maxBufferBytes.Load() {
 		t.Errorf("remaining bytes %d should be <= maxBufferBytes %d after flush", remaining, engine.maxBufferBytes.Load())

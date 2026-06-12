@@ -15,11 +15,15 @@ import (
 )
 
 // flushCandidate 是自适应决策引擎收集的缓冲快照。
+// Fields are copied by value under shard RLock to avoid data races
+// with concurrent write-path mutations of the same bufferEntry fields.
 type flushCandidate struct {
-	shardIdx  int
-	bufferKey string
-	entry     *bufferEntry // direct reference, avoids copying fields
-	trigger   string       // "age", "hard_limit", or "pressure"
+	shardIdx       int
+	bufferKey      string
+	estimatedBytes uint64    // copied from entry.estimatedBytes under RLock
+	recordCount    int       // copied from entry.recordCount under RLock
+	startTime      time.Time // copied from entry.startTime under RLock
+	trigger        string    // "age", "hard_limit", or "pressure"
 }
 
 // AdaptiveFlushEngine 是内存压力驱动的自适应刷盘决策引擎。
@@ -73,7 +77,7 @@ func (e *AdaptiveFlushEngine) evaluate() {
 	// 硬上限检查
 	var totalBytes uint64
 	for _, c := range candidates {
-		totalBytes += c.entry.estimatedBytes
+		totalBytes += c.estimatedBytes
 	}
 
 	// Update buffer estimated bytes metric
@@ -118,7 +122,7 @@ func (e *AdaptiveFlushEngine) evaluate() {
 	}
 }
 
-// collectCandidates 遍历所有 shard，收集 bufferEntry 的引用。
+// collectCandidates 遍历所有 shard，收集 bufferEntry 的快照（按值复制）。
 func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 	e.candidatesBuf = e.candidatesBuf[:0]
 	for i := uint32(0); i < e.buffer.shardCount; i++ {
@@ -126,9 +130,11 @@ func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 		shard.mu.RLock()
 		for key, entry := range shard.buffers {
 			e.candidatesBuf = append(e.candidatesBuf, flushCandidate{
-				shardIdx:  int(i),
-				bufferKey: key,
-				entry:     entry,
+				shardIdx:       int(i),
+				bufferKey:      key,
+				estimatedBytes: entry.estimatedBytes,
+				recordCount:    entry.recordCount,
+				startTime:      entry.startTime,
 			})
 		}
 		shard.mu.RUnlock()
@@ -141,7 +147,7 @@ func (e *AdaptiveFlushEngine) filterExpired(candidates []flushCandidate) []flush
 	var expired []flushCandidate
 	maxAge := time.Duration(e.maxAge.Load())
 	for _, c := range candidates {
-		if time.Since(c.entry.startTime) >= maxAge {
+		if time.Since(c.startTime) >= maxAge {
 			c.trigger = "age"
 			expired = append(expired, c)
 		}
@@ -155,7 +161,7 @@ func (e *AdaptiveFlushEngine) flushLargestUntil(
 	shouldStop func() bool,
 ) {
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].entry.recordCount > candidates[j].entry.recordCount
+		return candidates[i].recordCount > candidates[j].recordCount
 	})
 
 	minPerMeasurement := e.minBufferBytes.Load() / uint64(max(len(candidates), 1))
@@ -164,7 +170,7 @@ func (e *AdaptiveFlushEngine) flushLargestUntil(
 		if shouldStop() {
 			break
 		}
-		if candidates[i].entry.estimatedBytes < minPerMeasurement {
+		if candidates[i].estimatedBytes < minPerMeasurement {
 			continue
 		}
 		if candidates[i].trigger == "" {
@@ -181,7 +187,7 @@ func (e *AdaptiveFlushEngine) flushUntilBelow(
 	targetBytes uint64,
 ) {
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].entry.recordCount > candidates[j].entry.recordCount
+		return candidates[i].recordCount > candidates[j].recordCount
 	})
 
 	remaining := currentTotal
@@ -189,7 +195,7 @@ func (e *AdaptiveFlushEngine) flushUntilBelow(
 		if remaining <= targetBytes {
 			break
 		}
-		remaining -= candidates[i].entry.estimatedBytes
+		remaining -= candidates[i].estimatedBytes
 		if candidates[i].trigger == "" {
 			candidates[i].trigger = "hard_limit"
 		}
@@ -225,7 +231,7 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	// and does not acquire shard locks — safe to call while holding shard.mu.
 	// Only delete the entry on successful enqueue; on failure the entry stays
 	// in buffer for retry on the next evaluate() cycle.
-	flushCtx, flushCancel := context.WithTimeout(context.Background(), e.buffer.flushTimeout)
+	flushCtx, flushCancel := context.WithTimeout(e.buffer.ctx, e.buffer.flushTimeout)
 	task := flushTask{
 		ctx:         flushCtx,
 		cancel:      flushCancel,

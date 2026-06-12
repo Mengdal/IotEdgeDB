@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"iedb/internal/ingest"
@@ -36,10 +37,11 @@ type ArrowViewManager struct {
 	// Enables query-time UNION of all schema variants for a measurement.
 	measurementViews map[string]map[string]struct{}
 
-	notifyCh chan string
-	dirty    map[string]struct{}
-	closeCh  chan struct{}
-	logger   zerolog.Logger
+	notifyCh      chan string
+	dirty         map[string]struct{}
+	closeCh       chan struct{}
+	needsFullScan atomic.Bool // set when notifyCh overflows; triggers full buffer scan on next tick
+	logger        zerolog.Logger
 }
 
 // NewArrowViewManager 创建 VIEW 管理器并启动后台刷新循环。
@@ -63,6 +65,9 @@ func (m *ArrowViewManager) OnNewData(bufferKey string) {
 	select {
 	case m.notifyCh <- bufferKey:
 	default:
+		// notifyCh full — request a full buffer scan on the next tick
+		// to catch any keys dropped during this burst window.
+		m.needsFullScan.Store(true)
 	}
 }
 
@@ -154,6 +159,17 @@ func (m *ArrowViewManager) refreshLoop() {
 			m.dirty[key] = struct{}{}
 			m.mu.Unlock()
 		case <-ticker.C:
+			// Full scan: notifyCh overflowed during this window.
+			// Walk all buffer keys to recover any dropped notifications.
+			if m.needsFullScan.Swap(false) {
+				allKeys := m.buffer.AllBufferKeys()
+				m.mu.Lock()
+				for _, key := range allKeys {
+					m.dirty[key] = struct{}{}
+				}
+				m.mu.Unlock()
+			}
+
 			m.mu.Lock()
 			if len(m.dirty) == 0 {
 				m.mu.Unlock()

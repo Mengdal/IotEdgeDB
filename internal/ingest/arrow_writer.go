@@ -804,7 +804,8 @@ type ArrowBuffer struct {
 	// When total buffer estimated bytes exceeds hardLimit, oldest entries
 	// are evicted. If still over, writeColumnarInternal returns 503.
 	// Set via SetBufferHardLimit; 0 means no limit (backward compatible).
-	hardLimit uint64
+	// atomic: written from SIGHUP goroutine (SetBufferHardLimit), read from write path (ensureBufferSpace).
+	hardLimit atomic.Uint64
 
 	// OPTIMIZATION: Shard buffers to reduce lock contention
 	// Configurable via ingest.shard_count (default 32)
@@ -1684,7 +1685,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 
 	// CRITICAL FIX: Track count incrementally instead of O(n) loop
 	entry.recordCount += numRecords
-	entry.estimatedBytes = uint64(entry.recordCount) * estimateBytesPerRow(typedColumns)
+	entry.estimatedBytes += uint64(numRecords) * estimateBytesPerRow(typedColumns)
 	totalBuffered := entry.recordCount
 
 	// Check if buffer needs flush (size-based).
@@ -1801,7 +1802,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	entry.batches = append(entry.batches, typedColumns)
 
 	entry.recordCount += numRecords
-	entry.estimatedBytes = uint64(entry.recordCount) * estimateBytesPerRow(typedColumns)
+	entry.estimatedBytes += uint64(numRecords) * estimateBytesPerRow(typedColumns)
 	totalBuffered := entry.recordCount
 
 	// Check if buffer needs flush (size-based).
@@ -2372,20 +2373,28 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 				Int64("queue_depth", b.queueDepth.Load()).
 				Msg("Worker processing flush task")
 
-			// Execute flush
-			b.flushRecordsAsync(task.ctx, task.bufferKey, task.database, task.measurement, task.records, task.recordCount)
+			// Execute flush and gate post-flush cleanup on success.
+			// On failure, data was restored to buffer — skip OnFlushComplete
+			// (old VIEW is stale; new VIEW is created by the restore path)
+			// and skip RecordBufferFlushRecords (inflating metrics).
+			// Execute flush and gate post-flush cleanup on success.
+			// On failure, data was restored to buffer — skip OnFlushComplete
+			// (old VIEW is stale; new VIEW is created by the restore path)
+			// and skip RecordBufferFlushRecords (inflating metrics).
+			if b.flushRecordsAsync(task.ctx, task.bufferKey, task.database, task.measurement, task.records, task.recordCount) {
+				// Notify VIEW manager that flush is complete
+				if b.notifier != nil {
+					b.notifier.OnFlushComplete(task.bufferKey)
+				}
+				// Record flush record count distribution
+				trigger := task.trigger
+				if trigger == "" {
+					trigger = "size"
+				}
+				metrics.Get().RecordBufferFlushRecords(trigger, task.recordCount)
+			}
 			// Release timeout context resources
 			task.cancel()
-			// Record flush record count distribution
-			trigger := task.trigger
-			if trigger == "" {
-				trigger = "size"
-			}
-			metrics.Get().RecordBufferFlushRecords(trigger, task.recordCount)
-		// Notify VIEW manager that flush is complete
-		if b.notifier != nil {
-			b.notifier.OnFlushComplete(task.bufferKey)
-		}
 		}
 	}
 }
@@ -2395,7 +2404,7 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 // (Layer 1), and if still over, new writes are rejected with 503 (Layer 2).
 // A value of 0 disables overflow protection.
 func (b *ArrowBuffer) SetBufferHardLimit(limitBytes uint64) {
-	b.hardLimit = limitBytes
+	b.hardLimit.Store(limitBytes)
 }
 
 // estimateTotalBufferBytes scans all shards and returns the total estimated bytes.
@@ -2410,6 +2419,21 @@ func (b *ArrowBuffer) estimateTotalBufferBytes() uint64 {
 		shard.mu.RUnlock()
 	}
 	return total
+}
+
+// AllBufferKeys returns all buffer keys across all shards.
+// Used by ArrowViewManager for full-scan recovery when notifyCh overflows.
+func (b *ArrowBuffer) AllBufferKeys() []string {
+	var keys []string
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.RLock()
+		for key := range shard.buffers {
+			keys = append(keys, key)
+		}
+		shard.mu.RUnlock()
+	}
+	return keys
 }
 
 // evictOldestEntries evicts the oldest buffer entries until total estimated bytes
@@ -2480,12 +2504,13 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 // Returns nil if there is space (possibly after eviction), or error if the hard
 // limit is exceeded even after eviction.
 func (b *ArrowBuffer) ensureBufferSpace(newEntryBytes uint64) error {
-	if b.hardLimit == 0 {
+	hardLimit := b.hardLimit.Load()
+	if hardLimit == 0 {
 		return nil // no limit configured
 	}
 
 	total := b.estimateTotalBufferBytes()
-	if total+newEntryBytes <= b.hardLimit {
+	if total+newEntryBytes <= hardLimit {
 		return nil
 	}
 
@@ -2493,7 +2518,7 @@ func (b *ArrowBuffer) ensureBufferSpace(newEntryBytes uint64) error {
 	// inlineFlushCount caps the number of inline flushes to bound latency;
 	// beyond the cap, entries are evicted without flush (WAL-only).
 	inlineFlushCount := 0
-	target := b.hardLimit * 80 / 100
+	target := hardLimit * 80 / 100
 	for i := 0; i < 100 && b.estimateTotalBufferBytes() > target; i++ {
 		if !b.evictOldestEntries(target, &inlineFlushCount) {
 			break // nothing left to evict
@@ -2501,10 +2526,11 @@ func (b *ArrowBuffer) ensureBufferSpace(newEntryBytes uint64) error {
 	}
 
 	// Layer 2: if still over hard limit, reject with backpressure
+	hardLimit = b.hardLimit.Load()
 	total = b.estimateTotalBufferBytes()
-	if total+newEntryBytes > b.hardLimit {
+	if total+newEntryBytes > hardLimit {
 		return fmt.Errorf("buffer hard limit exceeded: %d bytes (current %d + new %d), limit %d",
-			total+newEntryBytes, total, newEntryBytes, b.hardLimit)
+			total+newEntryBytes, total, newEntryBytes, hardLimit)
 	}
 
 	return nil
@@ -2680,7 +2706,7 @@ func (b *ArrowBuffer) writeBackMergedData(ctx context.Context, database, measure
 	}
 }
 
-func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database, measurement string, records []interface{}, recordCount int) {
+func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database, measurement string, records []interface{}, recordCount int) (flushed bool) {
 	startTime := time.Now()
 
 	// Merge typed column batches
@@ -2693,7 +2719,7 @@ func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database
 			b.logger.Error().Err(err).
 				Str("buffer_key", bufferKey).
 				Msg("CRITICAL: inline restore flush merge failed — data may be lost")
-			return
+			return false
 		}
 		// mergeBatches failed — restore the original batch references back to buffer.
 		// records has not been nilled yet, batch refs are still valid.
@@ -2702,7 +2728,7 @@ func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database
 			Err(err).
 			Str("buffer_key", bufferKey).
 			Msg("Failed to merge batches — buffer entry restored, will retry")
-		return
+		return false
 	}
 
 	// Only clear batch references AFTER confirming merge succeeded.
@@ -2751,6 +2777,7 @@ func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database
 			b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_OK control record")
 		}
 	}
+		return true
 }
 
 // flushWithDataTimePartitioning partitions data by data timestamps (async path)
