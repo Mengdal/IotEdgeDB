@@ -1,0 +1,16 @@
+{
+  "fixedSectionOk": true,
+  "nodesRecovered": 1,
+  "edgesRestored": 4,
+  "crossBatchEdgesAdded": 0,
+  "typesRemapped": 0,
+  "complexityRemapped": 0,
+  "notes": [
+    "Created file:Dockerfile node (the file existed in the project but no file-type node was produced by any batch; only service:Dockerfile existed).",
+    "Restored 2 dropped edges targeting file:Dockerfile: pipeline:Makefile -> file:Dockerfile (depends_on) and document:README.md -> file:Dockerfile (documents).",
+    "Restored 2 dropped edges to config:helm/iedb/templates/_helpers.tpl by correcting target ID to file:helm/iedb/templates/_helpers.tpl (the node exists but was created with 'file:' prefix by batch-19, while batch-18 referenced it with 'config:' prefix).",
+    "Left 2 edges dropped intentionally: service:Dockerfile -> config:iedb.toml and document:README.md -> file:iedb.toml. The file iedb.toml is explicitly excluded by .understandignore, so the target nodes should not be created.",
+    "No cross-batch import edges were missing; all 327 import map entries were already covered by existing edges in the assembled graph.",
+    "No unknown types, unknown complexity values, or nodes without IDs were found in the assembled graph."
+  ]
+}

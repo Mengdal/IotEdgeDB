@@ -1,0 +1,488 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/api/like_optimizer.go",
+      "type": "file",
+      "name": "like_optimizer.go",
+      "filePath": "internal/api/like_optimizer.go",
+      "summary": "LIKE 查询模式优化器，将基于正则表达式的 LIKE 模式转换为 DuckDB 正则函数调用。",
+      "tags": [
+        "utility",
+        "query-optimization",
+        "sql"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/like_optimizer.go:OptimizeLikePatterns",
+      "type": "function",
+      "name": "OptimizeLikePatterns",
+      "filePath": "internal/api/like_optimizer.go",
+      "lineRange": [
+        35,
+        54
+      ],
+      "summary": "函数 OptimizeLikePatterns，参数：sql。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/like_optimizer.go:optimizeMultiplePredicates",
+      "type": "function",
+      "name": "optimizeMultiplePredicates",
+      "filePath": "internal/api/like_optimizer.go",
+      "lineRange": [
+        65,
+        97
+      ],
+      "summary": "函数 optimizeMultiplePredicates，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/api/like_optimizer_test.go",
+      "type": "file",
+      "name": "like_optimizer_test.go",
+      "filePath": "internal/api/like_optimizer_test.go",
+      "summary": "LIKE 模式优化器的单元测试和基准测试。",
+      "tags": [
+        "test",
+        "query-optimization",
+        "benchmark"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/like_optimizer_test.go:TestOptimizeLikePatterns",
+      "type": "function",
+      "name": "TestOptimizeLikePatterns",
+      "filePath": "internal/api/like_optimizer_test.go",
+      "lineRange": [
+        7,
+        93
+      ],
+      "summary": "测试函数 TestOptimizeLikePatterns，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/like_optimizer_test.go:BenchmarkOptimizeLikePatterns",
+      "type": "function",
+      "name": "BenchmarkOptimizeLikePatterns",
+      "filePath": "internal/api/like_optimizer_test.go",
+      "lineRange": [
+        95,
+        109
+      ],
+      "summary": "测试函数 BenchmarkOptimizeLikePatterns，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/api/lineprotocol_test.go",
+      "type": "file",
+      "name": "lineprotocol_test.go",
+      "filePath": "internal/api/lineprotocol_test.go",
+      "summary": "LineProtocol 测量名称验证的单元测试。",
+      "tags": [
+        "test",
+        "lineprotocol",
+        "validation"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/lineprotocol_test.go:TestIsValidMeasurementName",
+      "type": "function",
+      "name": "TestIsValidMeasurementName",
+      "filePath": "internal/api/lineprotocol_test.go",
+      "lineRange": [
+        5,
+        56
+      ],
+      "summary": "测试函数 TestIsValidMeasurementName，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/lineprotocol_test.go:TestIsValidMeasurementName_MaxLength",
+      "type": "function",
+      "name": "TestIsValidMeasurementName_MaxLength",
+      "filePath": "internal/api/lineprotocol_test.go",
+      "lineRange": [
+        58,
+        80
+      ],
+      "summary": "测试函数 TestIsValidMeasurementName_MaxLength，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/api/mcp.go",
+      "type": "file",
+      "name": "mcp.go",
+      "filePath": "internal/api/mcp.go",
+      "summary": "MCP（Model Context Protocol）API 处理器，为 AI 代理提供工具调用和资源访问接口。",
+      "tags": [
+        "api-handler",
+        "mcp",
+        "ai-integration"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/mcp.go:NewMCPHandler",
+      "type": "function",
+      "name": "NewMCPHandler",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        119,
+        121
+      ],
+      "summary": "函数 NewMCPHandler。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/mcp.go:RegisterRoutes",
+      "type": "function",
+      "name": "RegisterRoutes",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        123,
+        125
+      ],
+      "summary": "函数 RegisterRoutes，参数：app。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/mcp.go:handle",
+      "type": "function",
+      "name": "handle",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        127,
+        139
+      ],
+      "summary": "函数 handle，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/mcp.go:dispatch",
+      "type": "function",
+      "name": "dispatch",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        141,
+        201
+      ],
+      "summary": "函数 dispatch，参数：c, req。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/mcp.go:listTools",
+      "type": "function",
+      "name": "listTools",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        203,
+        246
+      ],
+      "summary": "函数 listTools。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/mcp.go:callTool",
+      "type": "function",
+      "name": "callTool",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        248,
+        356
+      ],
+      "summary": "函数 callTool，参数：c, name, args。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/mcp.go:listResources",
+      "type": "function",
+      "name": "listResources",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        358,
+        379
+      ],
+      "summary": "函数 listResources。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/mcp.go:readResource",
+      "type": "function",
+      "name": "readResource",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        381,
+        404
+      ],
+      "summary": "函数 readResource，参数：c, uri。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/mcp.go:listPrompts",
+      "type": "function",
+      "name": "listPrompts",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        406,
+        425
+      ],
+      "summary": "函数 listPrompts。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/mcp.go:getPrompt",
+      "type": "function",
+      "name": "getPrompt",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        427,
+        465
+      ],
+      "summary": "函数 getPrompt，参数：name。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/mcp.go:forwardRawRequest",
+      "type": "function",
+      "name": "forwardRawRequest",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        471,
+        513
+      ],
+      "summary": "函数 forwardRawRequest，参数：c, method, path, body, database, contentType。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/mcp.go:mcpHandler",
+      "type": "class",
+      "name": "mcpHandler",
+      "filePath": "internal/api/mcp.go",
+      "lineRange": [
+        114,
+        116
+      ],
+      "summary": "HTTP 请求处理器结构体 mcpHandler，处理相关 API 路由。",
+      "tags": [
+        "class",
+        "api-handler"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Go 结构体作为 HTTP 处理器，通过 Fiber 框架注册路由处理函数。"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/api/like_optimizer.go",
+      "target": "function:internal/api/like_optimizer.go:OptimizeLikePatterns",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/like_optimizer.go",
+      "target": "function:internal/api/like_optimizer.go:OptimizeLikePatterns",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/like_optimizer.go",
+      "target": "function:internal/api/like_optimizer.go:optimizeMultiplePredicates",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/like_optimizer_test.go",
+      "target": "function:internal/api/like_optimizer_test.go:TestOptimizeLikePatterns",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/like_optimizer_test.go",
+      "target": "function:internal/api/like_optimizer_test.go:BenchmarkOptimizeLikePatterns",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/lineprotocol_test.go",
+      "target": "function:internal/api/lineprotocol_test.go:TestIsValidMeasurementName",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/lineprotocol_test.go",
+      "target": "function:internal/api/lineprotocol_test.go:TestIsValidMeasurementName_MaxLength",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:NewMCPHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:NewMCPHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:RegisterRoutes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:RegisterRoutes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:handle",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:dispatch",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:listTools",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:callTool",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:listResources",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:readResource",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:listPrompts",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:getPrompt",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "function:internal/api/mcp.go:forwardRawRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/mcp.go",
+      "target": "class:internal/api/mcp.go:mcpHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    }
+  ]
+}

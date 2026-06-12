@@ -1,0 +1,2056 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/circuitbreaker/circuitbreaker.go",
+      "type": "file",
+      "name": "circuitbreaker.go",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "summary": "实现经典的断路器模式（Circuit Breaker），包含Closed/Open/HalfOpen三态转换、请求限流和状态变更回调，用于保护外部服务调用。",
+      "tags": [
+        "utility",
+        "resilience",
+        "error-handling"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "type": "file",
+      "name": "circuitbreaker_test.go",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "summary": "断路器模式的完整测试套件，覆盖状态转换、并发安全、阈值边界和错误传播等场景。",
+      "tags": [
+        "test",
+        "resilience",
+        "error-handling"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "type": "file",
+      "name": "compaction_bridge_integration_test.go",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "summary": "压缩桥接层与Raft FSM的集成测试，验证完成清单到Raft日志的同步以及Leader转发故障恢复流程。",
+      "tags": [
+        "test",
+        "cluster",
+        "integration",
+        "compaction"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/cluster/compaction_bridge_test.go",
+      "type": "file",
+      "name": "compaction_bridge_test.go",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "summary": "压缩桥接层的单元测试，覆盖注册、删除、批量文件操作及Leader解析错误的映射逻辑。",
+      "tags": [
+        "test",
+        "cluster",
+        "compaction"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:String",
+      "type": "function",
+      "name": "String",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        21,
+        32
+      ],
+      "summary": "返回当前断路器状态的字符串表示（closed/open/half-open）。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:DefaultConfig",
+      "type": "function",
+      "name": "DefaultConfig",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        61,
+        68
+      ],
+      "summary": "返回默认断路器配置：最多5次失败、30秒超时、半开状态3个请求。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:New",
+      "type": "function",
+      "name": "New",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        84,
+        94
+      ],
+      "summary": "创建断路器实例，应用配置并设置初始状态为关闭。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:Execute",
+      "type": "function",
+      "name": "Execute",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        97,
+        112
+      ],
+      "summary": "在断路器保护下执行函数：关闭状态正常执行，开启状态直接拒绝。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:allowRequest",
+      "type": "function",
+      "name": "allowRequest",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        115,
+        147
+      ],
+      "summary": "判断是否允许请求通过：关闭状态允许，开启状态超时后进入半开，半开状态限流。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:recordResult",
+      "type": "function",
+      "name": "recordResult",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        150,
+        159
+      ],
+      "summary": "根据函数执行结果记录成功或失败。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:recordFailure",
+      "type": "function",
+      "name": "recordFailure",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        161,
+        182
+      ],
+      "summary": "记录一次失败，达到阈值后切换为开启状态。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:recordSuccess",
+      "type": "function",
+      "name": "recordSuccess",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        184,
+        203
+      ],
+      "summary": "记录一次成功，连续成功达到阈值后切换为关闭状态。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:setState",
+      "type": "function",
+      "name": "setState",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        205,
+        223
+      ],
+      "summary": "执行状态切换并触发OnStateChange回调。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:State",
+      "type": "function",
+      "name": "State",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        226,
+        230
+      ],
+      "summary": "返回当前断路器状态。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:Stats",
+      "type": "function",
+      "name": "Stats",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        233,
+        246
+      ],
+      "summary": "返回断路器的运行统计信息。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:Reset",
+      "type": "function",
+      "name": "Reset",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        249,
+        258
+      ],
+      "summary": "重置断路器到初始关闭状态，清空计数。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker.go:IsOpen",
+      "type": "function",
+      "name": "IsOpen",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        261,
+        265
+      ],
+      "summary": "检查断路器是否处于开启状态。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/circuitbreaker/circuitbreaker.go:CircuitBreaker",
+      "type": "class",
+      "name": "CircuitBreaker",
+      "filePath": "internal/circuitbreaker/circuitbreaker.go",
+      "lineRange": [
+        71,
+        81
+      ],
+      "summary": "断路器核心结构体，管理Closed/Open/HalfOpen三态转换和请求保护。",
+      "tags": [
+        "class"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestStateString",
+      "type": "function",
+      "name": "TestStateString",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        14,
+        32
+      ],
+      "summary": "测试State.String()方法的返回字符串。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestDefaultConfig",
+      "type": "function",
+      "name": "TestDefaultConfig",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        35,
+        50
+      ],
+      "summary": "测试默认配置的字段值是否正确。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestNew",
+      "type": "function",
+      "name": "TestNew",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        53,
+        84
+      ],
+      "summary": "测试断路器的创建和配置应用。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Closed",
+      "type": "function",
+      "name": "TestCircuitBreaker_Closed",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        87,
+        132
+      ],
+      "summary": "测试关闭状态下请求正常通过。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Open",
+      "type": "function",
+      "name": "TestCircuitBreaker_Open",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        135,
+        170
+      ],
+      "summary": "测试开启状态下请求被拒绝。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpen",
+      "type": "function",
+      "name": "TestCircuitBreaker_HalfOpen",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        173,
+        208
+      ],
+      "summary": "测试半开状态下请求限流。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpen_FailureReturnsToOpen",
+      "type": "function",
+      "name": "TestCircuitBreaker_HalfOpen_FailureReturnsToOpen",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        211,
+        248
+      ],
+      "summary": "测试半开状态下失败后回到开启状态。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpen_SuccessCloses",
+      "type": "function",
+      "name": "TestCircuitBreaker_HalfOpen_SuccessCloses",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        251,
+        281
+      ],
+      "summary": "测试半开状态下成功后回到关闭状态。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Reset",
+      "type": "function",
+      "name": "TestCircuitBreaker_Reset",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        284,
+        318
+      ],
+      "summary": "测试重置操作。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_IsOpen",
+      "type": "function",
+      "name": "TestCircuitBreaker_IsOpen",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        321,
+        350
+      ],
+      "summary": "测试IsOpen方法。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Stats",
+      "type": "function",
+      "name": "TestCircuitBreaker_Stats",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        353,
+        381
+      ],
+      "summary": "测试统计信息返回。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_OnStateChange",
+      "type": "function",
+      "name": "TestCircuitBreaker_OnStateChange",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        384,
+        432
+      ],
+      "summary": "测试状态变更回调的触发。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpenRequestLimit",
+      "type": "function",
+      "name": "TestCircuitBreaker_HalfOpenRequestLimit",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        435,
+        482
+      ],
+      "summary": "测试半开状态下的请求限制。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Concurrent",
+      "type": "function",
+      "name": "TestCircuitBreaker_Concurrent",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        485,
+        529
+      ],
+      "summary": "测试并发安全。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_ErrorPropagation",
+      "type": "function",
+      "name": "TestCircuitBreaker_ErrorPropagation",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        532,
+        546
+      ],
+      "summary": "测试错误传播。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_ThresholdEdgeCases",
+      "type": "function",
+      "name": "TestCircuitBreaker_ThresholdEdgeCases",
+      "filePath": "internal/circuitbreaker/circuitbreaker_test.go",
+      "lineRange": [
+        549,
+        598
+      ],
+      "summary": "测试阈值边界情况。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_integration_test.go:LocalNodeID",
+      "type": "function",
+      "name": "LocalNodeID",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        61,
+        61
+      ],
+      "summary": "返回本地节点ID。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_integration_test.go:RegisterFileInManifest",
+      "type": "function",
+      "name": "RegisterFileInManifest",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        63,
+        83
+      ],
+      "summary": "将文件注册到Raft FSM清单。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_integration_test.go:DeleteFileFromManifest",
+      "type": "function",
+      "name": "DeleteFileFromManifest",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        85,
+        105
+      ],
+      "summary": "从Raft FSM清单中删除文件。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_integration_test.go:BatchFileOpsInManifest",
+      "type": "function",
+      "name": "BatchFileOpsInManifest",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        107,
+        127
+      ],
+      "summary": "在Raft FSM中批量执行文件操作。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_integration_test.go:waitFSMHasFile",
+      "type": "function",
+      "name": "waitFSMHasFile",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        131,
+        148
+      ],
+      "summary": "等待FSM中出现指定文件。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_integration_test.go:TestPhase4_CompletionManifestToFSM",
+      "type": "function",
+      "name": "TestPhase4_CompletionManifestToFSM",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        154,
+        265
+      ],
+      "summary": "集成测试：完成后清单同步到Raft FSM的完整流程。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_integration_test.go:TestPhase4_ForwardingFailureKeepsManifestUntilRecovery",
+      "type": "function",
+      "name": "TestPhase4_ForwardingFailureKeepsManifestUntilRecovery",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        278,
+        363
+      ],
+      "summary": "集成测试：Leader转发失败时保持清单直到恢复。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_integration_test.go:writeManifest",
+      "type": "function",
+      "name": "writeManifest",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        371,
+        388
+      ],
+      "summary": "写入测试用的完成清单文件。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_integration_test.go:listJSONPaths",
+      "type": "function",
+      "name": "listJSONPaths",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        391,
+        407
+      ],
+      "summary": "列出目录中的JSON文件路径。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/cluster/compaction_bridge_integration_test.go:fsmCoordinator",
+      "type": "class",
+      "name": "fsmCoordinator",
+      "filePath": "internal/cluster/compaction_bridge_integration_test.go",
+      "lineRange": [
+        50,
+        59
+      ],
+      "summary": "集成测试用的FSM协调器模拟实现。",
+      "tags": [
+        "class"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:LocalNodeID",
+      "type": "function",
+      "name": "LocalNodeID",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        39,
+        39
+      ],
+      "summary": "LocalNodeID函数",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:RegisterFileInManifest",
+      "type": "function",
+      "name": "RegisterFileInManifest",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        40,
+        44
+      ],
+      "summary": "RegisterFileInManifest函数",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:DeleteFileFromManifest",
+      "type": "function",
+      "name": "DeleteFileFromManifest",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        45,
+        49
+      ],
+      "summary": "DeleteFileFromManifest函数",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:BatchFileOpsInManifest",
+      "type": "function",
+      "name": "BatchFileOpsInManifest",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        50,
+        54
+      ],
+      "summary": "BatchFileOpsInManifest函数",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterMapsNoLeaderKnownToErrNotLeader",
+      "type": "function",
+      "name": "TestCompactionBridge_RegisterMapsNoLeaderKnownToErrNotLeader",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        63,
+        86
+      ],
+      "summary": "测试注册操作在无Leader时映射为ErrNotLeader。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterMapsLeaderUnreachableToErrNotLeader",
+      "type": "function",
+      "name": "TestCompactionBridge_RegisterMapsLeaderUnreachableToErrNotLeader",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        91,
+        105
+      ],
+      "summary": "测试注册操作在Leader不可达时映射为ErrNotLeader。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterSuccessAsLeader",
+      "type": "function",
+      "name": "TestCompactionBridge_RegisterSuccessAsLeader",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        110,
+        149
+      ],
+      "summary": "测试注册操作在Leader节点上成功执行。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterUnderlyingErrorSurfaces",
+      "type": "function",
+      "name": "TestCompactionBridge_RegisterUnderlyingErrorSurfaces",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        155,
+        169
+      ],
+      "summary": "测试注册操作的底层错误正确冒泡。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterRespectsDeadline",
+      "type": "function",
+      "name": "TestCompactionBridge_RegisterRespectsDeadline",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        174,
+        187
+      ],
+      "summary": "测试注册操作尊重上下文截止时间。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_DeleteMapsNoLeaderKnownToErrNotLeader",
+      "type": "function",
+      "name": "TestCompactionBridge_DeleteMapsNoLeaderKnownToErrNotLeader",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        192,
+        209
+      ],
+      "summary": "测试删除操作在无Leader时映射为ErrNotLeader。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_DeleteSuccessAsLeader",
+      "type": "function",
+      "name": "TestCompactionBridge_DeleteSuccessAsLeader",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        211,
+        228
+      ],
+      "summary": "测试删除操作在Leader节点上成功执行。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_DeleteUnderlyingErrorSurfaces",
+      "type": "function",
+      "name": "TestCompactionBridge_DeleteUnderlyingErrorSurfaces",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        230,
+        244
+      ],
+      "summary": "测试删除操作的底层错误正确冒泡。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_NilCoordinatorPanicsAtConstruction",
+      "type": "function",
+      "name": "TestCompactionBridge_NilCoordinatorPanicsAtConstruction",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        250,
+        265
+      ],
+      "summary": "测试nil协调器在构造时触发panic。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_HappyPath",
+      "type": "function",
+      "name": "TestCompactionBridge_BatchFileOps_HappyPath",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        272,
+        314
+      ],
+      "summary": "测试批量文件操作的正常流程。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_EmptyOps",
+      "type": "function",
+      "name": "TestCompactionBridge_BatchFileOps_EmptyOps",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        318,
+        328
+      ],
+      "summary": "测试批量空操作。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_MapsNoLeaderKnownToErrNotLeader",
+      "type": "function",
+      "name": "TestCompactionBridge_BatchFileOps_MapsNoLeaderKnownToErrNotLeader",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        332,
+        346
+      ],
+      "summary": "测试批量操作在无Leader时映射为ErrNotLeader。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_RespectsDeadline",
+      "type": "function",
+      "name": "TestCompactionBridge_BatchFileOps_RespectsDeadline",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        350,
+        363
+      ],
+      "summary": "测试批量操作尊重上下文截止时间。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/cluster/compaction_bridge_test.go:stubBridgeCoordinator",
+      "type": "class",
+      "name": "stubBridgeCoordinator",
+      "filePath": "internal/cluster/compaction_bridge_test.go",
+      "lineRange": [
+        26,
+        37
+      ],
+      "summary": "压缩桥接单元测试用的协调器存根。",
+      "tags": [
+        "class"
+      ],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:String",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:DefaultConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:New",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:Execute",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:allowRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:recordResult",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:recordFailure",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:recordSuccess",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:setState",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:State",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:Stats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:Reset",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:IsOpen",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "class:internal/circuitbreaker/circuitbreaker.go:CircuitBreaker",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestStateString",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestDefaultConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestNew",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Closed",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Open",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpen",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpen_FailureReturnsToOpen",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpen_SuccessCloses",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Reset",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_IsOpen",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Stats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_OnStateChange",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpenRequestLimit",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Concurrent",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_ErrorPropagation",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_ThresholdEdgeCases",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:LocalNodeID",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:RegisterFileInManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:DeleteFileFromManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:BatchFileOpsInManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:waitFSMHasFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:TestPhase4_CompletionManifestToFSM",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:TestPhase4_ForwardingFailureKeepsManifestUntilRecovery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:writeManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:listJSONPaths",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "class:internal/cluster/compaction_bridge_integration_test.go:fsmCoordinator",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:LocalNodeID",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:RegisterFileInManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:DeleteFileFromManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:BatchFileOpsInManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterMapsNoLeaderKnownToErrNotLeader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterMapsLeaderUnreachableToErrNotLeader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterSuccessAsLeader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterUnderlyingErrorSurfaces",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterRespectsDeadline",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_DeleteMapsNoLeaderKnownToErrNotLeader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_DeleteSuccessAsLeader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_DeleteUnderlyingErrorSurfaces",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_NilCoordinatorPanicsAtConstruction",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_HappyPath",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_EmptyOps",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_MapsNoLeaderKnownToErrNotLeader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_RespectsDeadline",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "class:internal/cluster/compaction_bridge_test.go:stubBridgeCoordinator",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:String",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:DefaultConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:New",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:Execute",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:State",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:Stats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:Reset",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker.go:IsOpen",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "class:internal/circuitbreaker/circuitbreaker.go:CircuitBreaker",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestStateString",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestDefaultConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestNew",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Closed",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Open",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpen",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpen_FailureReturnsToOpen",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpen_SuccessCloses",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Reset",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_IsOpen",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Stats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_OnStateChange",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_HalfOpenRequestLimit",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_Concurrent",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_ErrorPropagation",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "target": "function:internal/circuitbreaker/circuitbreaker_test.go:TestCircuitBreaker_ThresholdEdgeCases",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:LocalNodeID",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:RegisterFileInManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:DeleteFileFromManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:BatchFileOpsInManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:TestPhase4_CompletionManifestToFSM",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "function:internal/cluster/compaction_bridge_integration_test.go:TestPhase4_ForwardingFailureKeepsManifestUntilRecovery",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:LocalNodeID",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:RegisterFileInManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:DeleteFileFromManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:BatchFileOpsInManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterMapsNoLeaderKnownToErrNotLeader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterMapsLeaderUnreachableToErrNotLeader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterSuccessAsLeader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterUnderlyingErrorSurfaces",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_RegisterRespectsDeadline",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_DeleteMapsNoLeaderKnownToErrNotLeader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_DeleteSuccessAsLeader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_DeleteUnderlyingErrorSurfaces",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_NilCoordinatorPanicsAtConstruction",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_HappyPath",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_EmptyOps",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_MapsNoLeaderKnownToErrNotLeader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "function:internal/cluster/compaction_bridge_test.go:TestCompactionBridge_BatchFileOps_RespectsDeadline",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/cluster/raft/errors.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/cluster/raft/fsm_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/cluster/raft/fsm.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/cluster/raft/logger.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/cluster/raft/node_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/completion_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/completion.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/daily_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/daily.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/dedup_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/dedup.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/hourly.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/job_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/job.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/manager_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/manifest_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/manifest.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/scheduler_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/scheduler.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/subprocess_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/subprocess.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/tier.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/watcher_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/compaction/watcher.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/cluster/raft/errors.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/cluster/raft/fsm_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/cluster/raft/fsm.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/cluster/raft/logger.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/cluster/raft/node_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/completion_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/completion.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/daily_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/daily.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/dedup_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/dedup.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/hourly.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/job_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/job.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/manager_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/manifest_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/manifest.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/scheduler_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/scheduler.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/subprocess_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/subprocess.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/tier.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/watcher_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/compaction/watcher.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/circuitbreaker/circuitbreaker.go",
+      "target": "file:internal/circuitbreaker/circuitbreaker_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "target": "file:internal/cluster/raft/fsm.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/cluster/compaction_bridge_test.go",
+      "target": "file:internal/cluster/raft/fsm.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    }
+  ]
+}

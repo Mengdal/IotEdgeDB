@@ -261,8 +261,12 @@ func (e *AdaptiveFlushEngine) ValidateConfig(payload *config.ReloadPayload) erro
 	if payload == nil || payload.Ingest == nil {
 		return nil
 	}
-	if payload.Ingest.MaxBufferAgeSeconds < 10 {
-		return fmt.Errorf("max_buffer_age_seconds must be >= 10, got %d", payload.Ingest.MaxBufferAgeSeconds)
+	ic := payload.Ingest
+	if ic.MaxBufferAgeSeconds < 10 {
+		return fmt.Errorf("max_buffer_age_seconds must be >= 10, got %d", ic.MaxBufferAgeSeconds)
+	}
+	if ic.MaxBufferAgeSeconds > 1_000_000_000 {
+		return fmt.Errorf("max_buffer_age_seconds must be <= 1000000000, got %d", ic.MaxBufferAgeSeconds)
 	}
 	return nil
 }
@@ -278,13 +282,19 @@ func (e *AdaptiveFlushEngine) ReloadConfig(payload *config.ReloadPayload) error 
 	ic := payload.Ingest
 	oldMaxAge := time.Duration(e.maxAge.Load())
 	newMaxAge := time.Duration(ic.MaxBufferAgeSeconds) * time.Second
+	newLimit := e.monitor.BufferLimit()
+	newMin := e.monitor.MinBufferBytes()
 	e.maxAge.Store(int64(newMaxAge))
-	e.maxBufferBytes.Store(e.monitor.BufferLimit())
-	e.minBufferBytes.Store(e.monitor.MinBufferBytes())
+	e.maxBufferBytes.Store(newLimit)
+	e.minBufferBytes.Store(newMin)
+	// Keep ArrowBuffer overflow protection in sync with the reloaded limit.
+	if e.buffer != nil {
+		e.buffer.SetBufferHardLimit(newLimit * 2)
+	}
 	e.logger.Info().
 		Dur("old_max_age", oldMaxAge).
 		Dur("new_max_age", newMaxAge).
-		Uint64("buffer_limit_mb", e.maxBufferBytes.Load()/(1024*1024)).
+		Uint64("buffer_limit_mb", newLimit/(1024*1024)).
 		Msg("自适应刷盘引擎配置已热加载")
 	return nil
 }

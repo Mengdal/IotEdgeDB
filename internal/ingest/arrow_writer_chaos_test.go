@@ -64,8 +64,7 @@ func TestChaos_PressureOscillation_NoThrashing(t *testing.T) {
 			}
 		},
 	}
-	monitor.greenPct.Store(50)
-	monitor.redPct.Store(20)
+	monitor.greenRedPct.Store(int64(50)<<32 | int64(20))
 	monitor.minBufferBytes.Store(64 * 1024 * 1024)
 	monitor.bufferLimit.Store(2 * 1024 * 1024 * 1024)
 	engine := NewAdaptiveFlushEngine(buf, monitor, 10*time.Minute, zerolog.Nop())

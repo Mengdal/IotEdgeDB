@@ -1,0 +1,692 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/ingest/memory_monitor.go",
+      "type": "file",
+      "name": "memory_monitor.go",
+      "filePath": "internal/ingest/memory_monitor.go",
+      "summary": "监控系统可用内存并发布压力等级（绿/黄/红），用于控制 ArrowBuffer 的刷盘策略，避免 OOM。",
+      "tags": [
+        "ingestion",
+        "memory",
+        "monitor",
+        "pressure"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 原子操作无锁读取压力等级。支持 Docker cgroup 内存限制检测。"
+    },
+    {
+      "id": "file:internal/ingest/memory_monitor_test.go",
+      "type": "file",
+      "name": "memory_monitor_test.go",
+      "filePath": "internal/ingest/memory_monitor_test.go",
+      "summary": "MemoryMonitor 压力等级、缓冲上限和系统内存检测的单元测试。",
+      "tags": [
+        "test",
+        "memory",
+        "monitor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/ingest/msgpack.go",
+      "type": "file",
+      "name": "msgpack.go",
+      "filePath": "internal/ingest/msgpack.go",
+      "summary": "实现 MessagePack 二进制协议解码器，支持行格式、列格式（最快速）和批格式三种数据路径。",
+      "tags": [
+        "ingestion",
+        "msgpack",
+        "decoder",
+        "binary-protocol"
+      ],
+      "complexity": "complex",
+      "languageNotes": "列式格式是快速路径（18.6M rec/s），RawPayload 保留原始字节用于零拷贝 WAL。"
+    },
+    {
+      "id": "file:internal/ingest/msgpack_test.go",
+      "type": "file",
+      "name": "msgpack_test.go",
+      "filePath": "internal/ingest/msgpack_test.go",
+      "summary": "MessagePack 解码器全功能测试，涵盖行/列/批/数组四种格式和边界条件。",
+      "tags": [
+        "test",
+        "msgpack",
+        "decoder",
+        "benchmark"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/ingest/notifier.go",
+      "type": "file",
+      "name": "notifier.go",
+      "filePath": "internal/ingest/notifier.go",
+      "summary": "定义 BufferChangeNotifier 接口，用于 ingest 和 database 包之间的缓冲变更通知解耦。",
+      "tags": [
+        "ingestion",
+        "notifier",
+        "interface",
+        "decoupling"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/ingest/tle.go",
+      "type": "file",
+      "name": "tle.go",
+      "filePath": "internal/ingest/tle.go",
+      "summary": "实现两行轨道要素（TLE）解析器，解析卫星名称、轨道参数并计算半长轴、周期、近远地点等派生指标。",
+      "tags": [
+        "ingestion",
+        "tle",
+        "satellite",
+        "parser"
+      ],
+      "complexity": "complex",
+      "languageNotes": "使用 WGS-84 地球引力常数。字节级解析避免完整载荷字符串拷贝。"
+    },
+    {
+      "id": "file:internal/ingest/tle_test.go",
+      "type": "file",
+      "name": "tle_test.go",
+      "filePath": "internal/ingest/tle_test.go",
+      "summary": "TLE 解析器单元测试，涵盖校验和验证、派生指标计算、轨道类型分类和多种边界输入。",
+      "tags": [
+        "test",
+        "tle",
+        "satellite",
+        "parser"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/ingest/utf8.go",
+      "type": "file",
+      "name": "utf8.go",
+      "filePath": "internal/ingest/utf8.go",
+      "summary": "非 SIMD 构建下的 UTF-8 验证和清理函数，使用 Go 标准库 utf8 包。",
+      "tags": [
+        "ingestion",
+        "utf8",
+        "validation",
+        "sanitization"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/ingest/utf8_sanitize.go",
+      "type": "file",
+      "name": "utf8_sanitize.go",
+      "filePath": "internal/ingest/utf8_sanitize.go",
+      "summary": "UTF-8 清理慢路径：将无效 UTF-8 序列替换为 U+FFFD 替换字符。",
+      "tags": [
+        "ingestion",
+        "utf8",
+        "sanitization"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/ingest/msgpack.go:MessagePackDecoder",
+      "type": "class",
+      "name": "MessagePackDecoder",
+      "filePath": "internal/ingest/msgpack.go",
+      "summary": "MessagePack 二进制协议解码器，支持行/列/批三种格式解码。列格式为高性能快速路径。",
+      "tags": [
+        "decoder",
+        "msgpack",
+        "binary-protocol"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        16,
+        20
+      ]
+    },
+    {
+      "id": "function:internal/ingest/msgpack.go:NewMessagePackDecoder",
+      "type": "function",
+      "name": "NewMessagePackDecoder",
+      "filePath": "internal/ingest/msgpack.go",
+      "summary": "创建 MessagePackDecoder 实例。",
+      "tags": [
+        "decoder",
+        "constructor"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        23,
+        27
+      ]
+    },
+    {
+      "id": "function:internal/ingest/msgpack.go:Decode",
+      "type": "function",
+      "name": "Decode",
+      "filePath": "internal/ingest/msgpack.go",
+      "summary": "解码 MessagePack 二进制数据为 Record 或 ColumnarRecord，自动检测输入格式。",
+      "tags": [
+        "decoder",
+        "msgpack",
+        "dispatch"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        32,
+        88
+      ]
+    },
+    {
+      "id": "function:internal/ingest/msgpack.go:GetStats",
+      "type": "function",
+      "name": "GetStats",
+      "filePath": "internal/ingest/msgpack.go",
+      "summary": "返回解码器的统计信息（总解码数、总错误数）。",
+      "tags": [
+        "decoder",
+        "stats",
+        "monitoring"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        578,
+        592
+      ]
+    },
+    {
+      "id": "class:internal/ingest/tle.go:TLERecord",
+      "type": "class",
+      "name": "TLERecord",
+      "filePath": "internal/ingest/tle.go",
+      "summary": "TLE 卫星轨道记录，包含 NORAD ID、轨道根数、派生指标（半长轴、周期、近远地点）和轨道类型分类。",
+      "tags": [
+        "tle",
+        "satellite",
+        "orbital-elements"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        31,
+        64
+      ]
+    },
+    {
+      "id": "class:internal/ingest/tle.go:TLEParser",
+      "type": "class",
+      "name": "TLEParser",
+      "filePath": "internal/ingest/tle.go",
+      "summary": "两行轨道要素文件解析器，支持单条和批量解析，含校验和验证和轨道派生计算。",
+      "tags": [
+        "tle",
+        "parser",
+        "satellite"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        67,
+        67
+      ]
+    },
+    {
+      "id": "function:internal/ingest/tle.go:NewTLEParser",
+      "type": "function",
+      "name": "NewTLEParser",
+      "filePath": "internal/ingest/tle.go",
+      "summary": "创建 TLEParser 实例。",
+      "tags": [
+        "parser",
+        "constructor"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        70,
+        72
+      ]
+    },
+    {
+      "id": "function:internal/ingest/tle.go:ParseTLEFile",
+      "type": "function",
+      "name": "ParseTLEFile",
+      "filePath": "internal/ingest/tle.go",
+      "summary": "解析完整 TLE 文件（含多颗卫星），返回解析记录和警告列表。校验和失败的条目被跳过。",
+      "tags": [
+        "tle",
+        "parser",
+        "batch"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        78,
+        153
+      ]
+    },
+    {
+      "id": "function:internal/ingest/tle.go:ParseTLEEntry",
+      "type": "function",
+      "name": "ParseTLEEntry",
+      "filePath": "internal/ingest/tle.go",
+      "summary": "解析单条 TLE 条目（三行或两行格式），计算派生轨道指标并进行轨道类型分类。",
+      "tags": [
+        "tle",
+        "parser",
+        "single-entry"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        154,
+        178
+      ]
+    },
+    {
+      "id": "function:internal/ingest/tle.go:TLERecordsToTypedColumnar",
+      "type": "function",
+      "name": "TLERecordsToTypedColumnar",
+      "filePath": "internal/ingest/tle.go",
+      "summary": "将 TLERecord 列表转换为列式格式，供 ArrowBuffer 直接写入。",
+      "tags": [
+        "tle",
+        "columnar",
+        "conversion"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        509,
+        591
+      ]
+    },
+    {
+      "id": "class:internal/ingest/memory_monitor.go:MemoryMonitorConfig",
+      "type": "class",
+      "name": "MemoryMonitorConfig",
+      "filePath": "internal/ingest/memory_monitor.go",
+      "summary": "内存监控器配置，支持最大缓冲内存、最低保证内存、压力百分比阈值和检查间隔。",
+      "tags": [
+        "memory",
+        "config",
+        "throttling"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        25,
+        31
+      ]
+    },
+    {
+      "id": "class:internal/ingest/memory_monitor.go:MemoryMonitor",
+      "type": "class",
+      "name": "MemoryMonitor",
+      "filePath": "internal/ingest/memory_monitor.go",
+      "summary": "持续监控系统可用内存并发布压力等级（绿/黄/红），驱动 ArrowBuffer 的自适应刷盘策略。",
+      "tags": [
+        "memory",
+        "monitor",
+        "pressure",
+        "adaptive"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        34,
+        45
+      ]
+    },
+    {
+      "id": "function:internal/ingest/memory_monitor.go:NewMemoryMonitor",
+      "type": "function",
+      "name": "NewMemoryMonitor",
+      "filePath": "internal/ingest/memory_monitor.go",
+      "summary": "创建内存监控器，自动检测系统内存和 DuckDB 内存限制，计算缓冲上限。",
+      "tags": [
+        "memory",
+        "constructor",
+        "detection"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        48,
+        66
+      ]
+    },
+    {
+      "id": "function:internal/ingest/memory_monitor.go:Run",
+      "type": "function",
+      "name": "Run",
+      "filePath": "internal/ingest/memory_monitor.go",
+      "summary": "启动内存监控循环，定期检查可用内存并更新压力等级。",
+      "tags": [
+        "memory",
+        "monitor",
+        "loop"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        167,
+        183
+      ]
+    },
+    {
+      "id": "class:internal/ingest/notifier.go:BufferChangeNotifier",
+      "type": "class",
+      "name": "BufferChangeNotifier",
+      "filePath": "internal/ingest/notifier.go",
+      "summary": "缓冲变更通知接口，由 database 包实现，解耦 ingest 和 database 包之间的循环依赖。",
+      "tags": [
+        "notifier",
+        "interface",
+        "decoupling",
+        "callback"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        5,
+        11
+      ]
+    },
+    {
+      "id": "function:internal/ingest/utf8.go:SanitizeUTF8",
+      "type": "function",
+      "name": "SanitizeUTF8",
+      "filePath": "internal/ingest/utf8.go",
+      "summary": "替换字符串中的无效 UTF-8 序列为 U+FFFD 替换字符。快速路径使用 utf8.ValidString 检查。",
+      "tags": [
+        "utf8",
+        "sanitization",
+        "fast-path"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        25,
+        32
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "file:pkg/models/record.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/msgpack_test.go",
+      "target": "file:pkg/models/record.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "class:internal/ingest/msgpack.go:MessagePackDecoder",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "function:internal/ingest/msgpack.go:NewMessagePackDecoder",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "function:internal/ingest/msgpack.go:Decode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "function:internal/ingest/msgpack.go:GetStats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "class:internal/ingest/tle.go:TLERecord",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "class:internal/ingest/tle.go:TLEParser",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "function:internal/ingest/tle.go:NewTLEParser",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "function:internal/ingest/tle.go:ParseTLEFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "function:internal/ingest/tle.go:ParseTLEEntry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "function:internal/ingest/tle.go:TLERecordsToTypedColumnar",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor.go",
+      "target": "class:internal/ingest/memory_monitor.go:MemoryMonitorConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor.go",
+      "target": "class:internal/ingest/memory_monitor.go:MemoryMonitor",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor.go",
+      "target": "function:internal/ingest/memory_monitor.go:NewMemoryMonitor",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor.go",
+      "target": "function:internal/ingest/memory_monitor.go:Run",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/notifier.go",
+      "target": "class:internal/ingest/notifier.go:BufferChangeNotifier",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/utf8.go",
+      "target": "function:internal/ingest/utf8.go:SanitizeUTF8",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "class:internal/ingest/msgpack.go:MessagePackDecoder",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "function:internal/ingest/msgpack.go:NewMessagePackDecoder",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "function:internal/ingest/msgpack.go:Decode",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "function:internal/ingest/msgpack.go:GetStats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "class:internal/ingest/tle.go:TLERecord",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "class:internal/ingest/tle.go:TLEParser",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "function:internal/ingest/tle.go:NewTLEParser",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "function:internal/ingest/tle.go:ParseTLEFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "function:internal/ingest/tle.go:ParseTLEEntry",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "function:internal/ingest/tle.go:TLERecordsToTypedColumnar",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor.go",
+      "target": "class:internal/ingest/memory_monitor.go:MemoryMonitorConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor.go",
+      "target": "class:internal/ingest/memory_monitor.go:MemoryMonitor",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor.go",
+      "target": "function:internal/ingest/memory_monitor.go:NewMemoryMonitor",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor.go",
+      "target": "function:internal/ingest/memory_monitor.go:Run",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/notifier.go",
+      "target": "class:internal/ingest/notifier.go:BufferChangeNotifier",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/utf8.go",
+      "target": "function:internal/ingest/utf8.go:SanitizeUTF8",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "file:pkg/models/record.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor_test.go",
+      "target": "file:internal/ingest/memory_monitor.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/msgpack_test.go",
+      "target": "file:internal/ingest/msgpack.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/tle_test.go",
+      "target": "file:internal/ingest/tle.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "function:internal/ingest/msgpack.go:Decode",
+      "target": "class:pkg/models/record.go:ColumnarRecord",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:internal/ingest/msgpack.go:Decode",
+      "target": "class:pkg/models/record.go:Record",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "function:internal/ingest/tle.go:TLERecordsToTypedColumnar",
+      "target": "class:pkg/models/record.go:ColumnarRecord",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    }
+  ]
+}

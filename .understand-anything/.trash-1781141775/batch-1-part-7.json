@@ -1,0 +1,2352 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/api/query_management.go",
+      "type": "file",
+      "name": "query_management.go",
+      "filePath": "internal/api/query_management.go",
+      "summary": "查询管理 API 处理器，提供活动查询列表、历史记录查询和查询取消功能。",
+      "tags": [
+        "api-handler",
+        "query-management",
+        "monitoring"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/query_management.go:NewQueryManagementHandler",
+      "type": "function",
+      "name": "NewQueryManagementHandler",
+      "filePath": "internal/api/query_management.go",
+      "lineRange": [
+        24,
+        31
+      ],
+      "summary": "函数 NewQueryManagementHandler，参数：registry, authManager, licenseClient, logger。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management.go:RegisterRoutes",
+      "type": "function",
+      "name": "RegisterRoutes",
+      "filePath": "internal/api/query_management.go",
+      "lineRange": [
+        34,
+        45
+      ],
+      "summary": "函数 RegisterRoutes，参数：app。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management.go:listActiveQueries",
+      "type": "function",
+      "name": "listActiveQueries",
+      "filePath": "internal/api/query_management.go",
+      "lineRange": [
+        59,
+        104
+      ],
+      "summary": "函数 listActiveQueries，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management.go:listQueryHistory",
+      "type": "function",
+      "name": "listQueryHistory",
+      "filePath": "internal/api/query_management.go",
+      "lineRange": [
+        107,
+        128
+      ],
+      "summary": "函数 listQueryHistory，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management.go:getQuery",
+      "type": "function",
+      "name": "getQuery",
+      "filePath": "internal/api/query_management.go",
+      "lineRange": [
+        131,
+        152
+      ],
+      "summary": "函数 getQuery，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management.go:cancelQuery",
+      "type": "function",
+      "name": "cancelQuery",
+      "filePath": "internal/api/query_management.go",
+      "lineRange": [
+        155,
+        190
+      ],
+      "summary": "函数 cancelQuery，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/query_management.go:QueryManagementHandler",
+      "type": "class",
+      "name": "QueryManagementHandler",
+      "filePath": "internal/api/query_management.go",
+      "lineRange": [
+        16,
+        21
+      ],
+      "summary": "HTTP 请求处理器结构体 QueryManagementHandler，处理相关 API 路由。",
+      "tags": [
+        "class",
+        "api-handler",
+        "exported"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Go 结构体作为 HTTP 处理器，通过 Fiber 框架注册路由处理函数。"
+    },
+    {
+      "id": "file:internal/api/query_management_test.go",
+      "type": "file",
+      "name": "query_management_test.go",
+      "filePath": "internal/api/query_management_test.go",
+      "summary": "查询管理 API 的单元测试，验证活动查询、历史记录和取消功能。",
+      "tags": [
+        "test",
+        "query-management",
+        "api-test"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:setupQueryManagementTest",
+      "type": "function",
+      "name": "setupQueryManagementTest",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        19,
+        39
+      ],
+      "summary": "函数 setupQueryManagementTest，参数：t。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_ListActiveQueries_Empty",
+      "type": "function",
+      "name": "TestQueryManagement_ListActiveQueries_Empty",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        41,
+        57
+      ],
+      "summary": "测试函数 TestQueryManagement_ListActiveQueries_Empty，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_ListActiveQueries_WithRunning",
+      "type": "function",
+      "name": "TestQueryManagement_ListActiveQueries_WithRunning",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        59,
+        73
+      ],
+      "summary": "测试函数 TestQueryManagement_ListActiveQueries_WithRunning，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_ListHistory_Empty",
+      "type": "function",
+      "name": "TestQueryManagement_ListHistory_Empty",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        75,
+        86
+      ],
+      "summary": "测试函数 TestQueryManagement_ListHistory_Empty，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_ListHistory_WithCompleted",
+      "type": "function",
+      "name": "TestQueryManagement_ListHistory_WithCompleted",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        88,
+        102
+      ],
+      "summary": "测试函数 TestQueryManagement_ListHistory_WithCompleted，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_ListHistory_WithLimit",
+      "type": "function",
+      "name": "TestQueryManagement_ListHistory_WithLimit",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        104,
+        120
+      ],
+      "summary": "测试函数 TestQueryManagement_ListHistory_WithLimit，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_GetQuery_Active",
+      "type": "function",
+      "name": "TestQueryManagement_GetQuery_Active",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        122,
+        135
+      ],
+      "summary": "测试函数 TestQueryManagement_GetQuery_Active，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_GetQuery_Completed",
+      "type": "function",
+      "name": "TestQueryManagement_GetQuery_Completed",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        137,
+        151
+      ],
+      "summary": "测试函数 TestQueryManagement_GetQuery_Completed，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_GetQuery_NotFound",
+      "type": "function",
+      "name": "TestQueryManagement_GetQuery_NotFound",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        153,
+        164
+      ],
+      "summary": "测试函数 TestQueryManagement_GetQuery_NotFound，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_CancelQuery",
+      "type": "function",
+      "name": "TestQueryManagement_CancelQuery",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        166,
+        192
+      ],
+      "summary": "测试函数 TestQueryManagement_CancelQuery，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_CancelQuery_NotFound",
+      "type": "function",
+      "name": "TestQueryManagement_CancelQuery_NotFound",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        194,
+        205
+      ],
+      "summary": "测试函数 TestQueryManagement_CancelQuery_NotFound，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_CancelQuery_AlreadyCompleted",
+      "type": "function",
+      "name": "TestQueryManagement_CancelQuery_AlreadyCompleted",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        207,
+        221
+      ],
+      "summary": "测试函数 TestQueryManagement_CancelQuery_AlreadyCompleted，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_management_test.go:TestQueryManagement_LicenseRequired",
+      "type": "function",
+      "name": "TestQueryManagement_LicenseRequired",
+      "filePath": "internal/api/query_management_test.go",
+      "lineRange": [
+        223,
+        240
+      ],
+      "summary": "测试函数 TestQueryManagement_LicenseRequired，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/api/query_test.go",
+      "type": "file",
+      "name": "query_test.go",
+      "filePath": "internal/api/query_test.go",
+      "summary": "核心查询处理器的综合单元测试，覆盖 SQL 重写、验证、路径转换等功能。",
+      "tags": [
+        "test",
+        "query",
+        "sql-validation"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestExtractCTENames",
+      "type": "function",
+      "name": "TestExtractCTENames",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        16,
+        104
+      ],
+      "summary": "测试函数 TestExtractCTENames，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestMaskStringLiterals",
+      "type": "function",
+      "name": "TestMaskStringLiterals",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        106,
+        163
+      ],
+      "summary": "测试函数 TestMaskStringLiterals，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestUnmaskStringLiterals",
+      "type": "function",
+      "name": "TestUnmaskStringLiterals",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        165,
+        197
+      ],
+      "summary": "测试函数 TestUnmaskStringLiterals，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestStripSQLComments",
+      "type": "function",
+      "name": "TestStripSQLComments",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        199,
+        246
+      ],
+      "summary": "测试函数 TestStripSQLComments，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestConvertSQLWithCTE",
+      "type": "function",
+      "name": "TestConvertSQLWithCTE",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        248,
+        459
+      ],
+      "summary": "测试函数 TestConvertSQLWithCTE，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestJoinClausePatterns",
+      "type": "function",
+      "name": "TestJoinClausePatterns",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        461,
+        499
+      ],
+      "summary": "测试函数 TestJoinClausePatterns，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestValidateIdentifier",
+      "type": "function",
+      "name": "TestValidateIdentifier",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        501,
+        537
+      ],
+      "summary": "测试函数 TestValidateIdentifier，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestValidateOrderByClause",
+      "type": "function",
+      "name": "TestValidateOrderByClause",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        539,
+        573
+      ],
+      "summary": "测试函数 TestValidateOrderByClause，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestValidateWhereClauseQuery",
+      "type": "function",
+      "name": "TestValidateWhereClauseQuery",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        575,
+        621
+      ],
+      "summary": "测试函数 TestValidateWhereClauseQuery，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestDangerousSQLPatterns",
+      "type": "function",
+      "name": "TestDangerousSQLPatterns",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        623,
+        689
+      ],
+      "summary": "测试函数 TestDangerousSQLPatterns，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestValidateHeaderDatabase",
+      "type": "function",
+      "name": "TestValidateHeaderDatabase",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        696,
+        737
+      ],
+      "summary": "测试函数 TestValidateHeaderDatabase，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestQuotePath",
+      "type": "function",
+      "name": "TestQuotePath",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        744,
+        766
+      ],
+      "summary": "测试函数 TestQuotePath，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestValidateSQLRequest_BypassesAndFalsePositives",
+      "type": "function",
+      "name": "TestValidateSQLRequest_BypassesAndFalsePositives",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        774,
+        824
+      ],
+      "summary": "测试函数 TestValidateSQLRequest_BypassesAndFalsePositives，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestShowDatabasesPattern",
+      "type": "function",
+      "name": "TestShowDatabasesPattern",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        826,
+        851
+      ],
+      "summary": "测试函数 TestShowDatabasesPattern，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestShowTablesPattern",
+      "type": "function",
+      "name": "TestShowTablesPattern",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        853,
+        888
+      ],
+      "summary": "测试函数 TestShowTablesPattern，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestDBTablePattern",
+      "type": "function",
+      "name": "TestDBTablePattern",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        890,
+        928
+      ],
+      "summary": "测试函数 TestDBTablePattern，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestFormatNumber",
+      "type": "function",
+      "name": "TestFormatNumber",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        930,
+        956
+      ],
+      "summary": "测试函数 TestFormatNumber，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestValidIdentifierPattern",
+      "type": "function",
+      "name": "TestValidIdentifierPattern",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        958,
+        990
+      ],
+      "summary": "测试函数 TestValidIdentifierPattern，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:BenchmarkValidateIdentifier",
+      "type": "function",
+      "name": "BenchmarkValidateIdentifier",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        993,
+        997
+      ],
+      "summary": "测试函数 BenchmarkValidateIdentifier，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:BenchmarkValidateWhereClause",
+      "type": "function",
+      "name": "BenchmarkValidateWhereClause",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        999,
+        1005
+      ],
+      "summary": "测试函数 BenchmarkValidateWhereClause，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:BenchmarkDangerousSQLCheck",
+      "type": "function",
+      "name": "BenchmarkDangerousSQLCheck",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1007,
+        1013
+      ],
+      "summary": "测试函数 BenchmarkDangerousSQLCheck，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:BenchmarkConvertSQLToStoragePaths",
+      "type": "function",
+      "name": "BenchmarkConvertSQLToStoragePaths",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1017,
+        1064
+      ],
+      "summary": "测试函数 BenchmarkConvertSQLToStoragePaths，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:BenchmarkGetTransformedSQL",
+      "type": "function",
+      "name": "BenchmarkGetTransformedSQL",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1067,
+        1113
+      ],
+      "summary": "测试函数 BenchmarkGetTransformedSQL，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:GetBasePath",
+      "type": "function",
+      "name": "GetBasePath",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1120,
+        1120
+      ],
+      "summary": "函数 GetBasePath。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:Write",
+      "type": "function",
+      "name": "Write",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1121,
+        1121
+      ],
+      "summary": "函数 Write，参数：ctx, path, data。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:WriteReader",
+      "type": "function",
+      "name": "WriteReader",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1122,
+        1124
+      ],
+      "summary": "函数 WriteReader，参数：ctx, path, r, size。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:Read",
+      "type": "function",
+      "name": "Read",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1125,
+        1125
+      ],
+      "summary": "函数 Read，参数：ctx, path。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:ReadTo",
+      "type": "function",
+      "name": "ReadTo",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1126,
+        1126
+      ],
+      "summary": "函数 ReadTo，参数：ctx, path, w。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:List",
+      "type": "function",
+      "name": "List",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1127,
+        1129
+      ],
+      "summary": "函数 List，参数：ctx, prefix。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:Delete",
+      "type": "function",
+      "name": "Delete",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1130,
+        1130
+      ],
+      "summary": "函数 Delete，参数：ctx, path。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:Exists",
+      "type": "function",
+      "name": "Exists",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1131,
+        1131
+      ],
+      "summary": "函数 Exists，参数：ctx, path。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:Close",
+      "type": "function",
+      "name": "Close",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1132,
+        1132
+      ],
+      "summary": "函数 Close。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:Type",
+      "type": "function",
+      "name": "Type",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1133,
+        1133
+      ],
+      "summary": "函数 Type。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:ConfigJSON",
+      "type": "function",
+      "name": "ConfigJSON",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1134,
+        1134
+      ],
+      "summary": "函数 ConfigJSON。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:ReadToAt",
+      "type": "function",
+      "name": "ReadToAt",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1135,
+        1137
+      ],
+      "summary": "函数 ReadToAt，参数：_, _, _, _。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:StatFile",
+      "type": "function",
+      "name": "StatFile",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1138,
+        1138
+      ],
+      "summary": "函数 StatFile，参数：_, _。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:AppendReader",
+      "type": "function",
+      "name": "AppendReader",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1139,
+        1141
+      ],
+      "summary": "函数 AppendReader，参数：_, _, _, _。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestRewriteTimeBucket",
+      "type": "function",
+      "name": "TestRewriteTimeBucket",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1143,
+        1263
+      ],
+      "summary": "测试函数 TestRewriteTimeBucket，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestRewriteTimeBucketWithOrigin",
+      "type": "function",
+      "name": "TestRewriteTimeBucketWithOrigin",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1265,
+        1302
+      ],
+      "summary": "测试函数 TestRewriteTimeBucketWithOrigin，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestIntervalToSeconds",
+      "type": "function",
+      "name": "TestIntervalToSeconds",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1304,
+        1333
+      ],
+      "summary": "测试函数 TestIntervalToSeconds，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestParseTimeBucketOrigin",
+      "type": "function",
+      "name": "TestParseTimeBucketOrigin",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1335,
+        1358
+      ],
+      "summary": "测试函数 TestParseTimeBucketOrigin，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_test.go:TestRewriteDateTrunc",
+      "type": "function",
+      "name": "TestRewriteDateTrunc",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1360,
+        1444
+      ],
+      "summary": "测试函数 TestRewriteDateTrunc，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/api/query_test.go:mockLocalBackend",
+      "type": "class",
+      "name": "mockLocalBackend",
+      "filePath": "internal/api/query_test.go",
+      "lineRange": [
+        1116,
+        1118
+      ],
+      "summary": "类/结构体 mockLocalBackend，包含 14 个方法。",
+      "tags": [
+        "class"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/api/rbac_routes.go",
+      "type": "file",
+      "name": "rbac_routes.go",
+      "filePath": "internal/api/rbac_routes.go",
+      "summary": "基于角色的访问控制（RBAC）API 处理器，管理组织、团队、角色和测量权限的 CRUD 操作。",
+      "tags": [
+        "api-handler",
+        "rbac",
+        "security"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:NewRBACHandler",
+      "type": "function",
+      "name": "NewRBACHandler",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        20,
+        26
+      ],
+      "summary": "函数 NewRBACHandler，参数：authManager, rbacManager, logger。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:RegisterRoutes",
+      "type": "function",
+      "name": "RegisterRoutes",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        40,
+        78
+      ],
+      "summary": "函数 RegisterRoutes，参数：app。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:listOrganizations",
+      "type": "function",
+      "name": "listOrganizations",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        85,
+        100
+      ],
+      "summary": "函数 listOrganizations，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:createOrganization",
+      "type": "function",
+      "name": "createOrganization",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        103,
+        128
+      ],
+      "summary": "函数 createOrganization，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:getOrganization",
+      "type": "function",
+      "name": "getOrganization",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        131,
+        168
+      ],
+      "summary": "函数 getOrganization，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:updateOrganization",
+      "type": "function",
+      "name": "updateOrganization",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        171,
+        206
+      ],
+      "summary": "函数 updateOrganization，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:deleteOrganization",
+      "type": "function",
+      "name": "deleteOrganization",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        209,
+        236
+      ],
+      "summary": "函数 deleteOrganization，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:listTeams",
+      "type": "function",
+      "name": "listTeams",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        243,
+        266
+      ],
+      "summary": "函数 listTeams，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:createTeam",
+      "type": "function",
+      "name": "createTeam",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        269,
+        302
+      ],
+      "summary": "函数 createTeam，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:getTeam",
+      "type": "function",
+      "name": "getTeam",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        305,
+        342
+      ],
+      "summary": "函数 getTeam，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:updateTeam",
+      "type": "function",
+      "name": "updateTeam",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        345,
+        380
+      ],
+      "summary": "函数 updateTeam，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:deleteTeam",
+      "type": "function",
+      "name": "deleteTeam",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        383,
+        410
+      ],
+      "summary": "函数 deleteTeam，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:listRoles",
+      "type": "function",
+      "name": "listRoles",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        417,
+        440
+      ],
+      "summary": "函数 listRoles，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:createRole",
+      "type": "function",
+      "name": "createRole",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        443,
+        480
+      ],
+      "summary": "函数 createRole，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:getRole",
+      "type": "function",
+      "name": "getRole",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        483,
+        520
+      ],
+      "summary": "函数 getRole，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:updateRole",
+      "type": "function",
+      "name": "updateRole",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        523,
+        558
+      ],
+      "summary": "函数 updateRole，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:deleteRole",
+      "type": "function",
+      "name": "deleteRole",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        561,
+        588
+      ],
+      "summary": "函数 deleteRole，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:listMeasurementPermissions",
+      "type": "function",
+      "name": "listMeasurementPermissions",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        595,
+        618
+      ],
+      "summary": "函数 listMeasurementPermissions，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:createMeasurementPermission",
+      "type": "function",
+      "name": "createMeasurementPermission",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        621,
+        658
+      ],
+      "summary": "函数 createMeasurementPermission，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/rbac_routes.go:deleteMeasurementPermission",
+      "type": "function",
+      "name": "deleteMeasurementPermission",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        661,
+        688
+      ],
+      "summary": "函数 deleteMeasurementPermission，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/rbac_routes.go:RBACHandler",
+      "type": "class",
+      "name": "RBACHandler",
+      "filePath": "internal/api/rbac_routes.go",
+      "lineRange": [
+        13,
+        17
+      ],
+      "summary": "HTTP 请求处理器结构体 RBACHandler，处理相关 API 路由。",
+      "tags": [
+        "class",
+        "api-handler",
+        "exported"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Go 结构体作为 HTTP 处理器，通过 Fiber 框架注册路由处理函数。"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/auth/auth_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/auth/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/auth/middleware_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/auth/middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/auth/rbac_manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/auth/rbac_models.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/auth/rbac_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/metrics/metrics.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/metrics/timeseries_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/metrics/timeseries.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/queryregistry/registry_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "file:internal/queryregistry/registry.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "function:internal/api/query_management.go:NewQueryManagementHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "function:internal/api/query_management.go:NewQueryManagementHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "function:internal/api/query_management.go:RegisterRoutes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "function:internal/api/query_management.go:RegisterRoutes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "function:internal/api/query_management.go:listActiveQueries",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "function:internal/api/query_management.go:listQueryHistory",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "function:internal/api/query_management.go:getQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "function:internal/api/query_management.go:cancelQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "class:internal/api/query_management.go:QueryManagementHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management.go",
+      "target": "class:internal/api/query_management.go:QueryManagementHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "file:internal/metrics/metrics.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "file:internal/metrics/timeseries_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "file:internal/metrics/timeseries.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "file:internal/queryregistry/registry_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "file:internal/queryregistry/registry.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:setupQueryManagementTest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_ListActiveQueries_Empty",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_ListActiveQueries_WithRunning",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_ListHistory_Empty",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_ListHistory_WithCompleted",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_ListHistory_WithLimit",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_GetQuery_Active",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_GetQuery_Completed",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_GetQuery_NotFound",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_CancelQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_CancelQuery_NotFound",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_CancelQuery_AlreadyCompleted",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_management_test.go",
+      "target": "function:internal/api/query_management_test.go:TestQueryManagement_LicenseRequired",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/database/arrow_view_integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/database/arrow_view.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/database/duckdb_arrow.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/database/duckdb_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/database/duckdb.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/database/sql_transform_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/database/sql_transform_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/pruning/partition_pruner_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/pruning/partition_pruner.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "file:internal/sql/mask.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestExtractCTENames",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestMaskStringLiterals",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestUnmaskStringLiterals",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestStripSQLComments",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestConvertSQLWithCTE",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestJoinClausePatterns",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestValidateIdentifier",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestValidateOrderByClause",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestValidateWhereClauseQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestDangerousSQLPatterns",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestValidateHeaderDatabase",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestQuotePath",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestValidateSQLRequest_BypassesAndFalsePositives",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestShowDatabasesPattern",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestShowTablesPattern",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestDBTablePattern",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestFormatNumber",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestValidIdentifierPattern",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:BenchmarkValidateIdentifier",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:BenchmarkValidateWhereClause",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:BenchmarkDangerousSQLCheck",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:BenchmarkConvertSQLToStoragePaths",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:BenchmarkGetTransformedSQL",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:GetBasePath",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:GetBasePath",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Write",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Write",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:WriteReader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:WriteReader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Read",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Read",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:ReadTo",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:ReadTo",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:List",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:List",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Delete",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Delete",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Exists",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Exists",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Close",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Close",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Type",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:Type",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:ConfigJSON",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:ConfigJSON",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:ReadToAt",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:ReadToAt",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:StatFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:StatFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:AppendReader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:AppendReader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestRewriteTimeBucket",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestRewriteTimeBucketWithOrigin",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestIntervalToSeconds",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestParseTimeBucketOrigin",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "function:internal/api/query_test.go:TestRewriteDateTrunc",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_test.go",
+      "target": "class:internal/api/query_test.go:mockLocalBackend",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "file:internal/auth/auth_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "file:internal/auth/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "file:internal/auth/middleware_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "file:internal/auth/middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "file:internal/auth/rbac_manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "file:internal/auth/rbac_models.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "file:internal/auth/rbac_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:NewRBACHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:NewRBACHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:RegisterRoutes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:RegisterRoutes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:listOrganizations",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:createOrganization",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:getOrganization",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:updateOrganization",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:deleteOrganization",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:listTeams",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:createTeam",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:getTeam",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:updateTeam",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:deleteTeam",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:listRoles",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:createRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:getRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:updateRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:deleteRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:listMeasurementPermissions",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:createMeasurementPermission",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "function:internal/api/rbac_routes.go:deleteMeasurementPermission",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "class:internal/api/rbac_routes.go:RBACHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/rbac_routes.go",
+      "target": "class:internal/api/rbac_routes.go:RBACHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    }
+  ]
+}

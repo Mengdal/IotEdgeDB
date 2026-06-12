@@ -1,0 +1,38 @@
+{
+  "issues": [],
+  "warnings": [
+    "Node 'class:internal/wal/wal.go:Writer' has no edges (orphan)",
+    "Node 'pipeline:.github/workflows/release-build.yml' has no edges (orphan)",
+    "Node 'file:.understand-anything/.understandignore' has no edges (orphan)",
+    "Node 'file:helm/iedb-enterprise/.helmignore' has no edges (orphan)"
+  ],
+  "stats": {
+    "totalNodes": 2651,
+    "totalEdges": 6726,
+    "totalLayers": 8,
+    "tourSteps": 12,
+    "nodeTypes": {
+      "file": 273,
+      "function": 1994,
+      "class": 327,
+      "service": 12,
+      "pipeline": 2,
+      "document": 10,
+      "config": 33
+    },
+    "edgeTypes": {
+      "imports": 2518,
+      "contains": 2324,
+      "exports": 1570,
+      "tested_by": 158,
+      "depends_on": 86,
+      "calls": 8,
+      "configures": 11,
+      "related": 12,
+      "deploys": 8,
+      "documents": 21,
+      "serves": 9,
+      "routes": 1
+    }
+  }
+}

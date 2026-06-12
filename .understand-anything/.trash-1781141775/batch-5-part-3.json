@@ -1,0 +1,1506 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/ingest/utf8_simdutf.go",
+      "type": "file",
+      "name": "utf8_simdutf.go",
+      "filePath": "internal/ingest/utf8_simdutf.go",
+      "summary": "SIMD 加速的 UTF-8 验证函数（simdutf 库），对 4KB 以上字符串使用 NEON/AVX2 指令集。",
+      "tags": [
+        "ingestion",
+        "utf8",
+        "simd",
+        "validation"
+      ],
+      "complexity": "simple",
+      "languageNotes": "go:build simdutf 条件编译。4KB 阈值下回退到 Go 标准库以避免 cgo 开销。"
+    },
+    {
+      "id": "file:internal/ingest/utf8_test.go",
+      "type": "file",
+      "name": "utf8_test.go",
+      "filePath": "internal/ingest/utf8_test.go",
+      "summary": "UTF-8 验证和清理函数的全面测试与基准测试，覆盖不同长度和内容的输入。",
+      "tags": [
+        "test",
+        "utf8",
+        "sanitization",
+        "benchmark"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/mqtt/manager.go",
+      "type": "file",
+      "name": "manager.go",
+      "filePath": "internal/mqtt/manager.go",
+      "summary": "MQTT 订阅管理器，提供订阅的 CRUD 操作和生命周期管理（启动/停止/暂停/重启）。",
+      "tags": [
+        "mqtt",
+        "subscription",
+        "manager",
+        "crud"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/mqtt/subscriber.go",
+      "type": "file",
+      "name": "subscriber.go",
+      "filePath": "internal/mqtt/subscriber.go",
+      "summary": "MQTT 订阅者实现，处理单个订阅的 MQTT 连接、消息接收、解码和注入 ArrowBuffer。",
+      "tags": [
+        "mqtt",
+        "subscriber",
+        "message-processing",
+        "tls"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/tiering/integration_test.go",
+      "type": "file",
+      "name": "integration_test.go",
+      "filePath": "internal/tiering/integration_test.go",
+      "summary": "分层存储策略的集成测试，覆盖文件记录、策略迁移、自定义覆盖、层级统计和批量迁移。",
+      "tags": [
+        "test",
+        "tiering",
+        "integration",
+        "storage-lifecycle"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/tiering/policy.go",
+      "type": "file",
+      "name": "policy.go",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "分层存储策略管理器，支持基于数据库的分层策略配置、缓存和查询，区分热/冷存储。",
+      "tags": [
+        "tiering",
+        "policy",
+        "storage",
+        "lifecycle"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/tiering/policy_test.go",
+      "type": "file",
+      "name": "policy_test.go",
+      "filePath": "internal/tiering/policy_test.go",
+      "summary": "分层存储策略存储的单元测试，覆盖增删改查和有效策略解析。",
+      "tags": [
+        "test",
+        "tiering",
+        "policy"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:pkg/models/record.go",
+      "type": "file",
+      "name": "record.go",
+      "filePath": "pkg/models/record.go",
+      "summary": "定义核心数据模型：Record（行格式）、ColumnarRecord（列格式）和 MsgPackPayload（MessagePack 载荷结构）。",
+      "tags": [
+        "models",
+        "data-structure",
+        "shared-types"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/ingest/utf8_simdutf.go:ValidateUTF8",
+      "type": "function",
+      "name": "ValidateUTF8",
+      "filePath": "internal/ingest/utf8_simdutf.go",
+      "summary": "SIMD 加速的 UTF-8 验证，4KB 以上字符串使用 NEON/AVX2，以下回退到 Go 标准库。",
+      "tags": [
+        "utf8",
+        "validation",
+        "simd"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        23,
+        28
+      ]
+    },
+    {
+      "id": "function:internal/ingest/utf8_simdutf.go:ValidateUTF8Bytes",
+      "type": "function",
+      "name": "ValidateUTF8Bytes",
+      "filePath": "internal/ingest/utf8_simdutf.go",
+      "summary": "SIMD 加速的字节切片 UTF-8 验证，适用于验证整个传入载荷。",
+      "tags": [
+        "utf8",
+        "validation",
+        "simd",
+        "payload"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        32,
+        40
+      ]
+    },
+    {
+      "id": "function:internal/ingest/utf8_simdutf.go:SanitizeUTF8",
+      "type": "function",
+      "name": "SanitizeUTF8",
+      "filePath": "internal/ingest/utf8_simdutf.go",
+      "summary": "SIMD 构建下的 UTF-8 清理，使用最快验证路径后回退到标准清理函数。",
+      "tags": [
+        "utf8",
+        "sanitization",
+        "simd"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        44,
+        50
+      ]
+    },
+    {
+      "id": "class:pkg/models/record.go:Record",
+      "type": "class",
+      "name": "Record",
+      "filePath": "pkg/models/record.go",
+      "summary": "单条时序数据点的内部格式，包含测量名、时间戳、字段和标签。",
+      "tags": [
+        "models",
+        "time-series",
+        "record"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        7,
+        13
+      ]
+    },
+    {
+      "id": "class:pkg/models/record.go:ColumnarRecord",
+      "type": "class",
+      "name": "ColumnarRecord",
+      "filePath": "pkg/models/record.go",
+      "summary": "列式格式数据记录，零拷贝直接传递给 Arrow，是高性能数据路径的关键结构。",
+      "tags": [
+        "models",
+        "columnar",
+        "zero-copy",
+        "arrow"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        17,
+        24
+      ]
+    },
+    {
+      "id": "class:pkg/models/record.go:MsgPackPayload",
+      "type": "class",
+      "name": "MsgPackPayload",
+      "filePath": "pkg/models/record.go",
+      "summary": "MessagePack 顶级载荷结构，支持行格式（Measurement/Timestamp/Host/Fields）和列/批格式。",
+      "tags": [
+        "models",
+        "msgpack",
+        "payload"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        27,
+        41
+      ]
+    },
+    {
+      "id": "class:internal/mqtt/manager.go:Manager",
+      "type": "class",
+      "name": "Manager",
+      "filePath": "internal/mqtt/manager.go",
+      "summary": "MQTT 订阅管理接口，定义订阅生命周期的完整 CRUD 操作和状态管理。",
+      "tags": [
+        "mqtt",
+        "manager",
+        "interface",
+        "crud"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        15,
+        34
+      ]
+    },
+    {
+      "id": "class:internal/mqtt/manager.go:SubscriptionManager",
+      "type": "class",
+      "name": "SubscriptionManager",
+      "filePath": "internal/mqtt/manager.go",
+      "summary": "MQTT 订阅管理器实现，管理多个 Subscriber 实例，支持密码加密和生命周期控制。",
+      "tags": [
+        "mqtt",
+        "subscription",
+        "manager"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        37,
+        46
+      ]
+    },
+    {
+      "id": "function:internal/mqtt/manager.go:NewSubscriptionManager",
+      "type": "function",
+      "name": "NewSubscriptionManager",
+      "filePath": "internal/mqtt/manager.go",
+      "summary": "创建 SubscriptionManager 实例。",
+      "tags": [
+        "mqtt",
+        "constructor"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        53,
+        59
+      ]
+    },
+    {
+      "id": "class:internal/mqtt/subscriber.go:Subscriber",
+      "type": "class",
+      "name": "Subscriber",
+      "filePath": "internal/mqtt/subscriber.go",
+      "summary": "单个 MQTT 订阅的处理单元，管理 Paho MQTT 客户端连接、消息解码和数据注入。",
+      "tags": [
+        "mqtt",
+        "subscriber",
+        "message-processing"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        24,
+        48
+      ]
+    },
+    {
+      "id": "function:internal/mqtt/subscriber.go:NewSubscriber",
+      "type": "function",
+      "name": "NewSubscriber",
+      "filePath": "internal/mqtt/subscriber.go",
+      "summary": "创建新的 MQTT 订阅者实例。",
+      "tags": [
+        "mqtt",
+        "constructor"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        51,
+        71
+      ]
+    },
+    {
+      "id": "function:internal/mqtt/subscriber.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/mqtt/subscriber.go",
+      "summary": "启动 MQTT 订阅者，建立连接并开始接收消息。",
+      "tags": [
+        "mqtt",
+        "connect",
+        "lifecycle"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        73,
+        113
+      ]
+    },
+    {
+      "id": "function:internal/mqtt/subscriber.go:Stop",
+      "type": "function",
+      "name": "Stop",
+      "filePath": "internal/mqtt/subscriber.go",
+      "summary": "停止 MQTT 订阅者，断开连接并清理资源。",
+      "tags": [
+        "mqtt",
+        "disconnect",
+        "lifecycle"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        114,
+        142
+      ]
+    },
+    {
+      "id": "class:internal/tiering/policy.go:DatabasePolicy",
+      "type": "class",
+      "name": "DatabasePolicy",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "数据库级分层策略覆盖，支持热存储独占和热数据最大保存天数配置。",
+      "tags": [
+        "tiering",
+        "policy",
+        "database"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        16,
+        23
+      ]
+    },
+    {
+      "id": "class:internal/tiering/policy.go:EffectivePolicy",
+      "type": "class",
+      "name": "EffectivePolicy",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "数据库的最终生效策略，由自定义策略和全局默认值合并而来。",
+      "tags": [
+        "tiering",
+        "policy",
+        "effective"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        26,
+        31
+      ]
+    },
+    {
+      "id": "class:internal/tiering/policy.go:PolicyStore",
+      "type": "class",
+      "name": "PolicyStore",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "分层策略存储，使用 SQLite 持久化策略配置，支持内存缓存加速查询。",
+      "tags": [
+        "tiering",
+        "policy",
+        "store",
+        "cache"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        34,
+        40
+      ]
+    },
+    {
+      "id": "function:internal/tiering/policy.go:NewPolicyStore",
+      "type": "function",
+      "name": "NewPolicyStore",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "创建 PolicyStore，初始化 SQLite schema 并加载缓存。",
+      "tags": [
+        "tiering",
+        "constructor",
+        "sqlite"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        43,
+        60
+      ]
+    },
+    {
+      "id": "function:internal/tiering/policy.go:Get",
+      "type": "function",
+      "name": "Get",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "从缓存或数据库获取指定数据库的策略配置。",
+      "tags": [
+        "tiering",
+        "query",
+        "get"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        107,
+        144
+      ]
+    },
+    {
+      "id": "function:internal/tiering/policy.go:Set",
+      "type": "function",
+      "name": "Set",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "设置或更新数据库策略，持久化到 SQLite 并更新缓存。",
+      "tags": [
+        "tiering",
+        "write",
+        "set"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        145,
+        178
+      ]
+    },
+    {
+      "id": "function:internal/tiering/policy.go:Delete",
+      "type": "function",
+      "name": "Delete",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "删除指定数据库的策略配置，从缓存和 SQLite 中移除。",
+      "tags": [
+        "tiering",
+        "delete"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        179,
+        204
+      ]
+    },
+    {
+      "id": "function:internal/tiering/policy.go:List",
+      "type": "function",
+      "name": "List",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "列出所有数据库策略配置。",
+      "tags": [
+        "tiering",
+        "query",
+        "list"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        205,
+        263
+      ]
+    },
+    {
+      "id": "function:internal/tiering/policy.go:GetEffective",
+      "type": "function",
+      "name": "GetEffective",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "获取数据库的最终生效策略，合并自定义和全局设置。",
+      "tags": [
+        "tiering",
+        "resolution",
+        "effective"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        264,
+        285
+      ]
+    },
+    {
+      "id": "function:internal/tiering/policy.go:IsHotOnly",
+      "type": "function",
+      "name": "IsHotOnly",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "检查指定数据库是否应完全保留在热存储（不分层迁移）。",
+      "tags": [
+        "tiering",
+        "query",
+        "hot-only"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        286,
+        293
+      ]
+    },
+    {
+      "id": "function:internal/tiering/policy.go:GetHotMaxAge",
+      "type": "function",
+      "name": "GetHotMaxAge",
+      "filePath": "internal/tiering/policy.go",
+      "summary": "获取数据库在热存储中的最大保存天数。",
+      "tags": [
+        "tiering",
+        "query",
+        "hot-max-age"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        295,
+        327
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/adaptive_flush_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/adaptive_flush.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_partition_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_benchmark_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_chaos_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_close_race_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_flush_failure_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/lineprotocol_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/lineprotocol.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/memory_monitor_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/memory_monitor.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/msgpack_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/msgpack.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/notifier.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/tle_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/tle.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/utf8_sanitize.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/utf8_simdutf.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/utf8_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/utf8.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/shutdown/shutdown_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/shutdown/shutdown.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/adaptive_flush_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/adaptive_flush.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_partition_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_benchmark_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_chaos_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_close_race_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_flush_failure_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/lineprotocol_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/lineprotocol.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/memory_monitor_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/memory_monitor.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/msgpack_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/msgpack.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/notifier.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/tle_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/tle.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/utf8_sanitize.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/utf8_simdutf.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/utf8_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/utf8.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/metrics/metrics.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/metrics/timeseries_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/metrics/timeseries.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:pkg/models/record.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/integration_test.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/integration_test.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/integration_test.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/integration_test.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/integration_test.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/integration_test.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy_test.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy_test.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy_test.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy_test.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy_test.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/policy_test.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/utf8_simdutf.go",
+      "target": "function:internal/ingest/utf8_simdutf.go:ValidateUTF8",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/utf8_simdutf.go",
+      "target": "function:internal/ingest/utf8_simdutf.go:ValidateUTF8Bytes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/utf8_simdutf.go",
+      "target": "function:internal/ingest/utf8_simdutf.go:SanitizeUTF8",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:pkg/models/record.go",
+      "target": "class:pkg/models/record.go:Record",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:pkg/models/record.go",
+      "target": "class:pkg/models/record.go:ColumnarRecord",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:pkg/models/record.go",
+      "target": "class:pkg/models/record.go:MsgPackPayload",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "class:internal/mqtt/manager.go:Manager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "class:internal/mqtt/manager.go:SubscriptionManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "function:internal/mqtt/manager.go:NewSubscriptionManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "class:internal/mqtt/subscriber.go:Subscriber",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "function:internal/mqtt/subscriber.go:NewSubscriber",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "function:internal/mqtt/subscriber.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "function:internal/mqtt/subscriber.go:Stop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "class:internal/tiering/policy.go:DatabasePolicy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "class:internal/tiering/policy.go:EffectivePolicy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "class:internal/tiering/policy.go:PolicyStore",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:NewPolicyStore",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:Get",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:Set",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:Delete",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:List",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:GetEffective",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:IsHotOnly",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:GetHotMaxAge",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/utf8_simdutf.go",
+      "target": "function:internal/ingest/utf8_simdutf.go:ValidateUTF8",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/utf8_simdutf.go",
+      "target": "function:internal/ingest/utf8_simdutf.go:ValidateUTF8Bytes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/utf8_simdutf.go",
+      "target": "function:internal/ingest/utf8_simdutf.go:SanitizeUTF8",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:pkg/models/record.go",
+      "target": "class:pkg/models/record.go:Record",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:pkg/models/record.go",
+      "target": "class:pkg/models/record.go:ColumnarRecord",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:pkg/models/record.go",
+      "target": "class:pkg/models/record.go:MsgPackPayload",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "class:internal/mqtt/manager.go:Manager",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "class:internal/mqtt/manager.go:SubscriptionManager",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "function:internal/mqtt/manager.go:NewSubscriptionManager",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "class:internal/mqtt/subscriber.go:Subscriber",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "function:internal/mqtt/subscriber.go:NewSubscriber",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "function:internal/mqtt/subscriber.go:Start",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "function:internal/mqtt/subscriber.go:Stop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "class:internal/tiering/policy.go:DatabasePolicy",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "class:internal/tiering/policy.go:EffectivePolicy",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "class:internal/tiering/policy.go:PolicyStore",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:NewPolicyStore",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:Get",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:Set",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:Delete",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:List",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:GetEffective",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:IsHotOnly",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "function:internal/tiering/policy.go:GetHotMaxAge",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/mqtt/manager.go",
+      "target": "file:internal/ingest/notifier.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:internal/ingest/notifier.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/mqtt/subscriber.go",
+      "target": "file:pkg/models/record.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/tiering/policy.go",
+      "target": "file:internal/config/config.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/ingest/utf8_test.go",
+      "target": "file:internal/ingest/utf8.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/utf8_test.go",
+      "target": "file:internal/ingest/utf8_sanitize.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/tiering/policy_test.go",
+      "target": "file:internal/tiering/policy.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/tiering/integration_test.go",
+      "target": "file:internal/tiering/policy.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "class:internal/mqtt/manager.go:SubscriptionManager",
+      "target": "class:internal/ingest/notifier.go:BufferChangeNotifier",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "class:internal/mqtt/subscriber.go:Subscriber",
+      "target": "class:internal/ingest/notifier.go:BufferChangeNotifier",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "class:internal/tiering/policy.go:PolicyStore",
+      "target": "file:internal/config/config.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "class:internal/tiering/policy.go:PolicyStore",
+      "target": "file:internal/tiering/policy.go",
+      "type": "configures",
+      "direction": "forward",
+      "weight": 0.6
+    }
+  ]
+}

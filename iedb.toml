@@ -51,22 +51,40 @@ s3_secret_key = "password123"
 # Ingestion
 # -----------------------------------------------------------------------------
 [ingest]
-# === 自适应缓冲（新增）===
-max_buffer_memory_mb = 0            # 0=自动检测（默认），>0=手动指定硬上限（MB）
-min_buffer_memory_mb = 128          # 最低保证缓冲内存（MB）
-max_buffer_age_seconds = 900        # 超时强制刷盘（秒），默认 15 分钟
-memory_pressure_green_pct = 50      # 可用内存 >50% 绿色（正常缓冲）
-memory_pressure_red_pct = 20        # 可用内存 <20% 红色（激进刷盘）
-memory_check_interval_ms = 1000     # 内存检查间隔（毫秒）
+# === 压缩与 Parquet 写入 ===
+compression = "snappy"               # snappy / zstd / gzip
+use_dictionary = true                # Parquet 字典编码
+write_statistics = true              # Parquet 列统计信息
+data_page_version = "2.0"            # Parquet DataPageV2
 
-# === 废弃字段（保留兼容，不再生效）===
-# max_buffer_size = 50000
-# max_buffer_age_ms = 1000
+# === 自适应缓冲 (推荐，替代固定 MaxBufferSize) ===
+max_buffer_memory_mb = 0             # 0=自动检测(物理内存的50%)，>0=手动指定硬上限(MB)
+min_buffer_memory_mb = 128           # 最低保证缓冲内存 (MB)
+max_buffer_age_seconds = 900         # 超时强制刷盘 (秒)，默认 15 分钟
+memory_pressure_green_pct = 50       # 可用内存 >50% 绿色 (正常缓冲)
+memory_pressure_red_pct = 20         # 可用内存 <20% 红色 (激进刷盘)
+memory_check_interval_ms = 1000      # 内存检查间隔 (毫秒)
 
-# Sort keys for compression/query performance: "measurement:col1,col2"
-# Time column is always appended automatically
+# === Flush 并发控制 ===
+flush_workers = 16                    # Flush 工作线程数
+flush_queue_size = 100               # Flush 队列容量
+flush_timeout_seconds = 30           # 单次 flush 超时 (秒)
+
+# === 锁分片 ===
+shard_count = 32                     # Buffer shard 数量 (减少锁竞争)
+
+# === 排序键 (Parquet 内部排序，加速范围查询) ===
+# 格式: "measurement:col1,col2" (time 始终自动追加到末尾)
 sort_keys = []
-default_sort_keys = ""
+default_sort_keys = ""               # 所有 measurement 的默认排序键
+
+# === Decimal128 精度配置 ===
+# 格式: "measurement:col=precision,scale;col2=precision,scale"
+decimal_columns = []
+
+# === 废弃字段 (保留仅为参考，不再生效，由自适应缓冲接管) ===
+# max_buffer_size = 50000            # 缓冲区最大记录数 (已废弃)
+# max_buffer_age_ms = 5000           # 缓冲区最大存活毫秒 (已废弃)
 
 # -----------------------------------------------------------------------------
 # Compaction

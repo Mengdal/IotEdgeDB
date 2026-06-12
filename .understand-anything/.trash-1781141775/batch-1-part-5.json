@@ -1,0 +1,2607 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/api/proxy.go",
+      "type": "file",
+      "name": "proxy.go",
+      "filePath": "internal/api/proxy.go",
+      "summary": "集群代理 API 处理器，支持跨节点请求转发和远程数据获取。",
+      "tags": [
+        "api-handler",
+        "proxy",
+        "cluster"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/proxy.go:NewProxyHandler",
+      "type": "function",
+      "name": "NewProxyHandler",
+      "filePath": "internal/api/proxy.go",
+      "lineRange": [
+        25,
+        30
+      ],
+      "summary": "函数 NewProxyHandler，参数：logger。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/proxy.go:SetAuthManager",
+      "type": "function",
+      "name": "SetAuthManager",
+      "filePath": "internal/api/proxy.go",
+      "lineRange": [
+        33,
+        35
+      ],
+      "summary": "函数 SetAuthManager，参数：am。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/proxy.go:RegisterRoutes",
+      "type": "function",
+      "name": "RegisterRoutes",
+      "filePath": "internal/api/proxy.go",
+      "lineRange": [
+        38,
+        42
+      ],
+      "summary": "函数 RegisterRoutes，参数：app。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/proxy.go:handleFetch",
+      "type": "function",
+      "name": "handleFetch",
+      "filePath": "internal/api/proxy.go",
+      "lineRange": [
+        45,
+        92
+      ],
+      "summary": "函数 handleFetch，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/proxy.go:ProxyHandler",
+      "type": "class",
+      "name": "ProxyHandler",
+      "filePath": "internal/api/proxy.go",
+      "lineRange": [
+        17,
+        22
+      ],
+      "summary": "HTTP 请求处理器结构体 ProxyHandler，处理相关 API 路由。",
+      "tags": [
+        "class",
+        "api-handler",
+        "exported"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Go 结构体作为 HTTP 处理器，通过 Fiber 框架注册路由处理函数。"
+    },
+    {
+      "id": "file:internal/api/query.go",
+      "type": "file",
+      "name": "query.go",
+      "filePath": "internal/api/query.go",
+      "summary": "核心查询处理器，实现 SQL 查询的接收、验证、重写和多表路径转换，支持超大规模时间序列数据的分区并行查询。",
+      "tags": [
+        "api-handler",
+        "query",
+        "sql-processing"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/query.go:hasCrossDatabaseSyntax",
+      "type": "function",
+      "name": "hasCrossDatabaseSyntax",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        119,
+        154
+      ],
+      "summary": "函数 hasCrossDatabaseSyntax，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:isSingleTableQuery",
+      "type": "function",
+      "name": "isSingleTableQuery",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        158,
+        176
+      ],
+      "summary": "函数 isSingleTableQuery，参数：sqlLower。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:reset",
+      "type": "function",
+      "name": "reset",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        199,
+        213
+      ],
+      "summary": "函数 reset，参数：numCols。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:extractLimit",
+      "type": "function",
+      "name": "extractLimit",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        217,
+        228
+      ],
+      "summary": "函数 extractLimit，参数：sql, defaultLimit。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:extractCTENames",
+      "type": "function",
+      "name": "extractCTENames",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        232,
+        246
+      ],
+      "summary": "函数 extractCTENames，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:rewriteTimeBucket",
+      "type": "function",
+      "name": "rewriteTimeBucket",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        252,
+        311
+      ],
+      "summary": "函数 rewriteTimeBucket，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:rewriteDateTrunc",
+      "type": "function",
+      "name": "rewriteDateTrunc",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        317,
+        341
+      ],
+      "summary": "函数 rewriteDateTrunc，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:intervalToSeconds",
+      "type": "function",
+      "name": "intervalToSeconds",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        346,
+        366
+      ],
+      "summary": "函数 intervalToSeconds，参数：amount, unit。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:parseTimeBucketOrigin",
+      "type": "function",
+      "name": "parseTimeBucketOrigin",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        369,
+        383
+      ],
+      "summary": "函数 parseTimeBucketOrigin，参数：s。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:scanSQLFeatures",
+      "type": "function",
+      "name": "scanSQLFeatures",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        394,
+        411
+      ],
+      "summary": "函数 scanSQLFeatures，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:stripSQLComments",
+      "type": "function",
+      "name": "stripSQLComments",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        416,
+        466
+      ],
+      "summary": "函数 stripSQLComments，参数：sql, hasComments。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:validateIdentifier",
+      "type": "function",
+      "name": "validateIdentifier",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        619,
+        630
+      ],
+      "summary": "函数 validateIdentifier，参数：name。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:validateOrderByClause",
+      "type": "function",
+      "name": "validateOrderByClause",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        652,
+        663
+      ],
+      "summary": "函数 validateOrderByClause，参数：orderBy。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:validateWhereClauseQuery",
+      "type": "function",
+      "name": "validateWhereClauseQuery",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        666,
+        694
+      ],
+      "summary": "函数 validateWhereClauseQuery，参数：where。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:NewQueryHandler",
+      "type": "function",
+      "name": "NewQueryHandler",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        699,
+        729
+      ],
+      "summary": "函数 NewQueryHandler，参数：db, storage, logger, queryTimeoutSeconds, slowQueryThresholdMs。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:logSlowQuery",
+      "type": "function",
+      "name": "logSlowQuery",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        733,
+        749
+      ],
+      "summary": "函数 logSlowQuery，参数：sql, start, rowCount, tokenName。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:SetAuthAndRBAC",
+      "type": "function",
+      "name": "SetAuthAndRBAC",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        761,
+        764
+      ],
+      "summary": "函数 SetAuthAndRBAC，参数：am, rm。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:SetRouter",
+      "type": "function",
+      "name": "SetRouter",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        770,
+        772
+      ],
+      "summary": "函数 SetRouter，参数：router。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:SetTieringManager",
+      "type": "function",
+      "name": "SetTieringManager",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        776,
+        778
+      ],
+      "summary": "函数 SetTieringManager，参数：manager。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:SetGovernance",
+      "type": "function",
+      "name": "SetGovernance",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        781,
+        784
+      ],
+      "summary": "函数 SetGovernance，参数：manager, lc。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:SetQueryRegistry",
+      "type": "function",
+      "name": "SetQueryRegistry",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        787,
+        789
+      ],
+      "summary": "函数 SetQueryRegistry，参数：registry。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:SetArrowViewManager",
+      "type": "function",
+      "name": "SetArrowViewManager",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        794,
+        796
+      ],
+      "summary": "函数 SetArrowViewManager，参数：vm。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:InvalidateCaches",
+      "type": "function",
+      "name": "InvalidateCaches",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        800,
+        804
+      ],
+      "summary": "函数 InvalidateCaches。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:extractTableReferences",
+      "type": "function",
+      "name": "extractTableReferences",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        808,
+        903
+      ],
+      "summary": "函数 extractTableReferences，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:checkQueryPermissions",
+      "type": "function",
+      "name": "checkQueryPermissions",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        908,
+        974
+      ],
+      "summary": "函数 checkQueryPermissions，参数：c, sql, permission。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:checkMeasurementPermission",
+      "type": "function",
+      "name": "checkMeasurementPermission",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        978,
+        1017
+      ],
+      "summary": "函数 checkMeasurementPermission，参数：c, database, measurement, permission。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:RegisterRoutes",
+      "type": "function",
+      "name": "RegisterRoutes",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        1020,
+        1031
+      ],
+      "summary": "函数 RegisterRoutes，参数：app。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:handleGetMeasurementSchema",
+      "type": "function",
+      "name": "handleGetMeasurementSchema",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        1034,
+        1115
+      ],
+      "summary": "函数 handleGetMeasurementSchema，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:executeQuery",
+      "type": "function",
+      "name": "executeQuery",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        1130,
+        1719
+      ],
+      "summary": "函数 executeQuery，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:Error",
+      "type": "function",
+      "name": "Error",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        1734,
+        1736
+      ],
+      "summary": "函数 Error。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:ValidateSQLRequest",
+      "type": "function",
+      "name": "ValidateSQLRequest",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        1747,
+        1779
+      ],
+      "summary": "函数 ValidateSQLRequest，参数：sql。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:getTransformedSQL",
+      "type": "function",
+      "name": "getTransformedSQL",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        1790,
+        1824
+      ],
+      "summary": "函数 getTransformedSQL，参数：sql, headerDB。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:getTransformedSQLForParallel",
+      "type": "function",
+      "name": "getTransformedSQLForParallel",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        1830,
+        1863
+      ],
+      "summary": "函数 getTransformedSQLForParallel，参数：sql, headerDB。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:convertSQLToStoragePaths",
+      "type": "function",
+      "name": "convertSQLToStoragePaths",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        1872,
+        1992
+      ],
+      "summary": "函数 convertSQLToStoragePaths，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:buildReadParquetExpr",
+      "type": "function",
+      "name": "buildReadParquetExpr",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2032,
+        2096
+      ],
+      "summary": "函数 buildReadParquetExpr，参数：path, originalSQL, keyword。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:wrapWithBufferView",
+      "type": "function",
+      "name": "wrapWithBufferView",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2101,
+        2124
+      ],
+      "summary": "函数 wrapWithBufferView，参数：expr, keyword, dbName, measurement。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:buildReadParquetExprForMeasurement",
+      "type": "function",
+      "name": "buildReadParquetExprForMeasurement",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2129,
+        2152
+      ],
+      "summary": "函数 buildReadParquetExprForMeasurement，参数：database, measurement, originalSQL, keyword。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:buildReadParquetExprForParallel",
+      "type": "function",
+      "name": "buildReadParquetExprForParallel",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2157,
+        2198
+      ],
+      "summary": "函数 buildReadParquetExprForParallel，参数：path, originalSQL, keyword。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:extractDBMeasurementFromPath",
+      "type": "function",
+      "name": "extractDBMeasurementFromPath",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2215,
+        2269
+      ],
+      "summary": "函数 extractDBMeasurementFromPath，参数：path。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:buildMultiTierReadParquet",
+      "type": "function",
+      "name": "buildMultiTierReadParquet",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2274,
+        2359
+      ],
+      "summary": "函数 buildMultiTierReadParquet，参数：database, measurement, tieredPaths, keyword。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:convertSingleTableQuery",
+      "type": "function",
+      "name": "convertSingleTableQuery",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2363,
+        2398
+      ],
+      "summary": "函数 convertSingleTableQuery，参数：sql, sqlLower, database。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:convertSingleTableQueryForParallel",
+      "type": "function",
+      "name": "convertSingleTableQueryForParallel",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2402,
+        2458
+      ],
+      "summary": "函数 convertSingleTableQueryForParallel，参数：sql, sqlLower, database。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:convertSQLToStoragePathsWithHeaderDB",
+      "type": "function",
+      "name": "convertSQLToStoragePathsWithHeaderDB",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2464,
+        2583
+      ],
+      "summary": "函数 convertSQLToStoragePathsWithHeaderDB，参数：sql, database。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:convertValue",
+      "type": "function",
+      "name": "convertValue",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2592,
+        2652
+      ],
+      "summary": "函数 convertValue，参数：v。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:handleShowDatabases",
+      "type": "function",
+      "name": "handleShowDatabases",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2655,
+        2766
+      ],
+      "summary": "函数 handleShowDatabases，参数：c, start。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:handleShowTables",
+      "type": "function",
+      "name": "handleShowTables",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2769,
+        2878
+      ],
+      "summary": "函数 handleShowTables，参数：c, start, database。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:extractTableNames",
+      "type": "function",
+      "name": "extractTableNames",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2881,
+        2903
+      ],
+      "summary": "函数 extractTableNames，参数：files, database。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:extractTopLevelDirs",
+      "type": "function",
+      "name": "extractTopLevelDirs",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2911,
+        2927
+      ],
+      "summary": "函数 extractTopLevelDirs，参数：files。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:getTableStats",
+      "type": "function",
+      "name": "getTableStats",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2931,
+        2970
+      ],
+      "summary": "函数 getTableStats，参数：tablePath。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:estimateQuery",
+      "type": "function",
+      "name": "estimateQuery",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2983,
+        3106
+      ],
+      "summary": "函数 estimateQuery，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:formatNumber",
+      "type": "function",
+      "name": "formatNumber",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        3119,
+        3136
+      ],
+      "summary": "函数 formatNumber，参数：n。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query.go:listMeasurements",
+      "type": "function",
+      "name": "listMeasurements",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        3148,
+        3243
+      ],
+      "summary": "函数 listMeasurements，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query.go:queryMeasurement",
+      "type": "function",
+      "name": "queryMeasurement",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        3246,
+        3442
+      ],
+      "summary": "函数 queryMeasurement，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/api/query.go:AuthManager",
+      "type": "class",
+      "name": "AuthManager",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        36,
+        38
+      ],
+      "summary": "类/结构体 AuthManager，包含 1 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/query.go:RBACChecker",
+      "type": "class",
+      "name": "RBACChecker",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        41,
+        45
+      ],
+      "summary": "类/结构体 RBACChecker，包含 3 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/query.go:TableReference",
+      "type": "class",
+      "name": "TableReference",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        48,
+        51
+      ],
+      "summary": "类/结构体 TableReference，包含 0 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/query.go:QueryHandler",
+      "type": "class",
+      "name": "QueryHandler",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        469,
+        497
+      ],
+      "summary": "HTTP 请求处理器结构体 QueryHandler，处理相关 API 路由。",
+      "tags": [
+        "class",
+        "api-handler",
+        "exported"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Go 结构体作为 HTTP 处理器，通过 Fiber 框架注册路由处理函数。"
+    },
+    {
+      "id": "class:internal/api/query.go:QueryRequest",
+      "type": "class",
+      "name": "QueryRequest",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        506,
+        508
+      ],
+      "summary": "请求结构体 QueryRequest，定义 API 请求参数格式。",
+      "tags": [
+        "class",
+        "request-model",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/query.go:QueryResponse",
+      "type": "class",
+      "name": "QueryResponse",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        511,
+        520
+      ],
+      "summary": "响应结构体 QueryResponse，定义 API 响应数据格式。",
+      "tags": [
+        "class",
+        "response-model",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/query.go:SQLValidationError",
+      "type": "class",
+      "name": "SQLValidationError",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        1730,
+        1732
+      ],
+      "summary": "类/结构体 SQLValidationError，包含 1 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/query.go:ParallelQueryInfo",
+      "type": "class",
+      "name": "ParallelQueryInfo",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2020,
+        2027
+      ],
+      "summary": "类/结构体 ParallelQueryInfo，包含 0 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/query.go:EstimateResponse",
+      "type": "class",
+      "name": "EstimateResponse",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        2973,
+        2980
+      ],
+      "summary": "响应结构体 EstimateResponse，定义 API 响应数据格式。",
+      "tags": [
+        "class",
+        "response-model",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/query.go:MeasurementInfo",
+      "type": "class",
+      "name": "MeasurementInfo",
+      "filePath": "internal/api/query.go",
+      "lineRange": [
+        3139,
+        3145
+      ],
+      "summary": "类/结构体 MeasurementInfo，包含 0 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/api/query_arrow.go",
+      "type": "file",
+      "name": "query_arrow.go",
+      "filePath": "internal/api/query_arrow.go",
+      "summary": "Arrow 格式查询执行器，将 SQL 查询结果转换为 Arrow IPC 格式流式输出。",
+      "tags": [
+        "api-handler",
+        "arrow",
+        "query"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/query_arrow.go:executeQueryArrow",
+      "type": "function",
+      "name": "executeQueryArrow",
+      "filePath": "internal/api/query_arrow.go",
+      "lineRange": [
+        29,
+        213
+      ],
+      "summary": "函数 executeQueryArrow，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query_arrow.go:normalizeDecimalSchema",
+      "type": "function",
+      "name": "normalizeDecimalSchema",
+      "filePath": "internal/api/query_arrow.go",
+      "lineRange": [
+        228,
+        261
+      ],
+      "summary": "函数 normalizeDecimalSchema，参数：schema。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_arrow.go:castDecimalBatch",
+      "type": "function",
+      "name": "castDecimalBatch",
+      "filePath": "internal/api/query_arrow.go",
+      "lineRange": [
+        266,
+        294
+      ],
+      "summary": "函数 castDecimalBatch，参数：batch, info。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_arrow.go:sqlTypeToArrowType",
+      "type": "function",
+      "name": "sqlTypeToArrowType",
+      "filePath": "internal/api/query_arrow.go",
+      "lineRange": [
+        297,
+        315
+      ],
+      "summary": "函数 sqlTypeToArrowType，参数：sqlType。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/query_arrow.go:appendValueToBuilder",
+      "type": "function",
+      "name": "appendValueToBuilder",
+      "filePath": "internal/api/query_arrow.go",
+      "lineRange": [
+        318,
+        392
+      ],
+      "summary": "函数 appendValueToBuilder，参数：builder, val, _。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/api/query_arrow_json.go",
+      "type": "file",
+      "name": "query_arrow_json.go",
+      "filePath": "internal/api/query_arrow_json.go",
+      "summary": "Arrow JSON 查询执行器，将 Arrow 记录批处理流转换为 JSON 格式输出。",
+      "tags": [
+        "api-handler",
+        "arrow",
+        "json",
+        "serialization"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/query_arrow_json.go:executeArrowJSONQuery",
+      "type": "function",
+      "name": "executeArrowJSONQuery",
+      "filePath": "internal/api/query_arrow_json.go",
+      "lineRange": [
+        35,
+        181
+      ],
+      "summary": "函数 executeArrowJSONQuery，参数：h, c, ctx, cancel, convertedSQL, profileMode, governanceMaxRows, start, timestamp, onComplete, onFail, onTimeout。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query_arrow_json.go:streamArrowJSON",
+      "type": "function",
+      "name": "streamArrowJSON",
+      "filePath": "internal/api/query_arrow_json.go",
+      "lineRange": [
+        198,
+        308
+      ],
+      "summary": "函数 streamArrowJSON，参数：ctx, w, reader, governanceMaxRows, profile, start, timestamp。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/query_arrow_json.go:writeArrowValue",
+      "type": "function",
+      "name": "writeArrowValue",
+      "filePath": "internal/api/query_arrow_json.go",
+      "lineRange": [
+        312,
+        392
+      ],
+      "summary": "函数 writeArrowValue，参数：w, scratch, col, row。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "file:internal/auth/auth_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "file:internal/auth/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "file:internal/auth/middleware_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "file:internal/auth/middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "file:internal/auth/rbac_manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "file:internal/auth/rbac_models.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "file:internal/auth/rbac_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "function:internal/api/proxy.go:NewProxyHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "function:internal/api/proxy.go:NewProxyHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "function:internal/api/proxy.go:SetAuthManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "function:internal/api/proxy.go:SetAuthManager",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "function:internal/api/proxy.go:RegisterRoutes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "function:internal/api/proxy.go:RegisterRoutes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "function:internal/api/proxy.go:handleFetch",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "class:internal/api/proxy.go:ProxyHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/proxy.go",
+      "target": "class:internal/api/proxy.go:ProxyHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/auth/auth_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/auth/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/auth/middleware_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/auth/middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/auth/rbac_manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/auth/rbac_models.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/auth/rbac_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/compaction_bridge_integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/compaction_bridge_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/compaction_bridge.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/compactor_failover_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/compactor_failover.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/coordinator_fetch_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/coordinator.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/errors.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/file_registrar.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/filereplication_catchup_integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/filereplication_integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/forward_apply.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/health_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/health.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/node_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/node.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/registry_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/registry.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/role_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/role.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/router_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/router.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/writer_failover_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/cluster/writer_failover.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/database/arrow_view_integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/database/arrow_view.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/database/duckdb_arrow.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/database/duckdb_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/database/duckdb.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/database/sql_transform_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/database/sql_transform_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/governance/manager_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/governance/manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/governance/quota_tracker_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/governance/quota_tracker.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/governance/sliding_window_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/governance/sliding_window.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/metrics/metrics.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/metrics/timeseries_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/metrics/timeseries.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/pruning/partition_pruner_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/pruning/partition_pruner.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/query/parallel_executor_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/query/parallel_executor.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/query/query_rewriter_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/query/query_rewriter.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/queryregistry/registry_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/queryregistry/registry.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/sql/mask.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/metadata_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/metadata.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/migrator.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/policy_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/policy.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/router.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/scheduler.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/tier_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "file:internal/tiering/tier.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:hasCrossDatabaseSyntax",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:isSingleTableQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:reset",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:extractLimit",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:extractCTENames",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:rewriteTimeBucket",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:rewriteDateTrunc",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:intervalToSeconds",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:parseTimeBucketOrigin",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:scanSQLFeatures",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:stripSQLComments",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:validateIdentifier",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:validateOrderByClause",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:validateWhereClauseQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:NewQueryHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:NewQueryHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:logSlowQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetAuthAndRBAC",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetAuthAndRBAC",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetRouter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetRouter",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetTieringManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetTieringManager",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetGovernance",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetGovernance",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetQueryRegistry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetQueryRegistry",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetArrowViewManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:SetArrowViewManager",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:InvalidateCaches",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:InvalidateCaches",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:extractTableReferences",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:checkQueryPermissions",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:checkMeasurementPermission",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:RegisterRoutes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:RegisterRoutes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:handleGetMeasurementSchema",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:executeQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:Error",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:Error",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:ValidateSQLRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:ValidateSQLRequest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:getTransformedSQL",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:getTransformedSQLForParallel",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:convertSQLToStoragePaths",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:buildReadParquetExpr",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:wrapWithBufferView",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:buildReadParquetExprForMeasurement",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:buildReadParquetExprForParallel",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:extractDBMeasurementFromPath",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:buildMultiTierReadParquet",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:convertSingleTableQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:convertSingleTableQueryForParallel",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:convertSQLToStoragePathsWithHeaderDB",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:convertValue",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:handleShowDatabases",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:handleShowTables",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:extractTableNames",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:extractTopLevelDirs",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:getTableStats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:estimateQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:formatNumber",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:listMeasurements",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "function:internal/api/query.go:queryMeasurement",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:AuthManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:AuthManager",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:RBACChecker",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:RBACChecker",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:TableReference",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:TableReference",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:QueryHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:QueryHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:QueryRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:QueryRequest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:QueryResponse",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:QueryResponse",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:SQLValidationError",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:SQLValidationError",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:ParallelQueryInfo",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:ParallelQueryInfo",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:EstimateResponse",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:EstimateResponse",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:MeasurementInfo",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query.go",
+      "target": "class:internal/api/query.go:MeasurementInfo",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/query_arrow.go",
+      "target": "file:internal/metrics/metrics.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow.go",
+      "target": "file:internal/metrics/timeseries_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow.go",
+      "target": "file:internal/metrics/timeseries.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow.go",
+      "target": "function:internal/api/query_arrow.go:executeQueryArrow",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_arrow.go",
+      "target": "function:internal/api/query_arrow.go:normalizeDecimalSchema",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_arrow.go",
+      "target": "function:internal/api/query_arrow.go:castDecimalBatch",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_arrow.go",
+      "target": "function:internal/api/query_arrow.go:sqlTypeToArrowType",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_arrow.go",
+      "target": "function:internal/api/query_arrow.go:appendValueToBuilder",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/database/arrow_view_integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/database/arrow_view.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/database/duckdb_arrow.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/database/duckdb_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/database/duckdb.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/database/sql_transform_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/database/sql_transform_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/metrics/metrics.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/metrics/timeseries_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "file:internal/metrics/timeseries.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "function:internal/api/query_arrow_json.go:executeArrowJSONQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "function:internal/api/query_arrow_json.go:streamArrowJSON",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/query_arrow_json.go",
+      "target": "function:internal/api/query_arrow_json.go:writeArrowValue",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    }
+  ]
+}

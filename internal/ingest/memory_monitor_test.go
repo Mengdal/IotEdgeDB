@@ -18,8 +18,7 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 600 },
 		}
-		m.greenPct.Store(50)
-		m.redPct.Store(20)
+		m.greenRedPct.Store(int64(50)<<32 | int64(20))
 		if level := m.check(); level != PressureGreen {
 			t.Errorf("expected PressureGreen, got %d (available=600/1000=60%%)", level)
 		}
@@ -31,8 +30,7 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 350 },
 		}
-		m.greenPct.Store(50)
-		m.redPct.Store(20)
+		m.greenRedPct.Store(int64(50)<<32 | int64(20))
 		if level := m.check(); level != PressureYellow {
 			t.Errorf("expected PressureYellow, got %d (available=350/1000=35%%)", level)
 		}
@@ -44,8 +42,7 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 100 },
 		}
-		m.greenPct.Store(50)
-		m.redPct.Store(20)
+		m.greenRedPct.Store(int64(50)<<32 | int64(20))
 		if level := m.check(); level != PressureRed {
 			t.Errorf("expected PressureRed, got %d (available=100/1000=10%%)", level)
 		}
@@ -57,8 +54,7 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 200 },
 		}
-		m.greenPct.Store(50)
-		m.redPct.Store(20)
+		m.greenRedPct.Store(int64(50)<<32 | int64(20))
 		// 200/1000 = 20%, which is NOT < 20% (strict less-than)
 		// So it should be yellow, not red
 		if level := m.check(); level != PressureYellow {
@@ -72,8 +68,7 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 500 },
 		}
-		m.greenPct.Store(50)
-		m.redPct.Store(20)
+		m.greenRedPct.Store(int64(50)<<32 | int64(20))
 		// 500/1000 = 50%, which is NOT < 50% (strict less-than)
 		// So it should be green
 		if level := m.check(); level != PressureGreen {
@@ -171,8 +166,7 @@ func TestPressureLevel_AtomicConcurrency(t *testing.T) {
 		cfg:         MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
 		totalMemory: 1000,
 	}
-	m.greenPct.Store(50)
-	m.redPct.Store(20)
+	m.greenRedPct.Store(int64(50)<<32 | int64(20))
 	// Verify atomic store/load works across concurrent access
 	done := make(chan struct{})
 	go func() {
@@ -333,11 +327,12 @@ func TestMemoryMonitor_ReloadConfig(t *testing.T) {
 		t.Fatalf("ReloadConfig failed: %v", err)
 	}
 
-	if int(m.greenPct.Load()) != 60 {
-		t.Errorf("expected greenPct=60, got %d", m.greenPct.Load())
+	v := m.greenRedPct.Load()
+	if int(v>>32) != 60 {
+		t.Errorf("expected greenPct=60, got %d", int(v>>32))
 	}
-	if int(m.redPct.Load()) != 55 {
-		t.Errorf("expected redPct=55, got %d", m.redPct.Load())
+	if int(v&0xFFFFFFFF) != 55 {
+		t.Errorf("expected redPct=55, got %d", int(v&0xFFFFFFFF))
 	}
 	if m.MinBufferBytes() != 256*1024*1024 {
 		t.Errorf("expected minBufferBytes=%d, got %d", 256*1024*1024, m.MinBufferBytes())
@@ -351,8 +346,7 @@ func TestMemoryMonitor_CheckAfterReload(t *testing.T) {
 		totalMemory: 1000,
 		logger:      logger,
 	}
-	m.greenPct.Store(50)
-	m.redPct.Store(20)
+	m.greenRedPct.Store(int64(50)<<32 | int64(20))
 	m.bufferLimit.Store(128 * 1024 * 1024)
 
 	m.getAvailableMem = func() uint64 { return 400 }
@@ -360,8 +354,7 @@ func TestMemoryMonitor_CheckAfterReload(t *testing.T) {
 		t.Errorf("before reload: expected yellow (400/1000=40%%), got %d", level)
 	}
 
-	m.greenPct.Store(30)
-	m.redPct.Store(10)
+	m.greenRedPct.Store(int64(30)<<32 | int64(10))
 
 	if level := m.check(); level != PressureGreen {
 		t.Errorf("after reload: expected green (400/1000=40%% > 30%%), got %d", level)
@@ -382,8 +375,7 @@ func TestMemoryMonitor_BufferLimitAfterReload(t *testing.T) {
 		duckdbLimit: 4 * 1024 * 1024 * 1024,
 		logger:      logger,
 	}
-	m.greenPct.Store(50)
-	m.redPct.Store(20)
+	m.greenRedPct.Store(int64(50)<<32 | int64(20))
 	m.minBufferBytes.Store(128 * 1024 * 1024)
 	m.bufferLimit.Store(m.computeBufferLimitFor(0))
 

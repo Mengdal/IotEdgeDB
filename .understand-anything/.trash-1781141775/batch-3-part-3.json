@@ -1,0 +1,1279 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/shutdown/shutdown_test.go",
+      "type": "file",
+      "name": "shutdown_test.go",
+      "filePath": "internal/shutdown/shutdown_test.go",
+      "summary": "关闭协调器的测试文件，覆盖注册、优先级排序、超时和并发触发场景。",
+      "tags": [
+        "test",
+        "shutdown",
+        "lifecycle"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/sql/mask.go",
+      "type": "file",
+      "name": "mask.go",
+      "filePath": "internal/sql/mask.go",
+      "summary": "SQL 字符串操作工具库，提供字符串字面量的屏蔽/恢复功能，用于 SQL 注入防护和正则表达式安全处理。",
+      "tags": [
+        "sql",
+        "utility",
+        "security",
+        "string-manipulation"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/sql/mask.go:MaskStringLiterals",
+      "type": "function",
+      "name": "MaskStringLiterals",
+      "filePath": "internal/sql/mask.go",
+      "summary": "将 SQL 中字符串字面量替换为占位符，防止正则表达式匹配到字面量内容。",
+      "tags": [
+        "sql",
+        "security",
+        "transform"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        21,
+        79
+      ]
+    },
+    {
+      "id": "function:internal/sql/mask.go:UnmaskStringLiterals",
+      "type": "function",
+      "name": "UnmaskStringLiterals",
+      "filePath": "internal/sql/mask.go",
+      "summary": "将占位符还原为原始字符串字面量。",
+      "tags": [
+        "sql",
+        "security",
+        "transform"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        82,
+        88
+      ]
+    },
+    {
+      "id": "function:internal/sql/mask.go:EscapeStringLiteral",
+      "type": "function",
+      "name": "EscapeStringLiteral",
+      "filePath": "internal/sql/mask.go",
+      "summary": "转义 DuckDB 字符串字面量中的单引号，防止 SQL 注入。",
+      "tags": [
+        "sql",
+        "security",
+        "escaping"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        107,
+        109
+      ]
+    },
+    {
+      "id": "file:internal/telemetry/telemetry.go",
+      "type": "file",
+      "name": "telemetry.go",
+      "filePath": "internal/telemetry/telemetry.go",
+      "summary": "遥测数据采集器，定期收集和发送系统信息（OS、CPU、内存）到远程端点，支持配置化启用和实例 ID 持久化。",
+      "tags": [
+        "telemetry",
+        "monitoring",
+        "system-info"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/telemetry/telemetry.go:Collector",
+      "type": "class",
+      "name": "Collector",
+      "filePath": "internal/telemetry/telemetry.go",
+      "summary": "遥测采集器，在后台 goroutine 中按间隔收集和发送系统遥测数据。",
+      "tags": [
+        "collector",
+        "telemetry"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        49,
+        61
+      ]
+    },
+    {
+      "id": "function:internal/telemetry/telemetry.go:DefaultConfig",
+      "type": "function",
+      "name": "DefaultConfig",
+      "filePath": "internal/telemetry/telemetry.go",
+      "summary": "返回默认遥测配置：启用、24 小时间隔、默认端点。",
+      "tags": [
+        "config",
+        "defaults"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        39,
+        46
+      ]
+    },
+    {
+      "id": "function:internal/telemetry/telemetry.go:New",
+      "type": "function",
+      "name": "New",
+      "filePath": "internal/telemetry/telemetry.go",
+      "summary": "创建遥测采集器实例。",
+      "tags": [
+        "factory",
+        "telemetry"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        95,
+        122
+      ]
+    },
+    {
+      "id": "function:internal/telemetry/telemetry.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/telemetry/telemetry.go",
+      "summary": "启动遥测采集后台任务。",
+      "tags": [
+        "lifecycle",
+        "telemetry"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        125,
+        139
+      ]
+    },
+    {
+      "id": "function:internal/telemetry/telemetry.go:Stop",
+      "type": "function",
+      "name": "Stop",
+      "filePath": "internal/telemetry/telemetry.go",
+      "summary": "停止遥测采集。",
+      "tags": [
+        "lifecycle",
+        "telemetry"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        142,
+        146
+      ]
+    },
+    {
+      "id": "file:internal/tiering/metadata.go",
+      "type": "file",
+      "name": "metadata.go",
+      "filePath": "internal/tiering/metadata.go",
+      "summary": "分级存储元数据管理，基于 SQLite 跟踪文件的分级位置、迁移历史和统计信息，支持带 TTL 的缓存。",
+      "tags": [
+        "metadata",
+        "tiering",
+        "storage-lifecycle"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go SQLite 元数据存储，使用带 TTL 的缓存减少查询频率，支持完整的分级迁移流程跟踪。"
+    },
+    {
+      "id": "class:internal/tiering/metadata.go:MetadataStore",
+      "type": "class",
+      "name": "MetadataStore",
+      "filePath": "internal/tiering/metadata.go",
+      "summary": "分级存储元数据存储库，管理文件的层级归属和迁移记录。",
+      "tags": [
+        "metadata",
+        "tiering",
+        "persistence"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        23,
+        31
+      ]
+    },
+    {
+      "id": "function:internal/tiering/metadata.go:NewMetadataStore",
+      "type": "function",
+      "name": "NewMetadataStore",
+      "filePath": "internal/tiering/metadata.go",
+      "summary": "创建元数据存储，初始化 SQLite 模式。",
+      "tags": [
+        "factory",
+        "persistence"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        34,
+        46
+      ]
+    },
+    {
+      "id": "function:internal/tiering/metadata.go:RecordFile",
+      "type": "function",
+      "name": "RecordFile",
+      "filePath": "internal/tiering/metadata.go",
+      "summary": "记录文件到分级存储元数据系统。",
+      "tags": [
+        "crud",
+        "tiering"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        105,
+        140
+      ]
+    },
+    {
+      "id": "function:internal/tiering/metadata.go:GetFile",
+      "type": "function",
+      "name": "GetFile",
+      "filePath": "internal/tiering/metadata.go",
+      "summary": "查询文件的元数据信息。",
+      "tags": [
+        "crud",
+        "query"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        143,
+        155
+      ]
+    },
+    {
+      "id": "function:internal/tiering/metadata.go:GetFilesInTier",
+      "type": "function",
+      "name": "GetFilesInTier",
+      "filePath": "internal/tiering/metadata.go",
+      "summary": "查询指定层级的所有文件。",
+      "tags": [
+        "query",
+        "tiering"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        158,
+        176
+      ]
+    },
+    {
+      "id": "function:internal/tiering/metadata.go:UpdateTier",
+      "type": "function",
+      "name": "UpdateTier",
+      "filePath": "internal/tiering/metadata.go",
+      "summary": "更新文件的层级归属。",
+      "tags": [
+        "crud",
+        "tiering"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        337,
+        368
+      ]
+    },
+    {
+      "id": "function:internal/tiering/metadata.go:RecordMigration",
+      "type": "function",
+      "name": "RecordMigration",
+      "filePath": "internal/tiering/metadata.go",
+      "summary": "记录文件迁移开始事件。",
+      "tags": [
+        "crud",
+        "migration"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        395,
+        419
+      ]
+    },
+    {
+      "id": "function:internal/tiering/metadata.go:CompleteMigration",
+      "type": "function",
+      "name": "CompleteMigration",
+      "filePath": "internal/tiering/metadata.go",
+      "summary": "记录文件迁移完成事件。",
+      "tags": [
+        "crud",
+        "migration"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        422,
+        444
+      ]
+    },
+    {
+      "id": "file:internal/tiering/metadata_test.go",
+      "type": "file",
+      "name": "metadata_test.go",
+      "filePath": "internal/tiering/metadata_test.go",
+      "summary": "分级元数据存储的测试文件，验证文件记录、层级更新和层级统计功能。",
+      "tags": [
+        "test",
+        "tiering",
+        "metadata"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/tiering/scheduler.go",
+      "type": "file",
+      "name": "scheduler.go",
+      "filePath": "internal/tiering/scheduler.go",
+      "summary": "分级迁移定时调度器，通过 cron 定期执行文件在热/冷存储层之间的数据迁移，支持手动触发。",
+      "tags": [
+        "scheduler",
+        "cron",
+        "tiering",
+        "migration"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/tiering/scheduler.go:Scheduler",
+      "type": "class",
+      "name": "Scheduler",
+      "filePath": "internal/tiering/scheduler.go",
+      "summary": "分级迁移调度器，管理定时迁移任务的执行。",
+      "tags": [
+        "scheduler",
+        "tiering"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        13,
+        22
+      ]
+    },
+    {
+      "id": "function:internal/tiering/scheduler.go:NewScheduler",
+      "type": "function",
+      "name": "NewScheduler",
+      "filePath": "internal/tiering/scheduler.go",
+      "summary": "创建迁移调度器，默认每天凌晨 2 点执行。",
+      "tags": [
+        "factory",
+        "scheduler"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        32,
+        43
+      ]
+    },
+    {
+      "id": "function:internal/tiering/scheduler.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/tiering/scheduler.go",
+      "summary": "启动 cron 定时迁移调度器。",
+      "tags": [
+        "lifecycle",
+        "scheduler"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        46,
+        76
+      ]
+    },
+    {
+      "id": "function:internal/tiering/scheduler.go:Stop",
+      "type": "function",
+      "name": "Stop",
+      "filePath": "internal/tiering/scheduler.go",
+      "summary": "停止迁移调度器。",
+      "tags": [
+        "lifecycle",
+        "scheduler"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        79,
+        95
+      ]
+    },
+    {
+      "id": "function:internal/tiering/scheduler.go:TriggerNow",
+      "type": "function",
+      "name": "TriggerNow",
+      "filePath": "internal/tiering/scheduler.go",
+      "summary": "立即触发一次迁移周期。",
+      "tags": [
+        "manual-trigger",
+        "tiering"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        123,
+        126
+      ]
+    },
+    {
+      "id": "file:internal/tiering/tier.go",
+      "type": "file",
+      "name": "tier.go",
+      "filePath": "internal/tiering/tier.go",
+      "summary": "分级存储类型定义层，定义 Tier 枚举及其转换方法，以及文件元数据、迁移记录等核心数据结构。",
+      "tags": [
+        "type-definition",
+        "model",
+        "tiering"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/tiering/tier.go:FileMetadata",
+      "type": "class",
+      "name": "FileMetadata",
+      "filePath": "internal/tiering/tier.go",
+      "summary": "分级存储文件的完整元数据，包含层级归属和迁移时间戳。",
+      "tags": [
+        "model",
+        "metadata"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        43,
+        53
+      ]
+    },
+    {
+      "id": "class:internal/tiering/tier.go:MigrationCandidate",
+      "type": "class",
+      "name": "MigrationCandidate",
+      "filePath": "internal/tiering/tier.go",
+      "summary": "符合迁移条件的文件信息，包含当前层级和目标层级。",
+      "tags": [
+        "model",
+        "migration"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        56,
+        65
+      ]
+    },
+    {
+      "id": "class:internal/tiering/tier.go:MigrationRecord",
+      "type": "class",
+      "name": "MigrationRecord",
+      "filePath": "internal/tiering/tier.go",
+      "summary": "文件迁移的操作记录，包含开始、完成时间和错误信息。",
+      "tags": [
+        "model",
+        "migration",
+        "audit"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        68,
+        78
+      ]
+    },
+    {
+      "id": "file:internal/tiering/tier_test.go",
+      "type": "file",
+      "name": "tier_test.go",
+      "filePath": "internal/tiering/tier_test.go",
+      "summary": "Tier 类型的基础测试，验证字符串转换和有效性检查。",
+      "tags": [
+        "test",
+        "tiering",
+        "type-definition"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/wal/wal.go",
+      "type": "file",
+      "name": "wal.go",
+      "filePath": "internal/wal/wal.go",
+      "summary": "预写日志（WAL）写入器，实现崩溃安全的持久化写入，支持 CRC32 校验、文件轮转、复制钩子和老化清理。",
+      "tags": [
+        "wal",
+        "durability",
+        "replication",
+        "crash-recovery"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go WAL 实现，自定义二进制格式（Magic + Version + Checksum + Payload），支持同步模式选择和异步队列写入。"
+    },
+    {
+      "id": "class:internal/wal/wal.go:Writer",
+      "type": "class",
+      "name": "Writer",
+      "filePath": "internal/wal/wal.go",
+      "summary": "WAL 写入器核心，管理文件写入、轮转和复制，支持异步队列与多种同步策略。",
+      "tags": [
+        "wal",
+        "persistence"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        137,
+        170
+      ]
+    },
+    {
+      "id": "class:internal/wal/wal.go:WriterConfig",
+      "type": "class",
+      "name": "WriterConfig",
+      "filePath": "internal/wal/wal.go",
+      "summary": "WAL 写入器配置，包含数据目录、文件大小上限和同步模式。",
+      "tags": [
+        "config",
+        "wal"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        108,
+        117
+      ]
+    },
+    {
+      "id": "class:internal/wal/wal.go:ReplicationEntry",
+      "type": "class",
+      "name": "ReplicationEntry",
+      "filePath": "internal/wal/wal.go",
+      "summary": "WAL 复制条目，包含序列号和操作类型，用于集群间数据同步。",
+      "tags": [
+        "model",
+        "replication"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        121,
+        130
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:ParseEnvelope",
+      "type": "function",
+      "name": "ParseEnvelope",
+      "filePath": "internal/wal/wal.go",
+      "summary": "解析 WAL 条目的信封格式，提取数据库名称和原始 msgpack 负载。",
+      "tags": [
+        "parsing",
+        "wal"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        56,
+        64
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:NewWriter",
+      "type": "function",
+      "name": "NewWriter",
+      "filePath": "internal/wal/wal.go",
+      "summary": "创建 WAL 写入器，恢复已有 WAL 文件并启动后台写入循环。",
+      "tags": [
+        "factory",
+        "wal"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        173,
+        236
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:Append",
+      "type": "function",
+      "name": "Append",
+      "filePath": "internal/wal/wal.go",
+      "summary": "异步追加 msgpack 负载到 WAL（带数据库名称信封）。",
+      "tags": [
+        "write",
+        "wal"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        386,
+        394
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:AppendRawWithMeta",
+      "type": "function",
+      "name": "AppendRawWithMeta",
+      "filePath": "internal/wal/wal.go",
+      "summary": "带元数据的异步追加原始负载到 WAL。",
+      "tags": [
+        "write",
+        "wal"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        402,
+        451
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:AppendControl",
+      "type": "function",
+      "name": "AppendControl",
+      "filePath": "internal/wal/wal.go",
+      "summary": "追加控制记录（如 FLUSH_OK/FLUSH_FAIL）到 WAL。",
+      "tags": [
+        "write",
+        "wal",
+        "control"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        542,
+        602
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:Close",
+      "type": "function",
+      "name": "Close",
+      "filePath": "internal/wal/wal.go",
+      "summary": "关闭 WAL 写入器，等待所有待处理条目写入磁盘。",
+      "tags": [
+        "lifecycle",
+        "wal"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        651,
+        671
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:PurgeOlderThan",
+      "type": "function",
+      "name": "PurgeOlderThan",
+      "filePath": "internal/wal/wal.go",
+      "summary": "清理早于指定时间的 WAL 文件。",
+      "tags": [
+        "cleanup",
+        "wal"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        727,
+        747
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:PurgeAll",
+      "type": "function",
+      "name": "PurgeAll",
+      "filePath": "internal/wal/wal.go",
+      "summary": "清理所有 WAL 文件。",
+      "tags": [
+        "cleanup",
+        "wal"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        698,
+        704
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:Stats",
+      "type": "function",
+      "name": "Stats",
+      "filePath": "internal/wal/wal.go",
+      "summary": "返回 WAL 统计信息（文件数、条目数、已丢弃条目数等）。",
+      "tags": [
+        "stats",
+        "wal"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        750,
+        770
+      ]
+    },
+    {
+      "id": "function:internal/wal/wal.go:SetReplicationHook",
+      "type": "function",
+      "name": "SetReplicationHook",
+      "filePath": "internal/wal/wal.go",
+      "summary": "设置 WAL 复制钩子，每次写入后调用。",
+      "tags": [
+        "replication",
+        "hook"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        782,
+        787
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/sql/mask.go",
+      "target": "function:internal/sql/mask.go:MaskStringLiterals",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/sql/mask.go",
+      "target": "function:internal/sql/mask.go:MaskStringLiterals",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/sql/mask.go",
+      "target": "function:internal/sql/mask.go:UnmaskStringLiterals",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/sql/mask.go",
+      "target": "function:internal/sql/mask.go:UnmaskStringLiterals",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/sql/mask.go",
+      "target": "function:internal/sql/mask.go:EscapeStringLiteral",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/sql/mask.go",
+      "target": "function:internal/sql/mask.go:EscapeStringLiteral",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "class:internal/telemetry/telemetry.go:Collector",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "class:internal/telemetry/telemetry.go:Collector",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "function:internal/telemetry/telemetry.go:DefaultConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "function:internal/telemetry/telemetry.go:DefaultConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "function:internal/telemetry/telemetry.go:New",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "function:internal/telemetry/telemetry.go:New",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "function:internal/telemetry/telemetry.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "function:internal/telemetry/telemetry.go:Start",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "function:internal/telemetry/telemetry.go:Stop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/telemetry/telemetry.go",
+      "target": "function:internal/telemetry/telemetry.go:Stop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "class:internal/tiering/metadata.go:MetadataStore",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "class:internal/tiering/metadata.go:MetadataStore",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:NewMetadataStore",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:NewMetadataStore",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:RecordFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:RecordFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:GetFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:GetFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:GetFilesInTier",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:GetFilesInTier",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:UpdateTier",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:UpdateTier",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:RecordMigration",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:RecordMigration",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:CompleteMigration",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "function:internal/tiering/metadata.go:CompleteMigration",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "class:internal/tiering/scheduler.go:Scheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "class:internal/tiering/scheduler.go:Scheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "function:internal/tiering/scheduler.go:NewScheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "function:internal/tiering/scheduler.go:NewScheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "function:internal/tiering/scheduler.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "function:internal/tiering/scheduler.go:Start",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "function:internal/tiering/scheduler.go:Stop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "function:internal/tiering/scheduler.go:Stop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "function:internal/tiering/scheduler.go:TriggerNow",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/scheduler.go",
+      "target": "function:internal/tiering/scheduler.go:TriggerNow",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/tier.go",
+      "target": "file:internal/tiering/tier.go",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/tier.go",
+      "target": "file:internal/tiering/tier.go",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/tier.go",
+      "target": "class:internal/tiering/tier.go:FileMetadata",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/tier.go",
+      "target": "class:internal/tiering/tier.go:FileMetadata",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/tier.go",
+      "target": "class:internal/tiering/tier.go:MigrationCandidate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/tier.go",
+      "target": "class:internal/tiering/tier.go:MigrationCandidate",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/tiering/tier.go",
+      "target": "class:internal/tiering/tier.go:MigrationRecord",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/tiering/tier.go",
+      "target": "class:internal/tiering/tier.go:MigrationRecord",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "class:internal/wal/wal.go:WriterConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "class:internal/wal/wal.go:WriterConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "class:internal/wal/wal.go:ReplicationEntry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "class:internal/wal/wal.go:ReplicationEntry",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:ParseEnvelope",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:ParseEnvelope",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:NewWriter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:NewWriter",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:Append",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:Append",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:AppendRawWithMeta",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:AppendRawWithMeta",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:AppendControl",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:AppendControl",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:Close",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:Close",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:PurgeOlderThan",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:PurgeOlderThan",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:PurgeAll",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:PurgeAll",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:Stats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:Stats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:SetReplicationHook",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "function:internal/wal/wal.go:SetReplicationHook",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "file:internal/metrics/metrics.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "file:internal/metrics/timeseries_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/wal/wal.go",
+      "target": "file:internal/metrics/timeseries.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/tiering/metadata.go",
+      "target": "file:internal/tiering/metadata_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/tiering/tier.go",
+      "target": "file:internal/tiering/tier_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ]
+}

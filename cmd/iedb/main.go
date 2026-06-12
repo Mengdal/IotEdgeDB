@@ -373,12 +373,23 @@ func main() {
 		reloadCoordinator.Register("memory-monitor", memoryMonitor)
 		reloadCoordinator.Register("adaptive-flush", adaptiveEngine)
 
+		doneCh := make(chan struct{})
 		sighupCh := make(chan os.Signal, 1)
 		signal.Notify(sighupCh, syscall.SIGHUP)
 		go func() {
-			for range sighupCh {
-				if err := reloadCoordinator.Reload(); err != nil {
-					log.Warn().Err(err).Msg("配置热加载失败")
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().Interface("panic", r).Msg("SIGHUP hot reload panicked")
+				}
+			}()
+			for {
+				select {
+				case <-sighupCh:
+					if err := reloadCoordinator.Reload(); err != nil {
+						log.Warn().Err(err).Msg("config hot reload failed")
+					}
+				case <-doneCh:
+					return
 				}
 			}
 		}()
@@ -1718,7 +1729,8 @@ func main() {
 
 	// Wait for shutdown signal
 	sig := shutdownCoordinator.WaitForSignal()
-	signal.Stop(sighupCh) // 停止 SIGHUP 监听，防止 shutdown 期间热加载
+	close(doneCh)           // stop SIGHUP goroutine before component shutdown
+	signal.Stop(sighupCh)   // stop OS signal delivery
 	log.Info().Str("signal", sig.String()).Msg("Initiating graceful shutdown...")
 
 	// Perform graceful shutdown of all components

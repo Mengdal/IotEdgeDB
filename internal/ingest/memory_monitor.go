@@ -43,8 +43,7 @@ type MemoryMonitor struct {
 	logger      zerolog.Logger
 
 	// === 可热加载 ===
-	greenPct       atomic.Int64
-	redPct         atomic.Int64
+	greenRedPct    atomic.Int64 // packed greenPct<<32 | redPct (avoids torn read)
 	bufferLimit    atomic.Uint64
 	minBufferBytes atomic.Uint64
 
@@ -61,8 +60,7 @@ func NewMemoryMonitor(cfg MemoryMonitorConfig, duckdbLimitMB int, logger zerolog
 		logger:      logger,
 	}
 	m.totalMemory = m.detectSystemMemory()
-	m.greenPct.Store(int64(cfg.GreenPct))
-	m.redPct.Store(int64(cfg.RedPct))
+	m.greenRedPct.Store(int64(cfg.GreenPct)<<32 | int64(cfg.RedPct))
 	m.minBufferBytes.Store(uint64(cfg.MinBufferMemoryMB) * 1024 * 1024)
 	m.bufferLimit.Store(m.computeBufferLimitFor(cfg.MaxBufferMemoryMB))
 
@@ -167,8 +165,9 @@ func (m *MemoryMonitor) check() PressureLevel {
 	}
 	availPct := int(available * 100 / m.totalMemory)
 
-	redPct := int(m.redPct.Load())
-	greenPct := int(m.greenPct.Load())
+	v := m.greenRedPct.Load()
+	greenPct := int(v >> 32)
+	redPct := int(v & 0xFFFFFFFF)
 
 	if availPct < redPct {
 		return PressureRed
@@ -247,8 +246,7 @@ func (m *MemoryMonitor) ReloadConfig(payload *config.ReloadPayload) error {
 		return nil
 	}
 	ic := payload.Ingest
-	m.greenPct.Store(int64(ic.GreenPct))
-	m.redPct.Store(int64(ic.RedPct))
+	m.greenRedPct.Store(int64(ic.GreenPct)<<32 | int64(ic.RedPct))
 	m.minBufferBytes.Store(uint64(ic.MinBufferMemoryMB) * 1024 * 1024)
 	m.bufferLimit.Store(m.computeBufferLimitFor(ic.MaxBufferMemoryMB))
 	m.logger.Info().
