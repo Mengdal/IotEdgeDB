@@ -39,6 +39,10 @@ type Config struct {
 	Governance      GovernanceConfig
 	QueryManagement QueryManagementConfig
 	Reconciliation  ReconciliationConfig
+
+	// ConfigFilePath is the absolute path to the config file used at startup.
+	// Empty if no config file was found (defaults-only mode), which disables SIGHUP hot reload.
+	ConfigFilePath string
 }
 
 type ServerConfig struct {
@@ -429,11 +433,14 @@ func Load() (*Config, error) {
 	v.AddConfigPath("/etc/iedb/")
 	v.AddConfigPath("$HOME/.iedb/")
 
+	configFilePath := ""
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("failed to read config: %w", err)
 		}
 		// Config file not found is OK, use defaults
+	} else {
+		configFilePath = v.ConfigFileUsed()
 	}
 
 	// Parse max payload size
@@ -712,6 +719,7 @@ func Load() (*Config, error) {
 			Enabled:     v.GetBool("query_management.enabled"),
 			HistorySize: v.GetInt("query_management.history_size"),
 		},
+		ConfigFilePath: configFilePath,
 	}
 
 	if cfg.Database.MemoryLimit != "" && !memoryLimitRe.MatchString(cfg.Database.MemoryLimit) {
