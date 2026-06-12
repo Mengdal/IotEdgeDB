@@ -358,12 +358,15 @@ func main() {
 		arrowBuffer.SetBufferHardLimit(memoryMonitor.BufferLimit() * 2)
 
 		// 3. Arrow VIEW manager (buffer data queryable via DuckDB temp tables)
-		arrowViewMgr := database.NewArrowViewManager(db, arrowBuffer, logger.Get("arrow-view"))
-		arrowBuffer.SetNotifier(arrowViewMgr)
+	// Registered with shutdown coordinator so refreshLoop goroutine is
+	// stopped before the DuckDB pool closes.
+	arrowViewMgr := database.NewArrowViewManager(db, arrowBuffer, logger.Get("arrow-view"))
+	arrowBuffer.SetNotifier(arrowViewMgr)
+	shutdownCoordinator.Register("arrow-view", arrowViewMgr, shutdown.PriorityBuffer)
 
-		// 4. Query rewriter (transparent Parquet + buffer UNION queries)
-		queryRewriter := query.NewQueryRewriter(arrowViewMgr)
-		_ = queryRewriter // held for future direct use; currently integrated via buildReadParquetExpr
+	// 4. Query rewriter (transparent Parquet + buffer UNION queries)
+	queryRewriter := query.NewQueryRewriter(arrowViewMgr)
+	_ = queryRewriter // held for future direct use; currently integrated via buildReadParquetExpr
 
 		// === SIGHUP 配置热加载 ===
 		reloadCoordinator := config.NewReloadCoordinator(

@@ -886,6 +886,7 @@ func appendFlushRecDistHistogram(b []byte, m *Metrics, name string) []byte {
 		{"age", &m.flushRecDistAge},
 		{"hard_limit", &m.flushRecDistHard},
 		{"manual", &m.flushRecDistManual},
+		{"pressure", &m.flushRecDistPressure},
 	}
 
 	b = append(b, "# HELP "...)

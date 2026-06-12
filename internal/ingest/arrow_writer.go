@@ -1700,6 +1700,13 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	// OPTIMIZATION: Update metrics with atomic operations (lock-free!)
 	b.totalRecordsBuffered.Add(int64(numRecords))
 
+	// Hard-limit enforcement: after releasing the shard lock, check if
+	// the buffer exceeded the hard limit and evict oldest entries if so.
+	// Called with 0 because the new data is already in the entry.
+	if err := b.ensureBufferSpace(0); err != nil {
+		return err
+	}
+
 	b.logger.Debug().
 		Str("buffer_key", bufferKey).
 		Int("num_records", numRecords).
@@ -1807,6 +1814,12 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	shard.mu.Unlock()
 
 	b.totalRecordsBuffered.Add(int64(numRecords))
+
+	// Hard-limit enforcement: after releasing the shard lock, check if
+	// the buffer exceeded the hard limit and evict oldest entries if so.
+	if err := b.ensureBufferSpace(0); err != nil {
+		return err
+	}
 
 	b.logger.Debug().
 		Str("buffer_key", bufferKey).

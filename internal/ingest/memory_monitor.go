@@ -139,10 +139,16 @@ func (m *MemoryMonitor) computeBufferLimitFor(maxBufferMemoryMB int) uint64 {
 func (m *MemoryMonitor) getAvailableMemory() uint64 {
 	// 1. cgroup v2
 	if current, err := readUint64File("/sys/fs/cgroup/memory.current"); err == nil && current > 0 {
+		if current >= m.totalMemory {
+			return 0 // under OOM pressure, cgroup can briefly report current > max
+		}
 		return m.totalMemory - current
 	}
 	// 2. cgroup v1
 	if usage, err := readUint64File("/sys/fs/cgroup/memory/memory.usage_in_bytes"); err == nil && usage > 0 {
+		if usage >= m.totalMemory {
+			return 0
+		}
 		return m.totalMemory - usage
 	}
 	// 3. runtime 估算
