@@ -2,11 +2,13 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"iedb/internal/config"
 	"iedb/internal/metrics"
 
 	"github.com/rs/zerolog"
@@ -252,4 +254,34 @@ func splitKeyToDBAndMeas(key string) (database, measurement string) {
 		return cleanKey, cleanKey
 	}
 	return cleanKey[:idx], cleanKey[idx+1:]
+}
+
+// ValidateConfig 实现 config.Reloadable 接口。
+func (e *AdaptiveFlushEngine) ValidateConfig(payload *config.ReloadPayload) error {
+	if payload == nil || payload.Ingest == nil {
+		return nil
+	}
+	if payload.Ingest.MaxBufferAgeSeconds < 10 {
+		return fmt.Errorf("max_buffer_age_seconds must be >= 10, got %d", payload.Ingest.MaxBufferAgeSeconds)
+	}
+	return nil
+}
+
+// ReloadConfig 实现 config.Reloadable 接口。
+func (e *AdaptiveFlushEngine) ReloadConfig(payload *config.ReloadPayload) error {
+	if payload == nil || payload.Ingest == nil {
+		return nil
+	}
+	ic := payload.Ingest
+	oldMaxAge := time.Duration(e.maxAge.Load())
+	newMaxAge := time.Duration(ic.MaxBufferAgeSeconds) * time.Second
+	e.maxAge.Store(int64(newMaxAge))
+	e.maxBufferBytes.Store(e.monitor.BufferLimit())
+	e.minBufferBytes.Store(e.monitor.MinBufferBytes())
+	e.logger.Info().
+		Dur("old_max_age", oldMaxAge).
+		Dur("new_max_age", newMaxAge).
+		Uint64("buffer_limit_mb", e.maxBufferBytes.Load()/(1024*1024)).
+		Msg("自适应刷盘引擎配置已热加载")
+	return nil
 }
