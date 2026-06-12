@@ -100,8 +100,8 @@ func TestAdaptiveFlushEngine_FilterExpired(t *testing.T) {
 
 	for _, c := range expired {
 		age := time.Since(c.entry.startTime)
-		if age < engine.maxAge {
-			t.Errorf("expired entry %s has age %v < maxAge %v", c.bufferKey, age, engine.maxAge)
+		if age < time.Duration(engine.maxAge.Load()) {
+			t.Errorf("expired entry %s has age %v < maxAge %v", c.bufferKey, age, time.Duration(engine.maxAge.Load()))
 		}
 	}
 
@@ -140,8 +140,8 @@ func TestAdaptiveFlushEngine_FlushUntilBelow(t *testing.T) {
 	engine := NewAdaptiveFlushEngine(buf, monitor, 15*time.Minute, zerolog.Nop())
 
 	// Set maxBufferBytes to trigger hard-limit behavior
-	engine.maxBufferBytes = 2000
-	engine.minBufferBytes = 100
+	engine.maxBufferBytes.Store(2000)
+	engine.minBufferBytes.Store(100)
 
 	addBufferEntry(buf, "db/x", 50, 1000, time.Minute)
 	addBufferEntry(buf, "db/y", 100, 2000, time.Minute)
@@ -153,11 +153,11 @@ func TestAdaptiveFlushEngine_FlushUntilBelow(t *testing.T) {
 		totalBytes += c.entry.estimatedBytes
 	}
 
-	if totalBytes <= engine.maxBufferBytes {
+	if totalBytes <= engine.maxBufferBytes.Load() {
 		t.Fatalf("total bytes %d should exceed max %d for this test", totalBytes, engine.maxBufferBytes)
 	}
 
-	engine.flushUntilBelow(candidates, totalBytes, engine.maxBufferBytes)
+	engine.flushUntilBelow(candidates, totalBytes, engine.maxBufferBytes.Load())
 
 	// After flushUntilBelow, at least the largest entry should be gone
 	// The largest was db/y (2000 bytes), so after removing it: 1000 + 500 = 1500 <= 2000
@@ -165,7 +165,7 @@ func TestAdaptiveFlushEngine_FlushUntilBelow(t *testing.T) {
 	for _, c := range engine.collectCandidates() {
 		remaining += c.entry.estimatedBytes
 	}
-	if remaining > engine.maxBufferBytes {
+	if remaining > engine.maxBufferBytes.Load() {
 		t.Errorf("remaining bytes %d should be <= maxBufferBytes %d after flush", remaining, engine.maxBufferBytes)
 	}
 }
@@ -174,7 +174,7 @@ func TestAdaptiveFlushEngine_MinPerMeasurement(t *testing.T) {
 	buf := fakeArrowBufferForTest(t)
 	monitor := &MemoryMonitor{}
 	engine := NewAdaptiveFlushEngine(buf, monitor, 15*time.Minute, zerolog.Nop())
-	engine.minBufferBytes = 10000 // high floor to test skip logic
+	engine.minBufferBytes.Store(10000) // high floor to test skip logic
 
 	addBufferEntry(buf, "db/tiny", 10, 100, time.Minute)     // below minPerMeasurement
 	addBufferEntry(buf, "db/big", 1000, 50000, time.Minute)  // above minPerMeasurement

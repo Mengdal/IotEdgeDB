@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"iedb/internal/metrics"
@@ -23,9 +24,9 @@ type flushCandidate struct {
 type AdaptiveFlushEngine struct {
 	buffer         *ArrowBuffer
 	monitor        *MemoryMonitor
-	maxBufferBytes uint64
-	minBufferBytes uint64
-	maxAge         time.Duration
+	maxBufferBytes atomic.Uint64
+	minBufferBytes atomic.Uint64
+	maxAge         atomic.Int64 // 纳秒
 	candidatesBuf  []flushCandidate
 	logger         zerolog.Logger
 }
@@ -37,14 +38,15 @@ func NewAdaptiveFlushEngine(
 	maxAge time.Duration,
 	logger zerolog.Logger,
 ) *AdaptiveFlushEngine {
-	return &AdaptiveFlushEngine{
-		buffer:         buffer,
-		monitor:        monitor,
-		maxBufferBytes: monitor.BufferLimit(),
-		minBufferBytes: monitor.MinBufferBytes(),
-		maxAge:         maxAge,
-		logger:         logger,
+	e := &AdaptiveFlushEngine{
+		buffer:  buffer,
+		monitor: monitor,
+		logger:  logger,
 	}
+	e.maxBufferBytes.Store(monitor.BufferLimit())
+	e.minBufferBytes.Store(monitor.MinBufferBytes())
+	e.maxAge.Store(int64(maxAge))
+	return e
 }
 
 // Run 主循环，每秒评估一次。
@@ -75,13 +77,13 @@ func (e *AdaptiveFlushEngine) evaluate() {
 	// Update buffer estimated bytes metric
 	metrics.Get().SetBufferEstimatedBytes(int64(totalBytes))
 
-	if totalBytes > e.maxBufferBytes {
+	if totalBytes > e.maxBufferBytes.Load() {
 		e.logger.Debug().
 			Uint64("total_bytes", totalBytes).
-			Uint64("limit_bytes", e.maxBufferBytes).
+			Uint64("limit_bytes", e.maxBufferBytes.Load()).
 			Msg("Buffer hard limit exceeded, flushing largest")
 		metrics.Get().IncHardLimitFlush()
-		e.flushUntilBelow(candidates, totalBytes, e.maxBufferBytes)
+		e.flushUntilBelow(candidates, totalBytes, e.maxBufferBytes.Load())
 		return
 	}
 
@@ -135,8 +137,9 @@ func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 // filterExpired 筛选出超过 maxAge 的缓冲。
 func (e *AdaptiveFlushEngine) filterExpired(candidates []flushCandidate) []flushCandidate {
 	var expired []flushCandidate
+	maxAge := time.Duration(e.maxAge.Load())
 	for _, c := range candidates {
-		if time.Since(c.entry.startTime) >= e.maxAge {
+		if time.Since(c.entry.startTime) >= maxAge {
 			c.trigger = "age"
 			expired = append(expired, c)
 		}
@@ -153,7 +156,7 @@ func (e *AdaptiveFlushEngine) flushLargestUntil(
 		return candidates[i].entry.recordCount > candidates[j].entry.recordCount
 	})
 
-	minPerMeasurement := e.minBufferBytes / uint64(max(len(candidates), 1))
+	minPerMeasurement := e.minBufferBytes.Load() / uint64(max(len(candidates), 1))
 
 	for i := range candidates {
 		if shouldStop() {
