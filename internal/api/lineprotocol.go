@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"sync"
@@ -300,14 +299,6 @@ localProcessing:
 				Str("measurement", measurement).
 				Int("records", len(record.Columns["time"])).
 				Msg("Failed to write to Arrow buffer")
-			// Schema-churn rejection is retryable — surface as 503 so
-			// upstream senders back off rather than treating this as a
-			// permanent server error. See ingest.ErrSchemaChurnExceeded.
-			if errors.Is(err, ingest.ErrSchemaChurnExceeded) {
-				return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-					"error": "Write rejected (schema churn): " + err.Error(),
-				})
-			}
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Write failed: " + err.Error(),
 			})

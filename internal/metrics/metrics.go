@@ -65,10 +65,11 @@ type Metrics struct {
 
 	// Flush records distribution histogram (per trigger type)
 	// Buckets: 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000
-	flushRecDistSize  [9]atomic.Int64
-	flushRecDistAge   [9]atomic.Int64
-	flushRecDistHard  [9]atomic.Int64
-	flushRecDistManual [9]atomic.Int64
+	flushRecDistSize    [9]atomic.Int64
+	flushRecDistAge     [9]atomic.Int64
+	flushRecDistHard    [9]atomic.Int64
+	flushRecDistManual  [9]atomic.Int64
+	flushRecDistPressure [9]atomic.Int64
 
 	// Storage metrics
 	storageWritesTotal     atomic.Int64
@@ -241,7 +242,7 @@ func (m *Metrics) IncHardLimitFlush()                  { m.hardLimitFlushTotal.A
 func (m *Metrics) IncAgeExpiredFlush()                 { m.ageExpiredFlushTotal.Add(1) }
 
 // RecordBufferFlushRecords records a flush record count into the distribution histogram.
-// trigger is one of: "size", "age", "hard_limit", "manual".
+// trigger is one of: "size", "age", "hard_limit", "manual", "pressure".
 func (m *Metrics) RecordBufferFlushRecords(trigger string, recordCount int) {
 	buckets := []int{100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000}
 	var dst *[9]atomic.Int64
@@ -252,6 +253,8 @@ func (m *Metrics) RecordBufferFlushRecords(trigger string, recordCount int) {
 		dst = &m.flushRecDistHard
 	case "manual":
 		dst = &m.flushRecDistManual
+	case "pressure":
+		dst = &m.flushRecDistPressure
 	default:
 		dst = &m.flushRecDistSize
 	}

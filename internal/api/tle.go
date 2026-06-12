@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"iedb/internal/auth"
 	"io"
@@ -192,12 +191,6 @@ localProcessing:
 			Str("measurement", measurement).
 			Int("records", len(tleRecords)).
 			Msg("Failed to write TLE data to Arrow buffer")
-		// See lineprotocol.go for ErrSchemaChurnExceeded → 503 rationale.
-		if errors.Is(err, ingest.ErrSchemaChurnExceeded) {
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-				"error": "Write rejected (schema churn): " + err.Error(),
-			})
-		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Write failed: " + err.Error(),
 		})

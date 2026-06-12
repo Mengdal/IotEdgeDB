@@ -851,13 +851,7 @@ type ArrowBuffer struct {
 	totalErrors          atomic.Int64
 	totalWALErrors       atomic.Int64 // WAL write failures (real I/O / serialization errors)
 	totalWALDropped      atomic.Int64 // WAL backpressure drops (entry queued but channel full)
-	// totalSchemaChurnExceeded counts requests rejected because the
-	// schema-evolution flush loop hit schemaEvolutionMaxIters under
-	// sustained concurrent schema rotation against the same
-	// (database, measurement) buffer. Pathological signal — operators
-	// alert on a non-zero rate.
-	totalSchemaChurnExceeded atomic.Int64
-	queueDepth               atomic.Int64 // Current flush queue depth
+	queueDepth           atomic.Int64 // Current flush queue depth
 
 	// walDropLogSampler debounces the WAL-dropped Warn so a sustained
 	// burst of backpressure produces ~one log line per second instead
@@ -1014,7 +1008,7 @@ func (b *ArrowBuffer) flushTypeConflicts(baseKey, newSig string) {
 			// We are holding shard.mu — flushBufferLocked will
 			// Unlock for I/O and Lock before returning.
 			flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
+			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1], "schema_conflict"); err != nil {
 				b.logger.Warn().Err(err).
 					Str("buffer_key", key).
 					Str("old_schema", entry.schema).
@@ -1569,29 +1563,6 @@ func (b *ArrowBuffer) tryEnqueueFlush(
 		return flushQueueFull
 	}
 }
-
-// schemaEvolutionMaxIters bounds the schema-evolution flush loop.
-// Steady state: 1 iteration (no schema change). Adversarial state:
-// rotating-schema writers could in principle trigger an unbounded
-// loop because flushBufferLocked releases shard.mu for I/O and a
-// concurrent writer can install a fresh schema in that window.
-//
-// Hitting the cap means at least 8 distinct schemas raced through
-// the same (database, measurement) buffer in the time window of one
-// flush — a sustained-churn signal, not transient. Surfacing this as
-// ErrSchemaChurnExceeded lets the caller fail the request with a 503
-// rather than committing a wide schema-mixed buffer to disk that
-// query-side schema-on-read would then have to reconcile.
-const schemaEvolutionMaxIters = 8
-
-// ErrSchemaChurnExceeded is returned by flushOnSchemaChangeLocked when
-// schemaEvolutionMaxIters is reached. Treat as a transient backpressure
-// signal: the caller should reject the write with a retryable status
-// (503) so upstream senders back off; the in-buffer rows for the older
-// schemas have already been flushed to durable Parquet by the loop's
-// per-iteration flushes, so there is no data loss — only a per-request
-// failure under sustained schema-rotation churn.
-var ErrSchemaChurnExceeded = errors.New("schema-evolution loop exceeded max iterations: sustained concurrent schema churn against the same (database, measurement)")
 
 // writeColumnar writes a columnar record to the buffer
 func (b *ArrowBuffer) writeColumnar(ctx context.Context, database string, record *models.ColumnarRecord) error {
@@ -2322,7 +2293,7 @@ func (b *ArrowBuffer) flushAgedBuffers() {
 			}
 
 			flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
+			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1], "age"); err != nil {
 				b.logger.Error().Err(err).Str("buffer_key", key).Msg("Failed to flush aged buffer")
 			}
 			flushCancel()
@@ -2445,59 +2416,78 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 	const maxInlineFlushes = 5
 	evicted := false
 	now := time.Now()
-	for i := uint32(0); i < b.shardCount; i++ {
-		shard := b.shards[i]
-		shard.mu.Lock()
+
+	// Two-pass: first find the globally oldest entry across all shards,
+	// then evict it. Repeat until under targetBytes or nothing left.
+	for {
+		// Pass 1: scan all shards for the globally oldest entry.
+		var oldestShardIdx uint32
 		var oldestKey string
 		var oldestTime time.Time
-		for key, entry := range shard.buffers {
-			if oldestKey == "" || entry.startTime.Before(oldestTime) {
-				oldestKey = key
-				oldestTime = entry.startTime
-			}
-		}
-		if oldestKey != "" && now.Sub(oldestTime) > 0 {
-			// Extract batch references before deleting
-			entry := shard.buffers[oldestKey]
-			records := make([]interface{}, len(entry.batches))
-			for j, batch := range entry.batches {
-				records[j] = batch
-			}
-			recordCount := entry.recordCount
-			delete(shard.buffers, oldestKey)
-			parts := splitBufferKey(oldestKey)
-			shard.mu.Unlock()
-
-			if *inlineFlushCount < maxInlineFlushes && len(parts) == 2 {
-				*inlineFlushCount++
-				b.logger.Warn().
-					Str("buffer_key", oldestKey).
-					Dur("age", now.Sub(oldestTime)).
-					Int("inline_flush", *inlineFlushCount).
-					Msg("Buffer overflow: flushing oldest entry inline")
-				b.flushRecordsAsync(context.Background(), oldestKey, parts[0], parts[1], records, recordCount)
-			} else {
-				if *inlineFlushCount >= maxInlineFlushes {
-					b.logger.Error().
-						Str("buffer_key", oldestKey).
-						Int("max_inline_flushes", maxInlineFlushes).
-						Msg("Buffer overflow: inline flush cap reached, evicting without flush — data in WAL only")
+		for i := uint32(0); i < b.shardCount; i++ {
+			shard := b.shards[i]
+			shard.mu.RLock()
+			for key, entry := range shard.buffers {
+				if oldestKey == "" || entry.startTime.Before(oldestTime) {
+					oldestShardIdx = i
+					oldestKey = key
+					oldestTime = entry.startTime
 				}
-				b.logger.Warn().
-					Str("buffer_key", oldestKey).
-					Dur("age", now.Sub(oldestTime)).
-					Msg("Buffer overflow: evicted oldest entry (data preserved in WAL)")
-				metrics.Get().IncBufferFlushFailures() // tracks overflow evictions
 			}
-			evicted = true
-		} else {
-			shard.mu.Unlock()
+			shard.mu.RUnlock()
 		}
-		if evicted && b.estimateTotalBufferBytes() <= targetBytes {
+		if oldestKey == "" {
+			return evicted // nothing left to evict
+		}
+
+		// Pass 2: lock only the shard containing the oldest entry and evict it.
+		shard := b.shards[oldestShardIdx]
+		shard.mu.Lock()
+		entry, exists := shard.buffers[oldestKey]
+		if !exists {
+			// Entry was concurrently flushed/evicted — restart from pass 1.
+			shard.mu.Unlock()
+			if b.estimateTotalBufferBytes() <= targetBytes {
+				return evicted
+			}
+			continue
+		}
+		records := make([]interface{}, len(entry.batches))
+		for j, batch := range entry.batches {
+			records[j] = batch
+		}
+		recordCount := entry.recordCount
+		delete(shard.buffers, oldestKey)
+		parts := splitBufferKey(oldestKey)
+		shard.mu.Unlock()
+
+		evicted = true
+		if *inlineFlushCount < maxInlineFlushes && len(parts) == 2 {
+			*inlineFlushCount++
+			b.logger.Warn().
+				Str("buffer_key", oldestKey).
+				Dur("age", now.Sub(oldestTime)).
+				Int("inline_flush", *inlineFlushCount).
+				Msg("Buffer overflow: flushing oldest entry inline")
+			b.flushRecordsAsync(context.Background(), oldestKey, parts[0], parts[1], records, recordCount)
+		} else {
+			if *inlineFlushCount >= maxInlineFlushes {
+				b.logger.Error().
+					Str("buffer_key", oldestKey).
+					Int("max_inline_flushes", maxInlineFlushes).
+					Msg("Buffer overflow: inline flush cap reached, evicting without flush — data in WAL only")
+			}
+			b.logger.Warn().
+				Str("buffer_key", oldestKey).
+				Dur("age", now.Sub(oldestTime)).
+				Msg("Buffer overflow: evicted oldest entry (data preserved in WAL)")
+			metrics.Get().IncBufferFlushFailures() // tracks overflow evictions
+		}
+
+		if b.estimateTotalBufferBytes() <= targetBytes {
 			return true
 		}
 	}
-	return evicted
 }
 
 // ensureBufferSpace checks the buffer hard limit and applies overflow protection.
@@ -2959,7 +2949,7 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 
 // flushBufferLocked writes buffered data to Parquet and storage (synchronous version for periodic flush)
 // Note: Caller must hold shard.mu lock
-func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard, bufferKey, database, measurement string) error {
+func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard, bufferKey, database, measurement, trigger string) error {
 	entry, exists := shard.buffers[bufferKey]
 	if !exists || len(entry.batches) == 0 {
 		// Clean up stale tracking entry even if buffer is empty
@@ -3029,7 +3019,7 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 	}
 
 	// Record flush record count distribution
-	metrics.Get().RecordBufferFlushRecords("age", recordCount)
+	metrics.Get().RecordBufferFlushRecords(trigger, recordCount)
 
 	// Re-acquire lock for caller
 	shard.mu.Lock()
@@ -3747,7 +3737,7 @@ func (b *ArrowBuffer) FlushAll(ctx context.Context) error {
 				continue
 			}
 
-			if err := b.flushBufferLocked(ctx, shard, key, parts[0], parts[1]); err != nil {
+			if err := b.flushBufferLocked(ctx, shard, key, parts[0], parts[1], "manual"); err != nil {
 				b.logger.Error().Err(err).Str("buffer_key", key).Msg("Failed to flush buffer")
 				lastErr = err
 			}
@@ -3830,7 +3820,7 @@ func (b *ArrowBuffer) Close() error {
 			}
 
 			flushCtx, flushCancel := context.WithTimeout(context.Background(), b.flushTimeout)
-			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1]); err != nil {
+			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1], "shutdown"); err != nil {
 				b.logger.Error().Err(err).Str("buffer_key", key).Msg("Failed to flush buffer during close")
 			}
 			flushCancel()
@@ -3866,9 +3856,8 @@ func (b *ArrowBuffer) GetStats() map[string]interface{} {
 		"total_flushes":               b.totalFlushes.Load(),
 		"total_errors":                b.totalErrors.Load(),
 		"total_wal_errors":            b.totalWALErrors.Load(),
-		"total_wal_dropped":           b.totalWALDropped.Load(),
-		"total_schema_churn_exceeded": b.totalSchemaChurnExceeded.Load(),
-		"active_buffers":              activeBuffers,
+		"total_wal_dropped":  b.totalWALDropped.Load(),
+		"active_buffers":     activeBuffers,
 		"flush_queue_depth":           b.queueDepth.Load(),
 		"flush_workers":               b.flushWorkers,
 	}

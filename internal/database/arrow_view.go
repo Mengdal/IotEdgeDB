@@ -40,6 +40,7 @@ type ArrowViewManager struct {
 	notifyCh      chan string
 	dirty         map[string]struct{}
 	closeCh       chan struct{}
+	closing       atomic.Bool // prevents double-close panic on closeCh
 	needsFullScan atomic.Bool // set when notifyCh overflows; triggers full buffer scan on next tick
 	logger        zerolog.Logger
 }
@@ -208,11 +209,14 @@ func (m *ArrowViewManager) refreshView(bufferKey string) {
 
 	if !exists || schemaChanged {
 		m.createOrReplaceTable(bufferKey, newBatches)
+		m.buffer.MarkRefreshed(bufferKey)
+	} else if err := m.appendToTable(bufferKey, newBatches); err != nil {
+		// Append failed — old VIEW data is intact (table not dropped).
+		// Skip MarkRefreshed so the next refresh cycle retries these batches.
+		m.logger.Warn().Err(err).Str("buffer_key", bufferKey).Msg("Incremental VIEW append failed, will retry next cycle")
 	} else {
-		m.appendToTable(bufferKey, newBatches)
+		m.buffer.MarkRefreshed(bufferKey)
 	}
-
-	m.buffer.MarkRefreshed(bufferKey)
 }
 
 // createOrReplaceTable 创建或重建临时表。
@@ -256,11 +260,14 @@ func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ing
 }
 
 // appendToTable 增量追加 batch 到已有临时表。
-func (m *ArrowViewManager) appendToTable(bufferKey string, batches []*ingest.TypedColumnBatch) {
+// Returns nil on success, or the DuckDB append error on failure.
+// On failure, the old VIEW table is NOT dropped — the caller (refreshView)
+// skips MarkRefreshed so the failed batches will be retried next cycle.
+func (m *ArrowViewManager) appendToTable(bufferKey string, batches []*ingest.TypedColumnBatch) error {
 	viewName := ViewName(bufferKey)
 	conn, err := m.db.DB().Conn(context.Background())
 	if err != nil {
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -268,8 +275,7 @@ func (m *ArrowViewManager) appendToTable(bufferKey string, batches []*ingest.Typ
 	for _, batch := range batches {
 		n, err := m.appendBatchToTable(conn, viewName, batch)
 		if err != nil {
-			m.createOrReplaceTable(bufferKey, batches)
-			return
+			return err
 		}
 		totalRows += n
 	}
@@ -279,6 +285,7 @@ func (m *ArrowViewManager) appendToTable(bufferKey string, batches []*ingest.Typ
 		state.rowCount += totalRows
 	}
 	m.mu.Unlock()
+	return nil
 }
 
 // appendBatchToTable 使用 DuckDB Appender API 批量列式写入单个 batch 到临时表。
@@ -406,6 +413,9 @@ func columnValue(col interface{}, validity []bool, row int) interface{} {
 
 // Close 关闭 VIEW 管理器。
 func (m *ArrowViewManager) Close() error {
+	if !m.closing.CompareAndSwap(false, true) {
+		return nil // already closed
+	}
 	close(m.closeCh)
 	m.mu.Lock()
 	defer m.mu.Unlock()
