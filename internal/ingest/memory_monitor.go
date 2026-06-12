@@ -224,6 +224,10 @@ func (m *MemoryMonitor) ValidateConfig(payload *config.ReloadPayload) error {
 		return nil
 	}
 	ic := payload.Ingest
+	if ic.GreenPct < 0 || ic.GreenPct > 100 || ic.RedPct < 0 || ic.RedPct > 100 {
+		return fmt.Errorf("green_pct (%d) and red_pct (%d) must be in range [0, 100]",
+			ic.GreenPct, ic.RedPct)
+	}
 	if ic.GreenPct <= ic.RedPct {
 		return fmt.Errorf("green_pct (%d) must be > red_pct (%d)", ic.GreenPct, ic.RedPct)
 	}

@@ -156,7 +156,7 @@ func TestAdaptiveFlushEngine_FlushUntilBelow(t *testing.T) {
 	}
 
 	if totalBytes <= engine.maxBufferBytes.Load() {
-		t.Fatalf("total bytes %d should exceed max %d for this test", totalBytes, engine.maxBufferBytes)
+		t.Fatalf("total bytes %d should exceed max %d for this test", totalBytes, engine.maxBufferBytes.Load())
 	}
 
 	engine.flushUntilBelow(candidates, totalBytes, engine.maxBufferBytes.Load())
@@ -168,7 +168,7 @@ func TestAdaptiveFlushEngine_FlushUntilBelow(t *testing.T) {
 		remaining += c.entry.estimatedBytes
 	}
 	if remaining > engine.maxBufferBytes.Load() {
-		t.Errorf("remaining bytes %d should be <= maxBufferBytes %d after flush", remaining, engine.maxBufferBytes)
+		t.Errorf("remaining bytes %d should be <= maxBufferBytes %d after flush", remaining, engine.maxBufferBytes.Load())
 	}
 }
 

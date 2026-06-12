@@ -268,6 +268,9 @@ func (e *AdaptiveFlushEngine) ValidateConfig(payload *config.ReloadPayload) erro
 }
 
 // ReloadConfig 实现 config.Reloadable 接口。
+// IMPORTANT: MemoryMonitor.ReloadConfig must be called before this method,
+// because BufferLimit() and MinBufferBytes() are read from the monitor.
+// ReloadCoordinator guarantees this via registration order.
 func (e *AdaptiveFlushEngine) ReloadConfig(payload *config.ReloadPayload) error {
 	if payload == nil || payload.Ingest == nil {
 		return nil
