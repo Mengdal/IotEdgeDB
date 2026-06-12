@@ -49,7 +49,6 @@ func TestChaos_PressureOscillation_NoThrashing(t *testing.T) {
 			MinBufferMemoryMB: 64,
 		},
 		totalMemory: 10 * 1024 * 1024 * 1024, // 10GB
-		bufferLimit: 2 * 1024 * 1024 * 1024,  // 2GB
 		getAvailableMem: func() uint64 {
 			// Oscillate available memory rapidly to stress the decision engine
 			osc := time.Now().UnixNano() / int64(time.Millisecond)
@@ -65,6 +64,10 @@ func TestChaos_PressureOscillation_NoThrashing(t *testing.T) {
 			}
 		},
 	}
+	monitor.greenPct.Store(50)
+	monitor.redPct.Store(20)
+	monitor.minBufferBytes.Store(64 * 1024 * 1024)
+	monitor.bufferLimit.Store(2 * 1024 * 1024 * 1024)
 	engine := NewAdaptiveFlushEngine(buf, monitor, 10*time.Minute, zerolog.Nop())
 	buf.SetAdaptiveFlushEngine(engine)
 	buf.StartAdaptiveFlush()

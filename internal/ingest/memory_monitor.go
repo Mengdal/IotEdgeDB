@@ -32,13 +32,18 @@ type MemoryMonitorConfig struct {
 
 // MemoryMonitor 持续监控系统可用内存并发布压力等级。
 type MemoryMonitor struct {
-	cfg         MemoryMonitorConfig
-	pressure    atomic.Int32  // 当前压力等级（无锁读取）
-	totalMemory uint64        // 系统总内存（字节），启动时检测一次
-	bufferLimit uint64        // 缓冲内存硬上限（字节），启动时计算一次
-	duckdbLimit uint64        // DuckDB memory_limit（字节）
+	cfg         MemoryMonitorConfig // 仅用于初始赋值（GreenPct/RedPct 废弃，改用 atomic）
+	pressure    atomic.Int32        // 当前压力等级（无锁读取）
+	totalMemory uint64              // 系统总内存（字节），启动时检测一次
+	duckdbLimit uint64              // DuckDB memory_limit（字节）
 	stopCh      chan struct{}
 	logger      zerolog.Logger
+
+	// === 可热加载 ===
+	greenPct       atomic.Int64
+	redPct         atomic.Int64
+	bufferLimit    atomic.Uint64
+	minBufferBytes atomic.Uint64
 
 	// getAvailableMem is overridden in tests to mock system memory state.
 	getAvailableMem func() uint64
@@ -53,11 +58,14 @@ func NewMemoryMonitor(cfg MemoryMonitorConfig, duckdbLimitMB int, logger zerolog
 		logger:      logger,
 	}
 	m.totalMemory = m.detectSystemMemory()
-	m.bufferLimit = m.computeBufferLimit()
+	m.greenPct.Store(int64(cfg.GreenPct))
+	m.redPct.Store(int64(cfg.RedPct))
+	m.minBufferBytes.Store(uint64(cfg.MinBufferMemoryMB) * 1024 * 1024)
+	m.bufferLimit.Store(m.computeBufferLimitFor(cfg.MaxBufferMemoryMB))
 
 	logger.Info().
 		Uint64("total_memory_mb", m.totalMemory/(1024*1024)).
-		Uint64("buffer_limit_mb", m.bufferLimit/(1024*1024)).
+		Uint64("buffer_limit_mb", m.BufferLimit()/(1024*1024)).
 		Int("green_pct", cfg.GreenPct).
 		Int("red_pct", cfg.RedPct).
 		Msg("Memory monitor initialized")
@@ -105,10 +113,12 @@ func readUint64File(path string) (uint64, error) {
 	return strconv.ParseUint(s, 10, 64)
 }
 
-func (m *MemoryMonitor) computeBufferLimit() uint64 {
+// computeBufferLimitFor 根据 maxBufferMemoryMB 计算缓冲内存硬上限。
+// 0 表示自动检测。此方法在启动和热加载时均可调用。
+func (m *MemoryMonitor) computeBufferLimitFor(maxBufferMemoryMB int) uint64 {
 	var limit uint64
-	if m.cfg.MaxBufferMemoryMB > 0 {
-		limit = uint64(m.cfg.MaxBufferMemoryMB) * 1024 * 1024
+	if maxBufferMemoryMB > 0 {
+		limit = uint64(maxBufferMemoryMB) * 1024 * 1024
 	} else {
 		half := m.totalMemory / 2
 		if half > m.duckdbLimit {
@@ -117,7 +127,7 @@ func (m *MemoryMonitor) computeBufferLimit() uint64 {
 			limit = half
 		}
 	}
-	minBytes := uint64(m.cfg.MinBufferMemoryMB) * 1024 * 1024
+	minBytes := m.MinBufferBytes()
 	if limit < minBytes {
 		limit = minBytes
 	}
@@ -154,10 +164,13 @@ func (m *MemoryMonitor) check() PressureLevel {
 	}
 	availPct := int(available * 100 / m.totalMemory)
 
-	if availPct < m.cfg.RedPct {
+	redPct := int(m.redPct.Load())
+	greenPct := int(m.greenPct.Load())
+
+	if availPct < redPct {
 		return PressureRed
 	}
-	if availPct < m.cfg.GreenPct {
+	if availPct < greenPct {
 		return PressureYellow
 	}
 	return PressureGreen
@@ -189,12 +202,12 @@ func (m *MemoryMonitor) PressureLevel() PressureLevel {
 
 // BufferLimit 返回缓冲内存硬上限（字节）。
 func (m *MemoryMonitor) BufferLimit() uint64 {
-	return m.bufferLimit
+	return m.bufferLimit.Load()
 }
 
 // MinBufferBytes 返回最低保证缓冲内存（字节）。
 func (m *MemoryMonitor) MinBufferBytes() uint64 {
-	return uint64(m.cfg.MinBufferMemoryMB) * 1024 * 1024
+	return m.minBufferBytes.Load()
 }
 
 // Stop 停止监控循环。

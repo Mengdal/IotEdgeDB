@@ -15,6 +15,8 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 600 },
 		}
+		m.greenPct.Store(50)
+		m.redPct.Store(20)
 		if level := m.check(); level != PressureGreen {
 			t.Errorf("expected PressureGreen, got %d (available=600/1000=60%%)", level)
 		}
@@ -26,6 +28,8 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 350 },
 		}
+		m.greenPct.Store(50)
+		m.redPct.Store(20)
 		if level := m.check(); level != PressureYellow {
 			t.Errorf("expected PressureYellow, got %d (available=350/1000=35%%)", level)
 		}
@@ -37,6 +41,8 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 100 },
 		}
+		m.greenPct.Store(50)
+		m.redPct.Store(20)
 		if level := m.check(); level != PressureRed {
 			t.Errorf("expected PressureRed, got %d (available=100/1000=10%%)", level)
 		}
@@ -48,6 +54,8 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 200 },
 		}
+		m.greenPct.Store(50)
+		m.redPct.Store(20)
 		// 200/1000 = 20%, which is NOT < 20% (strict less-than)
 		// So it should be yellow, not red
 		if level := m.check(); level != PressureYellow {
@@ -61,6 +69,8 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 			totalMemory: 1000,
 			getAvailableMem: func() uint64 { return 500 },
 		}
+		m.greenPct.Store(50)
+		m.redPct.Store(20)
 		// 500/1000 = 50%, which is NOT < 50% (strict less-than)
 		// So it should be green
 		if level := m.check(); level != PressureGreen {
@@ -101,11 +111,12 @@ func TestMemoryMonitor_BufferLimit(t *testing.T) {
 			totalMemory: 16 * 1024 * 1024 * 1024, // 16GB
 			duckdbLimit: 4 * 1024 * 1024 * 1024,  // 4GB
 		}
-		m.bufferLimit = m.computeBufferLimit()
+		m.minBufferBytes.Store(64 * 1024 * 1024)
+		m.bufferLimit.Store(m.computeBufferLimitFor(m.cfg.MaxBufferMemoryMB))
 		// half = 8GB, minus duckdb 4GB = 4GB
 		expected := uint64(4 * 1024 * 1024 * 1024)
-		if m.bufferLimit != expected {
-			t.Errorf("expected 4GB (8GB - 4GB), got %d bytes", m.bufferLimit)
+		if m.BufferLimit() != expected {
+			t.Errorf("expected 4GB (8GB - 4GB), got %d bytes", m.BufferLimit())
 		}
 	})
 
@@ -118,11 +129,12 @@ func TestMemoryMonitor_BufferLimit(t *testing.T) {
 			totalMemory: 100 * 1024 * 1024, // 100MB
 			duckdbLimit: 0,
 		}
-		m.bufferLimit = m.computeBufferLimit()
+		m.minBufferBytes.Store(512 * 1024 * 1024)
+		m.bufferLimit.Store(m.computeBufferLimitFor(m.cfg.MaxBufferMemoryMB))
 		// half = 50MB, but min floor = 512MB
 		expected := uint64(512 * 1024 * 1024)
-		if m.bufferLimit != expected {
-			t.Errorf("expected min floor 512MB, got %d bytes", m.bufferLimit)
+		if m.BufferLimit() != expected {
+			t.Errorf("expected min floor 512MB, got %d bytes", m.BufferLimit())
 		}
 	})
 }
@@ -156,6 +168,8 @@ func TestPressureLevel_AtomicConcurrency(t *testing.T) {
 		cfg:         MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
 		totalMemory: 1000,
 	}
+	m.greenPct.Store(50)
+	m.redPct.Store(20)
 	// Verify atomic store/load works across concurrent access
 	done := make(chan struct{})
 	go func() {
