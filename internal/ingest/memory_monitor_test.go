@@ -3,7 +3,10 @@ package ingest
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"iedb/internal/config"
 
 	"github.com/rs/zerolog"
 )
@@ -188,4 +191,213 @@ func TestPressureLevel_AtomicConcurrency(t *testing.T) {
 		}
 	}
 	<-done
+}
+
+func TestMemoryMonitor_ValidateConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload *config.ReloadPayload
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "nil payload",
+			payload: nil,
+			wantErr: false,
+		},
+		{
+			name:    "nil ingest section",
+			payload: &config.ReloadPayload{Ingest: nil},
+			wantErr: false,
+		},
+		{
+			name: "valid config",
+			payload: &config.ReloadPayload{
+				Ingest: &config.IngestReloadConfig{
+					GreenPct:          50,
+					RedPct:            20,
+					MinBufferMemoryMB: 128,
+					MaxBufferMemoryMB: 0,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "green not greater than red",
+			payload: &config.ReloadPayload{
+				Ingest: &config.IngestReloadConfig{
+					GreenPct:          20,
+					RedPct:            20,
+					MinBufferMemoryMB: 128,
+				},
+			},
+			wantErr: true,
+			errMsg:  "must be > red_pct",
+		},
+		{
+			name: "green less than red",
+			payload: &config.ReloadPayload{
+				Ingest: &config.IngestReloadConfig{
+					GreenPct:          15,
+					RedPct:            20,
+					MinBufferMemoryMB: 128,
+				},
+			},
+			wantErr: true,
+			errMsg:  "must be > red_pct",
+		},
+		{
+			name: "min buffer too small",
+			payload: &config.ReloadPayload{
+				Ingest: &config.IngestReloadConfig{
+					GreenPct:          50,
+					RedPct:            20,
+					MinBufferMemoryMB: 1,
+				},
+			},
+			wantErr: true,
+			errMsg:  "must be >= 16",
+		},
+		{
+			name: "max less than min",
+			payload: &config.ReloadPayload{
+				Ingest: &config.IngestReloadConfig{
+					GreenPct:          50,
+					RedPct:            20,
+					MinBufferMemoryMB: 256,
+					MaxBufferMemoryMB: 128,
+				},
+			},
+			wantErr: true,
+			errMsg:  "must be >= min_buffer_memory_mb",
+		},
+		{
+			name: "max equal to min (ok)",
+			payload: &config.ReloadPayload{
+				Ingest: &config.IngestReloadConfig{
+					GreenPct:          50,
+					RedPct:            20,
+					MinBufferMemoryMB: 256,
+					MaxBufferMemoryMB: 256,
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+			m := NewMemoryMonitor(MemoryMonitorConfig{
+				GreenPct:          50,
+				RedPct:            20,
+				MinBufferMemoryMB: 128,
+			}, 0, logger)
+
+			err := m.ValidateConfig(tt.payload)
+			if tt.wantErr && err == nil {
+				t.Errorf("expected error containing '%s', got nil", tt.errMsg)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("expected no error, got %v", err)
+			}
+			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("expected error containing '%s', got '%s'", tt.errMsg, err.Error())
+			}
+		})
+	}
+}
+
+func TestMemoryMonitor_ReloadConfig(t *testing.T) {
+	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+	m := NewMemoryMonitor(MemoryMonitorConfig{
+		GreenPct:          50,
+		RedPct:            20,
+		MinBufferMemoryMB: 128,
+	}, 0, logger)
+
+	if m.PressureLevel() != PressureGreen {
+		t.Fatalf("initial pressure should be green, got %d", m.PressureLevel())
+	}
+
+	payload := &config.ReloadPayload{
+		Ingest: &config.IngestReloadConfig{
+			GreenPct:          60,
+			RedPct:            55,
+			MinBufferMemoryMB: 256,
+			MaxBufferMemoryMB: 0,
+		},
+	}
+
+	if err := m.ReloadConfig(payload); err != nil {
+		t.Fatalf("ReloadConfig failed: %v", err)
+	}
+
+	if int(m.greenPct.Load()) != 60 {
+		t.Errorf("expected greenPct=60, got %d", m.greenPct.Load())
+	}
+	if int(m.redPct.Load()) != 55 {
+		t.Errorf("expected redPct=55, got %d", m.redPct.Load())
+	}
+	if m.MinBufferBytes() != 256*1024*1024 {
+		t.Errorf("expected minBufferBytes=%d, got %d", 256*1024*1024, m.MinBufferBytes())
+	}
+}
+
+func TestMemoryMonitor_CheckAfterReload(t *testing.T) {
+	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+	m := &MemoryMonitor{
+		cfg:         MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
+		totalMemory: 1000,
+		logger:      logger,
+	}
+	m.greenPct.Store(50)
+	m.redPct.Store(20)
+	m.bufferLimit.Store(128 * 1024 * 1024)
+
+	m.getAvailableMem = func() uint64 { return 400 }
+	if level := m.check(); level != PressureYellow {
+		t.Errorf("before reload: expected yellow (400/1000=40%%), got %d", level)
+	}
+
+	m.greenPct.Store(30)
+	m.redPct.Store(10)
+
+	if level := m.check(); level != PressureGreen {
+		t.Errorf("after reload: expected green (400/1000=40%% > 30%%), got %d", level)
+	}
+
+	m.getAvailableMem = func() uint64 { return 50 }
+	if level := m.check(); level != PressureRed {
+		t.Errorf("after reload: expected red (50/1000=5%% < 10%%), got %d", level)
+	}
+}
+
+func TestMemoryMonitor_BufferLimitAfterReload(t *testing.T) {
+	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+
+	m := &MemoryMonitor{
+		cfg:         MemoryMonitorConfig{MinBufferMemoryMB: 128},
+		totalMemory: 16 * 1024 * 1024 * 1024,
+		duckdbLimit: 4 * 1024 * 1024 * 1024,
+		logger:      logger,
+	}
+	m.greenPct.Store(50)
+	m.redPct.Store(20)
+	m.minBufferBytes.Store(128 * 1024 * 1024)
+	m.bufferLimit.Store(m.computeBufferLimitFor(0))
+
+	if limit := m.BufferLimit(); limit != 4*1024*1024*1024 {
+		t.Fatalf("initial limit: expected 4GB, got %d", limit)
+	}
+
+	m.bufferLimit.Store(m.computeBufferLimitFor(2048))
+	if limit := m.BufferLimit(); limit != 2*1024*1024*1024 {
+		t.Errorf("after manual reload: expected 2GB, got %d", limit)
+	}
+
+	m.bufferLimit.Store(m.computeBufferLimitFor(0))
+	if limit := m.BufferLimit(); limit != 4*1024*1024*1024 {
+		t.Errorf("after auto reload: expected 4GB, got %d", limit)
+	}
 }
