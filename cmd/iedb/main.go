@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 
 	"iedb/internal/api"
@@ -362,6 +364,24 @@ func main() {
 		// 4. Query rewriter (transparent Parquet + buffer UNION queries)
 		queryRewriter := query.NewQueryRewriter(arrowViewMgr)
 		_ = queryRewriter // held for future direct use; currently integrated via buildReadParquetExpr
+
+		// === SIGHUP 配置热加载 ===
+		reloadCoordinator := config.NewReloadCoordinator(
+			cfg.ConfigFilePath,
+			logger.Get("config-reloader"),
+		)
+		reloadCoordinator.Register("memory-monitor", memoryMonitor)
+		reloadCoordinator.Register("adaptive-flush", adaptiveEngine)
+
+		sighupCh := make(chan os.Signal, 1)
+		signal.Notify(sighupCh, syscall.SIGHUP)
+		go func() {
+			for range sighupCh {
+				if err := reloadCoordinator.Reload(); err != nil {
+					log.Warn().Err(err).Msg("配置热加载失败")
+				}
+			}
+		}()
 
 	// After ArrowBuffer flushes (priority 30) but before WAL closes (priority 40),
 	// purge WAL files since all data has been flushed to storage.
@@ -1698,6 +1718,7 @@ func main() {
 
 	// Wait for shutdown signal
 	sig := shutdownCoordinator.WaitForSignal()
+	signal.Stop(sighupCh) // 停止 SIGHUP 监听，防止 shutdown 期间热加载
 	log.Info().Str("signal", sig.String()).Msg("Initiating graceful shutdown...")
 
 	// Perform graceful shutdown of all components
