@@ -377,17 +377,19 @@ func main() {
 		sighupCh := make(chan os.Signal, 1)
 		signal.Notify(sighupCh, syscall.SIGHUP)
 		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Error().Interface("panic", r).Msg("SIGHUP hot reload panicked")
-				}
-			}()
 			for {
 				select {
 				case <-sighupCh:
-					if err := reloadCoordinator.Reload(); err != nil {
-						log.Warn().Err(err).Msg("config hot reload failed")
-					}
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								log.Error().Interface("panic", r).Msg("SIGHUP reload panicked")
+							}
+						}()
+						if err := reloadCoordinator.Reload(); err != nil {
+							log.Warn().Err(err).Msg("config hot reload failed")
+						}
+					}()
 				case <-doneCh:
 					return
 				}
