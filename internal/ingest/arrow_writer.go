@@ -2039,6 +2039,7 @@ func (b *ArrowBuffer) tryBoolZeroCopy(col []interface{}) ([]bool, bool) {
 // to expire, eliminating the phase-misalignment lag of a fixed-period ticker.
 func (b *ArrowBuffer) periodicFlush() {
 	defer b.wg.Done()
+	var cycleCount int64
 
 	for {
 		// If adaptive flush engine is active, it owns all age-based flushing.
@@ -2078,6 +2079,10 @@ func (b *ArrowBuffer) periodicFlush() {
 			// Rearm the timer for the next oldest buffer expiry.
 			b.flushDeadline = b.computeNextFlushDeadline()
 			b.flushTimer.Reset(time.Until(b.flushDeadline))
+			cycleCount++
+			if cycleCount%30 == 0 {
+				b.gcEmptyEntries()
+			}
 		}
 	}
 }
@@ -2110,6 +2115,34 @@ func (b *ArrowBuffer) computeNextFlushDeadline() time.Time {
 		return now.Add(time.Millisecond)
 	}
 	return earliest
+}
+
+// gcEmptyEntries removes buffer entries that have been empty (no batches)
+// for longer than 2x maxBufferAge. These are schema-cache shells whose
+// measurement hasn't been written to recently. The factor of 2 provides
+// a safety margin so entries aren't collected between frequent flushes.
+func (b *ArrowBuffer) gcEmptyEntries() {
+	threshold := b.maxBufferAge * 2
+	now := time.Now().UTC()
+	var cleaned int
+
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.Lock()
+		for key, entry := range shard.buffers {
+			if len(entry.batches) == 0 && now.Sub(entry.startTime) > threshold {
+				delete(shard.buffers, key)
+				cleaned++
+			}
+		}
+		shard.mu.Unlock()
+	}
+
+	if cleaned > 0 {
+		b.logger.Debug().
+			Int("cleaned", cleaned).
+			Msg("GC cleaned empty buffer entries")
+	}
 }
 
 // flushAgedBuffers flushes buffers that have exceeded max age
