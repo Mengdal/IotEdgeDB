@@ -565,9 +565,9 @@ type flushTask struct {
 	database    string
 	measurement string
 	records     []interface{}
-	recordCount  int
-	arrowSchema  *arrow.Schema // cached schema from bufferEntry
-	trigger      string        // "size", "age", "hard_limit", or "manual"
+	recordCount int
+	arrowSchema *arrow.Schema // cached schema from bufferEntry
+	trigger     string        // "size", "age", "hard_limit", or "manual"
 }
 
 // WALWriter interface for Write-Ahead Log support
@@ -793,6 +793,9 @@ func (b *ArrowBuffer) flushTypeConflicts(baseKey, newSig string) {
 		shard.mu.Lock()
 		var conflictKeys []string
 		for key, entry := range shard.buffers {
+			if entry.isEmpty() {
+				continue
+			}
 			if strings.HasPrefix(key, prefix) && hasTypeConflict(entry.schema, newSig) {
 				conflictKeys = append(conflictKeys, key)
 			}
@@ -1465,6 +1468,10 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		case b.newBufferCh <- struct{}{}:
 		default:
 		}
+	} else if entry.isEmpty() {
+		entry.startTime = time.Now().UTC()
+		entry.recordCount = 0
+		entry.estimatedBytes = 0
 	}
 	// Infer Arrow schema eagerly on first entry creation.
 	if entry.arrowSchema == nil && len(typedColumns.Data) > 0 {
@@ -1606,8 +1613,11 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		case b.newBufferCh <- struct{}{}:
 		default:
 		}
+	} else if entry.isEmpty() {
+		entry.startTime = time.Now().UTC()
+		entry.recordCount = 0
+		entry.estimatedBytes = 0
 	}
-	// Infer Arrow schema eagerly on first entry creation.
 	if entry.arrowSchema == nil && len(typedColumns.Data) > 0 {
 		tagCols := typedColumns.TagColumns
 		decCols := b.getDecimalColumns(measurement)
@@ -2085,6 +2095,9 @@ func (b *ArrowBuffer) computeNextFlushDeadline() time.Time {
 	for _, shard := range b.shards {
 		shard.mu.RLock()
 		for _, entry := range shard.buffers {
+			if entry.isEmpty() {
+				continue
+			}
 			if expiry := entry.startTime.Add(maxAge); expiry.Before(earliest) {
 				earliest = expiry
 			}
@@ -2117,6 +2130,9 @@ func (b *ArrowBuffer) flushAgedBuffers() {
 		shard.mu.Lock()
 		var agedKeys []string
 		for key, entry := range shard.buffers {
+			if entry.isEmpty() {
+				continue
+			}
 			age := now.Sub(entry.startTime)
 			if age >= threshold {
 				agedKeys = append(agedKeys, key)
@@ -2258,7 +2274,10 @@ func (b *ArrowBuffer) AllBufferKeys() []string {
 	for i := uint32(0); i < b.shardCount; i++ {
 		shard := b.shards[i]
 		shard.mu.RLock()
-		for key := range shard.buffers {
+		for key, entry := range shard.buffers {
+			if entry.isEmpty() {
+				continue
+			}
 			keys = append(keys, key)
 		}
 		shard.mu.RUnlock()
@@ -2457,15 +2476,29 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	// Only restore if the bufferKey doesn't already have new data
-	if _, exists := shard.buffers[bufferKey]; !exists {
+	// Only restore if the bufferKey doesn't already have new data, or
+	// the existing entry is an empty shell (preserve cached schema).
+	entry, exists := shard.buffers[bufferKey]
+	if !exists || entry.isEmpty() {
+		var retainedArrowSchema *arrow.Schema
+		var retainedSchemaStr string
+		if entry != nil {
+			retainedArrowSchema = entry.arrowSchema
+			retainedSchemaStr = entry.schema
+		}
+		if retainedArrowSchema == nil {
+			retainedArrowSchema = arrowSchema
+		}
+		if retainedSchemaStr == "" {
+			retainedSchemaStr = schema
+		}
 		shard.buffers[bufferKey] = &bufferEntry{
 			batches:        typedBatches,
 			startTime:      time.Now(), // reset timer: retry on next adaptive cycle
 			recordCount:    recordCount,
 			estimatedBytes: estimatedBytes,
-			schema:         schema,
-			arrowSchema:    arrowSchema,
+			schema:         retainedSchemaStr,
+			arrowSchema:    retainedArrowSchema,
 		}
 	}
 }
@@ -2832,9 +2865,9 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 	}
 
 	// Clear buffer immediately
-		entry.batches = nil
-		entry.recordCount = 0
-		entry.estimatedBytes = 0
+	entry.batches = nil
+	entry.recordCount = 0
+	entry.estimatedBytes = 0
 
 	// Release lock before expensive operations
 	shard.mu.Unlock()
@@ -3589,7 +3622,10 @@ func (b *ArrowBuffer) FlushAll(ctx context.Context) error {
 
 		// Copy keys to avoid modifying map while iterating
 		keys := make([]string, 0, len(shard.buffers))
-		for key := range shard.buffers {
+		for key, entry := range shard.buffers {
+			if entry.isEmpty() {
+				continue
+			}
 			keys = append(keys, key)
 		}
 
@@ -3671,7 +3707,10 @@ func (b *ArrowBuffer) Close() error {
 		// Copy keys to avoid modifying map while iterating
 		// (flushBufferLocked releases and re-acquires the lock during I/O)
 		keys := make([]string, 0, len(shard.buffers))
-		for key := range shard.buffers {
+		for key, entry := range shard.buffers {
+			if entry.isEmpty() {
+				continue
+			}
 			keys = append(keys, key)
 		}
 
