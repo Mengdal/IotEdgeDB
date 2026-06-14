@@ -70,8 +70,6 @@ func getFlushMessageType(flushType string) string {
 // a critical error instead.
 type ctxKeyRestoreFallback struct{}
 
-
-
 // ArrowWriter handles Arrow schema inference and Parquet writing
 type ArrowWriter struct {
 	compression     compress.Compression
@@ -82,7 +80,7 @@ type ArrowWriter struct {
 	// Pre-built Parquet writer properties (immutable after construction)
 	writerProps *parquet.WriterProperties
 	arrowProps  pqarrow.ArrowWriterProperties
-	logger zerolog.Logger
+	logger      zerolog.Logger
 }
 
 // NewArrowWriter creates a new Arrow writer
@@ -99,7 +97,6 @@ func NewArrowWriter(cfg *config.IngestConfig, logger zerolog.Logger) *ArrowWrite
 	default:
 		comp = compress.Codecs.Snappy
 	}
-
 
 	// Pre-build Parquet writer properties once — they are immutable config objects
 	// that do not change after startup. Rebuilding them on every flush wastes CPU.
@@ -256,7 +253,6 @@ func sortColumnsTimeFirst(colNames []string) {
 // Schema Inference
 // =============================================================================
 
-
 // inferSchema infers Arrow schema from columnar data.
 // tagColumns optionally lists which columns are tags (stored as schema metadata for compaction dedup).
 // decimalCols optionally maps column names to DecimalSpec for Decimal128 columns.
@@ -337,7 +333,7 @@ func (w *ArrowWriter) inferSchema(columns map[string]interface{}, tagColumns []s
 // tagColumns optionally lists which columns are tags (stored as Parquet metadata for compaction dedup).
 // decimalCols optionally maps column names to DecimalSpec for Decimal128 type inference.
 func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement string, columns map[string]interface{}, validity map[string][]bool, tagColumns []string, decimalCols map[string]config.DecimalSpec) ([]byte, error) {
-	// Get or infer schema (with caching)
+	// Get or infer Arrow schema for columnar data.
 	schema, err := w.getSchema(measurement, columns, tagColumns, decimalCols)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get schema: %w", err)
@@ -2588,7 +2584,7 @@ func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database
 			b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_OK control record")
 		}
 	}
-		return true
+	return true
 }
 
 // flushWithDataTimePartitioning partitions data by data timestamps (async path)
@@ -3672,15 +3668,15 @@ func (b *ArrowBuffer) GetStats() map[string]interface{} {
 
 	// Read atomic values (lock-free!)
 	return map[string]interface{}{
-		"total_records_buffered":      b.totalRecordsBuffered.Load(),
-		"total_records_written":       b.totalRecordsWritten.Load(),
-		"total_flushes":               b.totalFlushes.Load(),
-		"total_errors":                b.totalErrors.Load(),
-		"total_wal_errors":            b.totalWALErrors.Load(),
-		"total_wal_dropped":  b.totalWALDropped.Load(),
-		"active_buffers":     activeBuffers,
-		"flush_queue_depth":           b.queueDepth.Load(),
-		"flush_workers":               b.flushWorkers,
+		"total_records_buffered": b.totalRecordsBuffered.Load(),
+		"total_records_written":  b.totalRecordsWritten.Load(),
+		"total_flushes":          b.totalFlushes.Load(),
+		"total_errors":           b.totalErrors.Load(),
+		"total_wal_errors":       b.totalWALErrors.Load(),
+		"total_wal_dropped":      b.totalWALDropped.Load(),
+		"active_buffers":         activeBuffers,
+		"flush_queue_depth":      b.queueDepth.Load(),
+		"flush_workers":          b.flushWorkers,
 	}
 }
 
