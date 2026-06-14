@@ -70,132 +70,7 @@ func getFlushMessageType(flushType string) string {
 // a critical error instead.
 type ctxKeyRestoreFallback struct{}
 
-// schemaCacheEntry holds a cached schema with LRU tracking
-type schemaCacheEntry struct {
-	schema     *arrow.Schema
-	key        string
-	prev, next *schemaCacheEntry
-}
 
-// schemaLRUCache is a thread-safe LRU cache for Arrow schemas
-type schemaLRUCache struct {
-	capacity int
-	cache    map[string]*schemaCacheEntry
-	head     *schemaCacheEntry // Most recently used
-	tail     *schemaCacheEntry // Least recently used
-	mu       sync.RWMutex
-	hits     int64
-	misses   int64
-}
-
-// newSchemaLRUCache creates a new LRU cache with given capacity
-func newSchemaLRUCache(capacity int) *schemaLRUCache {
-	return &schemaLRUCache{
-		capacity: capacity,
-		cache:    make(map[string]*schemaCacheEntry),
-	}
-}
-
-// get retrieves a schema from cache, returns nil if not found
-func (c *schemaLRUCache) get(key string) *arrow.Schema {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	entry, ok := c.cache[key]
-	if !ok {
-		c.misses++
-		return nil
-	}
-
-	// Move to front (most recently used)
-	c.moveToFront(entry)
-	c.hits++
-	return entry.schema
-}
-
-// set adds or updates a schema in cache
-func (c *schemaLRUCache) set(key string, schema *arrow.Schema) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Check if already exists
-	if entry, ok := c.cache[key]; ok {
-		entry.schema = schema
-		c.moveToFront(entry)
-		return
-	}
-
-	// Create new entry
-	entry := &schemaCacheEntry{
-		schema: schema,
-		key:    key,
-	}
-
-	// Add to cache
-	c.cache[key] = entry
-	c.addToFront(entry)
-
-	// Evict if over capacity
-	if len(c.cache) > c.capacity {
-		c.evictLRU()
-	}
-}
-
-// moveToFront moves an entry to the front of the list
-func (c *schemaLRUCache) moveToFront(entry *schemaCacheEntry) {
-	if entry == c.head {
-		return // Already at front
-	}
-
-	// Remove from current position
-	c.removeEntry(entry)
-
-	// Add to front
-	c.addToFront(entry)
-}
-
-// addToFront adds an entry to the front of the list
-func (c *schemaLRUCache) addToFront(entry *schemaCacheEntry) {
-	entry.prev = nil
-	entry.next = c.head
-
-	if c.head != nil {
-		c.head.prev = entry
-	}
-	c.head = entry
-
-	if c.tail == nil {
-		c.tail = entry
-	}
-}
-
-// removeEntry removes an entry from the list
-func (c *schemaLRUCache) removeEntry(entry *schemaCacheEntry) {
-	if entry.prev != nil {
-		entry.prev.next = entry.next
-	} else {
-		c.head = entry.next
-	}
-
-	if entry.next != nil {
-		entry.next.prev = entry.prev
-	} else {
-		c.tail = entry.prev
-	}
-}
-
-// evictLRU removes the least recently used entry
-func (c *schemaLRUCache) evictLRU() {
-	if c.tail == nil {
-		return
-	}
-
-	// Remove from cache map
-	delete(c.cache, c.tail.key)
-
-	// Remove from list
-	c.removeEntry(c.tail)
-}
 
 // ArrowWriter handles Arrow schema inference and Parquet writing
 type ArrowWriter struct {
@@ -207,9 +82,6 @@ type ArrowWriter struct {
 	// Pre-built Parquet writer properties (immutable after construction)
 	writerProps *parquet.WriterProperties
 	arrowProps  pqarrow.ArrowWriterProperties
-	// LRU Schema cache (measurement -> schema) with bounded size
-	schemaCache *schemaLRUCache
-
 	logger zerolog.Logger
 }
 
@@ -228,9 +100,6 @@ func NewArrowWriter(cfg *config.IngestConfig, logger zerolog.Logger) *ArrowWrite
 		comp = compress.Codecs.Snappy
 	}
 
-	// Schema cache capacity - 1000 schemas is ~100-200KB memory
-	// Most deployments have <100 unique measurement/schema combinations
-	const schemaCacheCapacity = 1000
 
 	// Pre-build Parquet writer properties once — they are immutable config objects
 	// that do not change after startup. Rebuilding them on every flush wastes CPU.
@@ -249,7 +118,6 @@ func NewArrowWriter(cfg *config.IngestConfig, logger zerolog.Logger) *ArrowWrite
 		dataPageVersion: cfg.DataPageVersion,
 		writerProps:     parquet.NewWriterProperties(writerOpts...),
 		arrowProps:      pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema()),
-		schemaCache:     newSchemaLRUCache(schemaCacheCapacity),
 		logger:          logger.With().Str("component", "arrow-writer").Logger(),
 	}
 }
@@ -388,66 +256,6 @@ func sortColumnsTimeFirst(colNames []string) {
 // Schema Inference
 // =============================================================================
 
-// getSchema gets or infers Arrow schema for columnar data (LRU cached per measurement)
-func (w *ArrowWriter) getSchema(measurement string, columns map[string]interface{}, tagColumns []string, decimalCols map[string]config.DecimalSpec) (*arrow.Schema, error) {
-	// Create cache key from column names and types
-	var colNames []string
-	var typeNames []string
-
-	for name := range columns {
-		if name[0] == '_' {
-			continue // Skip internal columns
-		}
-		colNames = append(colNames, name)
-	}
-
-	// Get type signatures
-	for _, name := range colNames {
-		col := columns[name]
-		switch col.(type) {
-		case []int64:
-			if name == "time" {
-				typeNames = append(typeNames, "timestamp")
-			} else {
-				typeNames = append(typeNames, "int64")
-			}
-		case []float64:
-			typeNames = append(typeNames, "float64")
-		case []string:
-			typeNames = append(typeNames, "string")
-		case []bool:
-			typeNames = append(typeNames, "bool")
-		case []decimal128.Num:
-			typeNames = append(typeNames, "decimal128")
-		default:
-			typeNames = append(typeNames, "unknown")
-		}
-	}
-
-	// Create cache key (includes tag columns to ensure metadata correctness)
-	cacheKey := fmt.Sprintf("%s:%v:%v:%v", measurement, colNames, typeNames, tagColumns)
-
-	// Check LRU cache
-	if schema := w.schemaCache.get(cacheKey); schema != nil {
-		return schema, nil
-	}
-
-	// Cache miss - infer schema
-	schema, err := w.inferSchema(columns, tagColumns, decimalCols)
-	if err != nil {
-		return nil, err
-	}
-
-	// Store in LRU cache
-	w.schemaCache.set(cacheKey, schema)
-
-	w.logger.Debug().
-		Str("measurement", measurement).
-		Str("cache_key", cacheKey).
-		Msg("Schema cache miss, inferred and cached")
-
-	return schema, nil
-}
 
 // inferSchema infers Arrow schema from columnar data.
 // tagColumns optionally lists which columns are tags (stored as schema metadata for compaction dedup).
