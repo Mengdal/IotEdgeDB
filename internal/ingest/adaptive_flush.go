@@ -60,14 +60,9 @@ func (e *AdaptiveFlushEngine) Run(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	// 空壳 GC 间隔与淘汰阈值一致 (maxAge * 2)。
-	// 小于 1 分钟时兜底为 5 分钟，避免 maxAge 配置过小导致 GC 过频。
-	gcInterval := time.Duration(e.maxAge.Load()) * 2
-	if gcInterval < 5*time.Minute {
-		gcInterval = 5 * time.Minute
-	}
-	gcTicker := time.NewTicker(gcInterval)
-	defer gcTicker.Stop()
+	// GC timer re-reads maxAge on each cycle for hot-reload support.
+	gcTimer := time.NewTimer(time.Duration(e.maxAge.Load()) * 2)
+	defer gcTimer.Stop()
 
 	for {
 		select {
@@ -75,8 +70,13 @@ func (e *AdaptiveFlushEngine) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			e.evaluate()
-		case <-gcTicker.C:
+		case <-gcTimer.C:
 			e.buffer.gcEmptyEntries()
+			nextGC := time.Duration(e.maxAge.Load()) * 2
+			if nextGC < 5*time.Minute {
+				nextGC = 5 * time.Minute
+			}
+			gcTimer.Reset(nextGC)
 		}
 	}
 }
@@ -140,6 +140,9 @@ func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 		shard := e.buffer.shards[i]
 		shard.mu.RLock()
 		for key, entry := range shard.buffers {
+			if entry.isEmpty() {
+				continue
+			}
 			e.candidatesBuf = append(e.candidatesBuf, flushCandidate{
 				shardIdx:       int(i),
 				bufferKey:      key,
@@ -252,12 +255,14 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 		records:     records,
 		recordCount: recordCount,
 		trigger:     trigger,
+		arrowSchema: entry.arrowSchema,
 	}
 	outcome := e.buffer.tryEnqueueFlush(task, flushCancel, c.bufferKey, recordCount)
 
 	if outcome == flushQueued {
-		// Only delete after confirmed enqueue.
-		delete(shard.buffers, c.bufferKey)
+		entry.batches = nil
+		entry.recordCount = 0
+		entry.estimatedBytes = 0
 	}
 	shard.mu.Unlock()
 }

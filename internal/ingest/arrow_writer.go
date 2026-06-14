@@ -803,7 +803,7 @@ func (b *ArrowBuffer) flushTypeConflicts(baseKey, newSig string) {
 			// or deleted between collection and now.
 			shard.mu.Lock()
 			entry, exists := shard.buffers[key]
-			if !exists || !hasTypeConflict(entry.schema, newSig) {
+			if !exists || entry.isEmpty() || !hasTypeConflict(entry.schema, newSig) {
 				shard.mu.Unlock()
 				continue
 			}
@@ -1456,6 +1456,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		entry.startTime = time.Now().UTC()
 		entry.recordCount = 0
 		entry.estimatedBytes = 0
+		entry.refreshIndex = 0
 	}
 	// Infer Arrow schema eagerly on first entry creation.
 	if entry.arrowSchema == nil && len(typedColumns.Data) > 0 {
@@ -1596,6 +1597,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		entry.startTime = time.Now().UTC()
 		entry.recordCount = 0
 		entry.estimatedBytes = 0
+		entry.refreshIndex = 0
 	}
 	if entry.arrowSchema == nil && len(typedColumns.Data) > 0 {
 		tagCols := typedColumns.TagColumns
@@ -2082,10 +2084,6 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 				Int64("queue_depth", b.queueDepth.Load()).
 				Msg("Worker processing flush task")
 
-			// Execute flush and gate post-flush cleanup on success.
-			// On failure, data was restored to buffer — skip OnFlushComplete
-			// (old VIEW is stale; new VIEW is created by the restore path)
-			// and skip RecordBufferFlushRecords (inflating metrics).
 			// Execute flush and gate post-flush cleanup on success.
 			// On failure, data was restored to buffer — skip OnFlushComplete
 			// (old VIEW is stale; new VIEW is created by the restore path)
