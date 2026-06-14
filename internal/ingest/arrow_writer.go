@@ -2039,7 +2039,6 @@ func (b *ArrowBuffer) tryBoolZeroCopy(col []interface{}) ([]bool, bool) {
 // to expire, eliminating the phase-misalignment lag of a fixed-period ticker.
 func (b *ArrowBuffer) periodicFlush() {
 	defer b.wg.Done()
-	var cycleCount int64
 
 	for {
 		// If adaptive flush engine is active, it owns all age-based flushing.
@@ -2079,10 +2078,6 @@ func (b *ArrowBuffer) periodicFlush() {
 			// Rearm the timer for the next oldest buffer expiry.
 			b.flushDeadline = b.computeNextFlushDeadline()
 			b.flushTimer.Reset(time.Until(b.flushDeadline))
-			cycleCount++
-			if cycleCount%30 == 0 {
-				b.gcEmptyEntries()
-			}
 		}
 	}
 }

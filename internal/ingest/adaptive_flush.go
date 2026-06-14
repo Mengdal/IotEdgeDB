@@ -60,12 +60,23 @@ func (e *AdaptiveFlushEngine) Run(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	// 空壳 GC 间隔与淘汰阈值一致 (maxAge * 2)。
+	// 小于 1 分钟时兜底为 5 分钟，避免 maxAge 配置过小导致 GC 过频。
+	gcInterval := time.Duration(e.maxAge.Load()) * 2
+	if gcInterval < 5*time.Minute {
+		gcInterval = 5 * time.Minute
+	}
+	gcTicker := time.NewTicker(gcInterval)
+	defer gcTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			e.evaluate()
+		case <-gcTicker.C:
+			e.buffer.gcEmptyEntries()
 		}
 	}
 }
