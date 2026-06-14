@@ -506,7 +506,15 @@ type bufferEntry struct {
 	recordCount    int                 // total record count
 	estimatedBytes uint64              // estimated memory usage
 	schema         string              // column signature for schema evolution
+	arrowSchema    *arrow.Schema       // inferred Arrow schema (nil until first flush preparation)
 	refreshIndex   int                 // Arrow VIEW incremental refresh cursor
+}
+
+// isEmpty returns true when the entry has no buffered data batches.
+// Such entries are "empty shells" kept to preserve the cached arrowSchema
+// across flush cycles — they are eligible for GC after extended idleness.
+func (e *bufferEntry) isEmpty() bool {
+	return len(e.batches) == 0
 }
 
 type bufferShard struct {
