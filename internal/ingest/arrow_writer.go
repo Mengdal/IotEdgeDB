@@ -332,11 +332,14 @@ func (w *ArrowWriter) inferSchema(columns map[string]interface{}, tagColumns []s
 // Columns without a validity entry (or when validity is nil) are treated as fully valid.
 // tagColumns optionally lists which columns are tags (stored as Parquet metadata for compaction dedup).
 // decimalCols optionally maps column names to DecimalSpec for Decimal128 type inference.
-func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement string, columns map[string]interface{}, validity map[string][]bool, tagColumns []string, decimalCols map[string]config.DecimalSpec) ([]byte, error) {
-	// Get or infer Arrow schema for columnar data.
-	schema, err := w.getSchema(measurement, columns, tagColumns, decimalCols)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get schema: %w", err)
+func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement string, columns map[string]interface{}, validity map[string][]bool, tagColumns []string, decimalCols map[string]config.DecimalSpec, schema *arrow.Schema) ([]byte, error) {
+	// Use provided schema, or infer as fallback (defense-in-depth)
+	if schema == nil {
+		var err error
+		schema, err = w.inferSchema(columns, tagColumns, decimalCols)
+		if err != nil {
+			return nil, fmt.Errorf("failed to infer schema: %w", err)
+		}
 	}
 
 	// Create Arrow arrays from columns
@@ -1462,6 +1465,17 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		default:
 		}
 	}
+	// Infer Arrow schema eagerly on first entry creation.
+	if entry.arrowSchema == nil && len(typedColumns.Data) > 0 {
+		tagCols := record.TagColumns
+		decCols := b.getDecimalColumns(record.Measurement)
+		schema, err := b.writer.inferSchema(typedColumns.Data, tagCols, decCols)
+		if err != nil {
+			shard.mu.Unlock()
+			return fmt.Errorf("failed to infer Arrow schema: %w", err)
+		}
+		entry.arrowSchema = schema
+	}
 
 	// Add typed columns to buffer (already converted via zero-copy fast paths)
 	entry.batches = append(entry.batches, typedColumns)
@@ -1586,6 +1600,17 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		case b.newBufferCh <- struct{}{}:
 		default:
 		}
+	}
+	// Infer Arrow schema eagerly on first entry creation.
+	if entry.arrowSchema == nil && len(typedColumns.Data) > 0 {
+		tagCols := typedColumns.TagColumns
+		decCols := b.getDecimalColumns(measurement)
+		schema, err := b.writer.inferSchema(typedColumns.Data, tagCols, decCols)
+		if err != nil {
+			shard.mu.Unlock()
+			return fmt.Errorf("failed to infer Arrow schema: %w", err)
+		}
+		entry.arrowSchema = schema
 	}
 
 	// Add typed columns to buffer directly (no conversion needed)
@@ -2648,7 +2673,7 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 		// Single hour - sort once and write one file
 		sorted := sortTypedColumnBatchByKeys(merged, sortKeys)
 
-		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols)
+		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols, nil)
 		if err != nil {
 			return fmt.Errorf("failed to write Parquet: %w", err)
 		}
@@ -2716,7 +2741,7 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 		sorted := sortTypedColumnBatchByKeys(hourBatch, sortKeys)
 
 		// Write Parquet file for this hour
-		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols)
+		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols, nil)
 		if err != nil {
 			return fmt.Errorf("failed to write Parquet for hour %d: %w", hourID, err)
 		}
