@@ -565,8 +565,9 @@ type flushTask struct {
 	database    string
 	measurement string
 	records     []interface{}
-	recordCount int
-	trigger     string // "size", "age", "hard_limit", or "manual"
+	recordCount  int
+	arrowSchema  *arrow.Schema // cached schema from bufferEntry
+	trigger      string        // "size", "age", "hard_limit", or "manual"
 }
 
 // WALWriter interface for Write-Ahead Log support
@@ -1507,13 +1508,18 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 			measurement: record.Measurement,
 			records:     recordsToFlush,
 			recordCount: totalBuffered,
+			arrowSchema: entry.arrowSchema,
 		}
 		outcome := b.tryEnqueueFlush(task, flushCancel, bufferKey, totalBuffered)
 
 		if outcome == flushQueued {
-			// Only delete after confirmed enqueue — avoids data loss
-			// when flushQueue is full or buffer is closing.
-			delete(shard.buffers, bufferKey)
+			// Only clear after confirmed enqueue — avoids data loss
+			// when flushQueue is full or buffer is closing.  Keep
+			// the entry as a schema shell so the cached arrowSchema
+			// survives across flush cycles.
+			entry.batches = nil
+			entry.recordCount = 0
+			entry.estimatedBytes = 0
 			shouldFlush = true
 		}
 		// On any non-queued outcome: keep entry in buffer for retry.
@@ -1639,11 +1645,14 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 			measurement: measurement,
 			records:     recordsToFlush,
 			recordCount: totalBuffered,
+			arrowSchema: entry.arrowSchema,
 		}
 		outcome := b.tryEnqueueFlush(task, flushCancel, bufferKey, totalBuffered)
 
 		if outcome == flushQueued {
-			delete(shard.buffers, bufferKey)
+			entry.batches = nil
+			entry.recordCount = 0
+			entry.estimatedBytes = 0
 			shouldFlush = true
 		}
 	}
@@ -2202,7 +2211,7 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 			// On failure, data was restored to buffer — skip OnFlushComplete
 			// (old VIEW is stale; new VIEW is created by the restore path)
 			// and skip RecordBufferFlushRecords (inflating metrics).
-			if b.flushRecordsAsync(task.ctx, task.bufferKey, task.database, task.measurement, task.records, task.recordCount) {
+			if b.flushRecordsAsync(task.ctx, task.bufferKey, task.database, task.measurement, task.records, task.recordCount, task.arrowSchema) {
 				// Notify VIEW manager that flush is complete
 				if b.notifier != nil {
 					b.notifier.OnFlushComplete(task.bufferKey)
@@ -2307,6 +2316,7 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 			records[j] = batch
 		}
 		recordCount := entry.recordCount
+		arrowSchema := entry.arrowSchema
 		delete(shard.buffers, oldestKey)
 		parts := splitBufferKey(oldestKey)
 		shard.mu.Unlock()
@@ -2319,7 +2329,7 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 				Dur("age", now.Sub(oldestTime)).
 				Int("inline_flush", *inlineFlushCount).
 				Msg("Buffer overflow: flushing oldest entry inline")
-			b.flushRecordsAsync(context.Background(), oldestKey, parts[0], parts[1], records, recordCount)
+			b.flushRecordsAsync(context.Background(), oldestKey, parts[0], parts[1], records, recordCount, arrowSchema)
 		} else {
 			if *inlineFlushCount >= maxInlineFlushes {
 				b.logger.Error().
@@ -2378,7 +2388,7 @@ func (b *ArrowBuffer) ensureBufferSpace(newEntryBytes uint64) error {
 
 // restoreBufferEntry rebuilds a bufferEntry from batch references when mergeBatches fails.
 // The entry was deleted by flushCandidate before the task was created; this puts it back.
-func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}) {
+func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}, arrowSchema *arrow.Schema) {
 	if len(batches) == 0 {
 		return
 	}
@@ -2427,7 +2437,7 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 		parts := splitBufferKey(bufferKey)
 		if len(parts) == 2 {
 			ctx := context.WithValue(context.Background(), ctxKeyRestoreFallback{}, true)
-			b.flushRecordsAsync(ctx, bufferKey, parts[0], parts[1], batches, recordCount)
+			b.flushRecordsAsync(ctx, bufferKey, parts[0], parts[1], batches, recordCount, arrowSchema)
 		}
 		return
 	}
@@ -2455,6 +2465,7 @@ func (b *ArrowBuffer) restoreBufferEntry(bufferKey string, batches []interface{}
 			recordCount:    recordCount,
 			estimatedBytes: estimatedBytes,
 			schema:         schema,
+			arrowSchema:    arrowSchema,
 		}
 	}
 }
@@ -2533,7 +2544,7 @@ func (b *ArrowBuffer) writeBackMergedData(ctx context.Context, database, measure
 		}
 		records := []interface{}{merged}
 		ctx := context.WithValue(context.Background(), ctxKeyRestoreFallback{}, true)
-		b.flushRecordsAsync(ctx, bufferKey, database, measurement, records, recordCount)
+		b.flushRecordsAsync(ctx, bufferKey, database, measurement, records, recordCount, nil)
 		return
 	}
 
@@ -2546,7 +2557,7 @@ func (b *ArrowBuffer) writeBackMergedData(ctx context.Context, database, measure
 	}
 }
 
-func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database, measurement string, records []interface{}, recordCount int) (flushed bool) {
+func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database, measurement string, records []interface{}, recordCount int, arrowSchema *arrow.Schema) (flushed bool) {
 	startTime := time.Now()
 
 	// Merge typed column batches
@@ -2563,7 +2574,7 @@ func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database
 		}
 		// mergeBatches failed — restore the original batch references back to buffer.
 		// records has not been nilled yet, batch refs are still valid.
-		b.restoreBufferEntry(bufferKey, records)
+		b.restoreBufferEntry(bufferKey, records, arrowSchema)
 		b.logger.Error().
 			Err(err).
 			Str("buffer_key", bufferKey).
@@ -2578,7 +2589,7 @@ func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database
 	}
 
 	// Flush with data timestamp partitioning
-	if err := b.flushWithDataTimePartitioning(ctx, bufferKey, database, measurement, merged, recordCount, startTime); err != nil {
+	if err := b.flushWithDataTimePartitioning(ctx, bufferKey, database, measurement, merged, recordCount, startTime, arrowSchema); err != nil {
 		// When called from the restoreBufferEntry inline-flush fallback, skip
 		// restore to prevent unbounded recursion. Data remains in WAL.
 		if ctx.Value(ctxKeyRestoreFallback{}) != nil {
@@ -2621,14 +2632,14 @@ func (b *ArrowBuffer) flushRecordsAsync(ctx context.Context, bufferKey, database
 }
 
 // flushWithDataTimePartitioning partitions data by data timestamps (async path)
-func (b *ArrowBuffer) flushWithDataTimePartitioning(ctx context.Context, bufferKey, database, measurement string, merged *TypedColumnBatch, recordCount int, startTime time.Time) error {
-	return b.flushPartitionedData(ctx, bufferKey, database, measurement, merged, recordCount, flushTypeAsync, startTime)
+func (b *ArrowBuffer) flushWithDataTimePartitioning(ctx context.Context, bufferKey, database, measurement string, merged *TypedColumnBatch, recordCount int, startTime time.Time, arrowSchema *arrow.Schema) error {
+	return b.flushPartitionedData(ctx, bufferKey, database, measurement, merged, recordCount, flushTypeAsync, startTime, arrowSchema)
 }
 
 // flushPartitionedData is the shared core logic for partitioning and writing data by hour boundaries
 // Called by both async (flushWithDataTimePartitioning) and sync (flushBufferLockedDataTime) paths
 // Uses hash-based grouping to partition by hour, then sorts each hour independently
-func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, database, measurement string, merged *TypedColumnBatch, recordCount int, flushType string, startTime time.Time) error {
+func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, database, measurement string, merged *TypedColumnBatch, recordCount int, flushType string, startTime time.Time, arrowSchema *arrow.Schema) error {
 	// Get sort keys for this measurement (guaranteed to include "time")
 	sortKeys := b.getSortKeys(measurement)
 
@@ -2673,7 +2684,7 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 		// Single hour - sort once and write one file
 		sorted := sortTypedColumnBatchByKeys(merged, sortKeys)
 
-		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols, nil)
+		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols, arrowSchema)
 		if err != nil {
 			return fmt.Errorf("failed to write Parquet: %w", err)
 		}
@@ -2741,7 +2752,7 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 		sorted := sortTypedColumnBatchByKeys(hourBatch, sortKeys)
 
 		// Write Parquet file for this hour
-		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols, nil)
+		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols, arrowSchema)
 		if err != nil {
 			return fmt.Errorf("failed to write Parquet for hour %d: %w", hourID, err)
 		}
@@ -2821,7 +2832,9 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 	}
 
 	// Clear buffer immediately
-	delete(shard.buffers, bufferKey)
+		entry.batches = nil
+		entry.recordCount = 0
+		entry.estimatedBytes = 0
 
 	// Release lock before expensive operations
 	shard.mu.Unlock()
@@ -2830,14 +2843,14 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 	merged, err := b.mergeBatches(recordsToFlush)
 	if err != nil {
 		// Restore original batch references back to buffer
-		b.restoreBufferEntry(bufferKey, recordsToFlush)
+		b.restoreBufferEntry(bufferKey, recordsToFlush, entry.arrowSchema)
 		shard.mu.Lock() // Re-acquire lock for caller
 		return fmt.Errorf("failed to merge batches: %w", err)
 	}
 
 	// Flush with data timestamp partitioning
 	startTime := time.Now().UTC()
-	if err := b.flushBufferLockedDataTime(ctx, bufferKey, database, measurement, merged, recordCount, startTime); err != nil {
+	if err := b.flushBufferLockedDataTime(ctx, bufferKey, database, measurement, merged, recordCount, startTime, entry.arrowSchema); err != nil {
 		// Put merged data back into buffer
 		b.writeBackMergedData(ctx, database, measurement, merged)
 		b.logger.Warn().
@@ -2877,8 +2890,8 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 }
 
 // flushBufferLockedDataTime flushes with data_time partitioning (sync path)
-func (b *ArrowBuffer) flushBufferLockedDataTime(ctx context.Context, bufferKey, database, measurement string, merged *TypedColumnBatch, recordCount int, startTime time.Time) error {
-	return b.flushPartitionedData(ctx, bufferKey, database, measurement, merged, recordCount, flushTypeSync, startTime)
+func (b *ArrowBuffer) flushBufferLockedDataTime(ctx context.Context, bufferKey, database, measurement string, merged *TypedColumnBatch, recordCount int, startTime time.Time, arrowSchema *arrow.Schema) error {
+	return b.flushPartitionedData(ctx, bufferKey, database, measurement, merged, recordCount, flushTypeSync, startTime, arrowSchema)
 }
 
 // mergeBatches merges multiple column batches into a single TypedColumnBatch.
