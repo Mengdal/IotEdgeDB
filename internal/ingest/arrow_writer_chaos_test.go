@@ -25,15 +25,15 @@ func TestChaos_PressureOscillation_NoThrashing(t *testing.T) {
 
 	storage := &chaosStorage{}
 	buf := NewArrowBuffer(&config.IngestConfig{
-		MaxBufferSize:         50000, // high enough to avoid size-based flush
-		MaxBufferAgeMS:        60000, // long enough to avoid age-based flush
-		Compression:           "none",
-		ShardCount:            8,
-		FlushWorkers:          4,
-		FlushQueueSize:        64,
-		MaxBufferMemoryMB:     0, // auto
-		MinBufferMemoryMB:     64,
-		MaxBufferAgeSeconds:    600,  // 10 min
+		MaxBufferSize:          50000, // high enough to avoid size-based flush
+		MaxBufferAgeMS:         60000, // long enough to avoid age-based flush
+		Compression:            "none",
+		ShardCount:             8,
+		FlushWorkers:           4,
+		FlushQueueSize:         64,
+		MaxBufferMemoryMB:      0, // auto
+		MinBufferMemoryMB:      64,
+		MaxBufferAgeSeconds:    600, // 10 min
 		MemoryPressureGreenPct: 50,
 		MemoryPressureRedPct:   20,
 		MemoryCheckIntervalMS:  100, // fast checks for test
@@ -43,9 +43,9 @@ func TestChaos_PressureOscillation_NoThrashing(t *testing.T) {
 	// Set up adaptive engine with a fast-cycling memory monitor
 	monitor := &MemoryMonitor{
 		cfg: MemoryMonitorConfig{
-			GreenPct:        50,
-			RedPct:          20,
-			CheckIntervalMS: 100,
+			GreenPct:          50,
+			RedPct:            20,
+			CheckIntervalMS:   100,
 			MinBufferMemoryMB: 64,
 		},
 		totalMemory: 10 * 1024 * 1024 * 1024, // 10GB
@@ -70,9 +70,7 @@ func TestChaos_PressureOscillation_NoThrashing(t *testing.T) {
 	engine := NewAdaptiveFlushEngine(buf, monitor, 10*time.Minute, zerolog.Nop())
 	buf.SetAdaptiveFlushEngine(engine)
 	buf.StartAdaptiveFlush()
-	// Note: periodicFlush started in NewArrowBuffer checks b.adaptiveFlush != nil
-	// and goes idle; the write in SetAdaptiveFlushEngine races with that read
-	// but the field is only ever written once (nil → non-nil), so it's benign.
+	// Note: AdaptiveFlushEngine is always active in production and handles all aging.
 
 	// Write continuously while pressure oscillates
 	ctx := context.Background()
@@ -342,8 +340,8 @@ func TestChaos_RapidSchemaChanges(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type chaosStorage struct {
-	mu       sync.Mutex
-	writes   int
+	mu     sync.Mutex
+	writes int
 }
 
 func (s *chaosStorage) Write(ctx context.Context, path string, data []byte) error {
@@ -362,7 +360,7 @@ func (s *chaosStorage) writeCount() int {
 func (s *chaosStorage) WriteReader(ctx context.Context, path string, r io.Reader, size int64) error {
 	return nil
 }
-func (s *chaosStorage) Read(ctx context.Context, path string) ([]byte, error)     { return nil, nil }
+func (s *chaosStorage) Read(ctx context.Context, path string) ([]byte, error)      { return nil, nil }
 func (s *chaosStorage) ReadTo(ctx context.Context, path string, w io.Writer) error { return nil }
 func (s *chaosStorage) Delete(ctx context.Context, path string) error              { return nil }
 func (s *chaosStorage) Exists(ctx context.Context, path string) (bool, error)      { return false, nil }

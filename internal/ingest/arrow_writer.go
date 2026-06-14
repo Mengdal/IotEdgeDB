@@ -612,8 +612,7 @@ type ArrowBuffer struct {
 	// Optional buffer change notifier (injected by database package)
 	notifier BufferChangeNotifier
 
-	// Adaptive flush engine (replaces periodicFlush timer when set).
-	// atomic.Pointer for race-free read in periodicFlush / write paths.
+	// Adaptive flush engine (always active in production).
 	adaptiveFlush atomic.Pointer[AdaptiveFlushEngine]
 
 	// Buffer overflow protection: hard limit in bytes.
@@ -631,12 +630,9 @@ type ArrowBuffer struct {
 	shardCount uint32
 
 	// Background flush
-	ctx           context.Context
-	cancel        context.CancelFunc
-	flushTimer    *time.Timer   // self-adjusting: fires when the oldest buffer is due to expire
-	flushDeadline time.Time     // absolute time when flushTimer will fire; updated whenever the timer is (re)set
-	newBufferCh   chan struct{} // signals periodicFlush that a new buffer was created (used for idle→active wake-up)
-	wg            sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	// OPTIMIZATION: Worker pool for bounded flush concurrency
 	// Prevents goroutine explosion under sustained load
@@ -938,9 +934,6 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		shardCount:           uint32(shardCount),
 		ctx:                  ctx,
 		cancel:               cancel,
-		flushTimer:           time.NewTimer(time.Duration(cfg.MaxBufferAgeMS) * time.Millisecond),
-		flushDeadline:        time.Now().UTC().Add(time.Duration(cfg.MaxBufferAgeMS) * time.Millisecond),
-		newBufferCh:          make(chan struct{}, 1),
 		flushQueue:           make(chan flushTask, queueSize),
 		flushWorkers:         flushWorkers,
 		flushTimeout:         flushTimeout,
@@ -964,10 +957,6 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		buffer.wg.Add(1)
 		go buffer.flushWorker(i)
 	}
-
-	// Start background flush
-	buffer.wg.Add(1)
-	go buffer.periodicFlush()
 
 	buffer.logger.Info().
 		Str("compression", cfg.Compression).
@@ -1463,11 +1452,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 			schema:    newSignature,
 		}
 		shard.buffers[bufferKey] = entry
-		// Tell periodicFlush to recompute its wakeup time for this new buffer.
-		select {
-		case b.newBufferCh <- struct{}{}:
-		default:
-		}
 	} else if entry.isEmpty() {
 		entry.startTime = time.Now().UTC()
 		entry.recordCount = 0
@@ -1608,11 +1592,6 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 			schema:    newSignature,
 		}
 		shard.buffers[bufferKey] = entry
-		// Tell periodicFlush to recompute its wakeup time for this new buffer.
-		select {
-		case b.newBufferCh <- struct{}{}:
-		default:
-		}
 	} else if entry.isEmpty() {
 		entry.startTime = time.Now().UTC()
 		entry.recordCount = 0
@@ -2034,84 +2013,6 @@ func (b *ArrowBuffer) tryBoolZeroCopy(col []interface{}) ([]bool, bool) {
 	return arr, true
 }
 
-// periodicFlush runs in the background and flushes old buffers.
-// It uses a self-adjusting timer that fires exactly when the oldest buffer is due
-// to expire, eliminating the phase-misalignment lag of a fixed-period ticker.
-func (b *ArrowBuffer) periodicFlush() {
-	defer b.wg.Done()
-
-	for {
-		// If adaptive flush engine is active, it owns all age-based flushing.
-		// Sleep until shutdown to avoid duplicate work and lock contention.
-		if b.adaptiveFlush.Load() != nil {
-			select {
-			case <-b.ctx.Done():
-				return
-			}
-		}
-
-		select {
-		case <-b.ctx.Done():
-			return
-
-		case <-b.newBufferCh:
-			// A new buffer was created. Only reset the timer if the oldest
-			// buffer's expiry is earlier than the currently scheduled deadline.
-			// In practice this only triggers the idle→active transition: once
-			// the timer is armed, a new buffer (expiry = now+maxAge) is always
-			// later than any existing buffer's expiry, so the condition is false
-			// and we skip the expensive shard scan entirely.
-			nextDeadline := b.computeNextFlushDeadline()
-			if nextDeadline.Before(b.flushDeadline) {
-				if !b.flushTimer.Stop() {
-					select {
-					case <-b.flushTimer.C:
-					default:
-					}
-				}
-				b.flushDeadline = nextDeadline
-				b.flushTimer.Reset(time.Until(nextDeadline))
-			}
-
-		case <-b.flushTimer.C:
-			b.flushAgedBuffers()
-			// Rearm the timer for the next oldest buffer expiry.
-			b.flushDeadline = b.computeNextFlushDeadline()
-			b.flushTimer.Reset(time.Until(b.flushDeadline))
-		}
-	}
-}
-
-// computeNextFlushDeadline returns the absolute time when the oldest buffered
-// key is due to be flushed. If no buffers exist it returns now+maxAge so the
-// goroutine sleeps until a new buffer signals it via newBufferCh.
-// Returning an absolute time avoids drift from a second time.Now() call at
-// the call site.
-func (b *ArrowBuffer) computeNextFlushDeadline() time.Time {
-	now := time.Now().UTC()
-	maxAge := b.maxBufferAge
-	earliest := now.Add(maxAge) // default when no buffers exist
-
-	for _, shard := range b.shards {
-		shard.mu.RLock()
-		for _, entry := range shard.buffers {
-			if entry.isEmpty() {
-				continue
-			}
-			if expiry := entry.startTime.Add(maxAge); expiry.Before(earliest) {
-				earliest = expiry
-			}
-		}
-		shard.mu.RUnlock()
-	}
-
-	// Clamp to at least 1ms in the future so Reset never gets zero/negative.
-	if earliest.Before(now.Add(time.Millisecond)) {
-		return now.Add(time.Millisecond)
-	}
-	return earliest
-}
-
 // gcEmptyEntries removes buffer entries that have been empty (no batches)
 // for longer than 2x maxBufferAge. These are schema-cache shells whose
 // measurement hasn't been written to recently. The factor of 2 provides
@@ -2137,72 +2038,6 @@ func (b *ArrowBuffer) gcEmptyEntries() {
 		b.logger.Debug().
 			Int("cleaned", cleaned).
 			Msg("GC cleaned empty buffer entries")
-	}
-}
-
-// flushAgedBuffers flushes buffers that have exceeded max age
-func (b *ArrowBuffer) flushAgedBuffers() {
-	now := time.Now().UTC()
-	maxAge := b.maxBufferAge
-
-	threshold := maxAge
-
-	// Iterate over all shards
-	for shardIdx := range b.shards {
-		shard := b.shards[shardIdx]
-
-		// Collect aged keys under the lock, then release before
-		// calling flushBufferLocked.  See flushTypeConflicts for
-		// the full rationale — iterating while the lock is released
-		// causes a fatal concurrent-map panic.
-		shard.mu.Lock()
-		var agedKeys []string
-		for key, entry := range shard.buffers {
-			if entry.isEmpty() {
-				continue
-			}
-			age := now.Sub(entry.startTime)
-			if age >= threshold {
-				agedKeys = append(agedKeys, key)
-			}
-		}
-		shard.mu.Unlock()
-
-		for _, key := range agedKeys {
-			shard.mu.Lock()
-			entry, exists := shard.buffers[key]
-			if !exists {
-				shard.mu.Unlock()
-				continue
-			}
-			if now.Sub(entry.startTime) < threshold {
-				shard.mu.Unlock()
-				continue
-			}
-
-			b.logger.Info().
-				Str("buffer_key", key).
-				Dur("age", now.Sub(entry.startTime)).
-				Dur("threshold", threshold).
-				Int("shard", shardIdx).
-				Msg("Flushing aged buffer")
-
-			// Parse buffer key to get database and measurement
-			parts := splitBufferKey(key)
-			if len(parts) != 2 {
-				b.logger.Error().Str("buffer_key", key).Msg("Invalid buffer key format")
-				shard.mu.Unlock()
-				continue
-			}
-
-			flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
-			if err := b.flushBufferLocked(flushCtx, shard, key, parts[0], parts[1], "age"); err != nil {
-				b.logger.Error().Err(err).Str("buffer_key", key).Msg("Failed to flush aged buffer")
-			}
-			flushCancel()
-			// flushBufferLocked returns with the lock re-acquired.
-			shard.mu.Unlock()
-		}
 	}
 }
 
@@ -3719,9 +3554,7 @@ func (b *ArrowBuffer) Close() error {
 	// unlock observes either the flag (skips send) or the cancelled
 	// ctx (Done arm fires). Either path avoids the panic.
 	b.closing.Store(true)
-	// Stop periodic flush
 	b.cancel()
-	b.flushTimer.Stop()
 
 	// Wait for all workers to finish (they exit via b.ctx.Done())
 	b.wg.Wait()

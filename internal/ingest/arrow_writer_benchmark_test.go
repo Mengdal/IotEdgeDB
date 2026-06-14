@@ -76,7 +76,7 @@ func (s *benchStorage) Write(ctx context.Context, path string, data []byte) erro
 func (s *benchStorage) WriteReader(ctx context.Context, path string, r io.Reader, size int64) error {
 	return nil
 }
-func (s *benchStorage) Read(ctx context.Context, path string) ([]byte, error)     { return nil, nil }
+func (s *benchStorage) Read(ctx context.Context, path string) ([]byte, error)      { return nil, nil }
 func (s *benchStorage) ReadTo(ctx context.Context, path string, w io.Writer) error { return nil }
 func (s *benchStorage) Delete(ctx context.Context, path string) error              { return nil }
 func (s *benchStorage) Exists(ctx context.Context, path string) (bool, error)      { return false, nil }
@@ -338,13 +338,5 @@ func BenchmarkArrowBuffer_TotalBufferedBytes(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buf.TotalBufferedBytes()
-	}
-}
-
-func BenchmarkArrowBuffer_ComputeNextFlushDeadline(b *testing.B) {
-	buf := fakeArrowBufferForBench(b, 32, 500)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		buf.computeNextFlushDeadline()
 	}
 }

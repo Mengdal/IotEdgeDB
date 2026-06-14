@@ -19,13 +19,13 @@ func fakeArrowBufferForTest(t *testing.T) *ArrowBuffer {
 	t.Cleanup(cancel)
 
 	buf := &ArrowBuffer{
-		ctx:         ctx,
-		cancel:      cancel,
-		shards:      make([]*bufferShard, 4),
-		shardCount:  4,
-		flushQueue:  make(chan flushTask, 100),
+		ctx:          ctx,
+		cancel:       cancel,
+		shards:       make([]*bufferShard, 4),
+		shardCount:   4,
+		flushQueue:   make(chan flushTask, 100),
 		flushTimeout: 30 * time.Second,
-		logger:      logger,
+		logger:       logger,
 	}
 	for i := range buf.shards {
 		buf.shards[i] = &bufferShard{
@@ -86,8 +86,8 @@ func TestAdaptiveFlushEngine_FilterExpired(t *testing.T) {
 	engine := NewAdaptiveFlushEngine(buf, monitor, 10*time.Minute, zerolog.Nop())
 
 	// Add entries with different ages
-	addBufferEntry(buf, "db/fresh", 100, 10000, 1*time.Minute)     // not expired
-	addBufferEntry(buf, "db/old", 5000, 500000, 20*time.Minute)     // expired
+	addBufferEntry(buf, "db/fresh", 100, 10000, 1*time.Minute)        // not expired
+	addBufferEntry(buf, "db/old", 5000, 500000, 20*time.Minute)       // expired
 	addBufferEntry(buf, "db/ancient", 10000, 1000000, 60*time.Minute) // expired
 
 	candidates := engine.collectCandidates()
@@ -175,8 +175,8 @@ func TestAdaptiveFlushEngine_MinPerMeasurement(t *testing.T) {
 	engine := NewAdaptiveFlushEngine(buf, monitor, 15*time.Minute, zerolog.Nop())
 	engine.minBufferBytes.Store(10000) // high floor to test skip logic
 
-	addBufferEntry(buf, "db/tiny", 10, 100, time.Minute)     // below minPerMeasurement
-	addBufferEntry(buf, "db/big", 1000, 50000, time.Minute)  // above minPerMeasurement
+	addBufferEntry(buf, "db/tiny", 10, 100, time.Minute)    // below minPerMeasurement
+	addBufferEntry(buf, "db/big", 1000, 50000, time.Minute) // above minPerMeasurement
 
 	candidates := engine.collectCandidates()
 
@@ -209,9 +209,9 @@ func TestAdaptiveFlushEngine_EmptyBuffer(t *testing.T) {
 
 func TestSplitKeyToDBAndMeas(t *testing.T) {
 	tests := []struct {
-		key             string
-		expectedDB      string
-		expectedMeas    string
+		key          string
+		expectedDB   string
+		expectedMeas string
 	}{
 		{"db/measurement", "db", "measurement"},
 		{"default/cpu", "default", "cpu"},

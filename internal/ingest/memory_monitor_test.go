@@ -14,8 +14,8 @@ import (
 func TestMemoryMonitor_PressureLevels(t *testing.T) {
 	t.Run("green when available above green pct", func(t *testing.T) {
 		m := &MemoryMonitor{
-			cfg:         MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
-			totalMemory: 1000,
+			cfg:             MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
+			totalMemory:     1000,
 			getAvailableMem: func() uint64 { return 600 },
 		}
 		m.greenRedPct.Store(int64(50)<<32 | int64(20))
@@ -26,8 +26,8 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 
 	t.Run("yellow when between green and red", func(t *testing.T) {
 		m := &MemoryMonitor{
-			cfg:         MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
-			totalMemory: 1000,
+			cfg:             MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
+			totalMemory:     1000,
 			getAvailableMem: func() uint64 { return 350 },
 		}
 		m.greenRedPct.Store(int64(50)<<32 | int64(20))
@@ -38,8 +38,8 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 
 	t.Run("red when available below red pct", func(t *testing.T) {
 		m := &MemoryMonitor{
-			cfg:         MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
-			totalMemory: 1000,
+			cfg:             MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
+			totalMemory:     1000,
 			getAvailableMem: func() uint64 { return 100 },
 		}
 		m.greenRedPct.Store(int64(50)<<32 | int64(20))
@@ -50,8 +50,8 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 
 	t.Run("red boundary at red pct", func(t *testing.T) {
 		m := &MemoryMonitor{
-			cfg:         MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
-			totalMemory: 1000,
+			cfg:             MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
+			totalMemory:     1000,
 			getAvailableMem: func() uint64 { return 200 },
 		}
 		m.greenRedPct.Store(int64(50)<<32 | int64(20))
@@ -64,8 +64,8 @@ func TestMemoryMonitor_PressureLevels(t *testing.T) {
 
 	t.Run("yellow boundary at green pct", func(t *testing.T) {
 		m := &MemoryMonitor{
-			cfg:         MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
-			totalMemory: 1000,
+			cfg:             MemoryMonitorConfig{GreenPct: 50, RedPct: 20},
+			totalMemory:     1000,
 			getAvailableMem: func() uint64 { return 500 },
 		}
 		m.greenRedPct.Store(int64(50)<<32 | int64(20))
