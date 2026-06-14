@@ -2339,6 +2339,9 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 			shard := b.shards[i]
 			shard.mu.RLock()
 			for key, entry := range shard.buffers {
+				if entry.isEmpty() {
+					continue
+				}
 				if oldestKey == "" || entry.startTime.Before(oldestTime) {
 					oldestShardIdx = i
 					oldestKey = key
@@ -2879,8 +2882,7 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard, bufferKey, database, measurement, trigger string) error {
 	entry, exists := shard.buffers[bufferKey]
 	if !exists || len(entry.batches) == 0 {
-		// Clean up stale tracking entry even if buffer is empty
-		delete(shard.buffers, bufferKey)
+		// Keep empty shell for schema caching; GC will clean if idle too long.
 		// Notify VIEW manager after synchronous flush
 		if b.notifier != nil {
 			b.notifier.OnFlushComplete(bufferKey)
