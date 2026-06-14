@@ -471,7 +471,7 @@ func TestDecimal128_WriteParquetRoundTrip(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	data, err := writer.WriteParquetColumnar(ctx, "trades", columns, nil, nil, decimalCols)
+	data, err := writer.WriteParquetColumnar(ctx, "trades", columns, nil, nil, decimalCols, nil)
 	if err != nil {
 		t.Fatalf("WriteParquetColumnar failed: %v", err)
 	}
@@ -551,9 +551,9 @@ func TestDecimal128_SchemaMetadata(t *testing.T) {
 		"price": {Precision: 18, Scale: 8},
 	}
 
-	schema, err := writer.getSchema("trades", columns, nil, decimalCols)
+	schema, err := writer.inferSchema(columns, nil, decimalCols)
 	if err != nil {
-		t.Fatalf("getSchema failed: %v", err)
+		t.Fatalf("inferSchema failed: %v", err)
 	}
 
 	// Check that iedb:decimals metadata is present
