@@ -1659,15 +1659,17 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	// Get shard for this buffer key (lock sharding)
 	shard := b.getShard(bufferKey)
 
-	var recordsToFlush []interface{}
+	var dataForFlush map[string]interface{}
+	var validityForFlush map[string][]bool
+	var tagColumnsForFlush []string
 	var shouldFlush bool
 
 	shard.mu.Lock()
 
-	// Initialize buffer and record count if needed
 	entry, exists := shard.buffers[bufferKey]
 	if !exists {
 		entry = &bufferEntry{
+			data:      make(map[string]interface{}),
 			startTime: time.Now().UTC(),
 			schema:    newSignature,
 		}
@@ -1689,23 +1691,20 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		entry.arrowSchema = schema
 	}
 
-	// Add typed columns to buffer directly (no conversion needed)
-	entry.batches = append(entry.batches, typedColumns)
+	appendTypedBatchToEntry(entry, typedColumns, numRecords)
 
-	entry.recordCount += numRecords
-	entry.estimatedBytes += uint64(numRecords) * estimateBytesPerRow(typedColumns)
 	totalBuffered := entry.recordCount
 
-	// Check if buffer needs flush (size-based).
-	// When adaptive flush engine is active, it owns all flush decisions and
-	// this fixed-size gate is skipped to allow memory-pressure-driven buffering.
 	if b.adaptiveFlush.Load() == nil && totalBuffered >= b.config.MaxBufferSize {
-		recordsToFlush = make([]interface{}, len(entry.batches))
-		for i, batch := range entry.batches {
-			recordsToFlush[i] = batch
-		}
+		dataForFlush = entry.data
+		validityForFlush = entry.validity
+		tagColumnsForFlush = entry.tagColumns
+		entry.data = make(map[string]interface{})
+		entry.validity = nil
+		entry.tagColumns = nil
+		entry.recordCount = 0
+		entry.estimatedBytes = 0
 
-		// Try to enqueue BEFORE deleting — safe inside lock (non-blocking).
 		flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
 		task := flushTask{
 			ctx:         flushCtx,
@@ -1713,17 +1712,18 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 			bufferKey:   bufferKey,
 			database:    database,
 			measurement: measurement,
-			records:     recordsToFlush,
+			data:        dataForFlush,
+			validity:    validityForFlush,
+			tagColumns:  tagColumnsForFlush,
 			recordCount: totalBuffered,
 			arrowSchema: entry.arrowSchema,
 		}
 		outcome := b.tryEnqueueFlush(task, flushCancel, bufferKey, totalBuffered)
 
 		if outcome == flushQueued {
-			entry.batches = nil
-			entry.recordCount = 0
-			entry.estimatedBytes = 0
 			shouldFlush = true
+		} else {
+			prependFlushDataToEntry(entry, dataForFlush, validityForFlush, tagColumnsForFlush, totalBuffered)
 		}
 	}
 
