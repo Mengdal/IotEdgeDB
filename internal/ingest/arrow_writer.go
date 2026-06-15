@@ -1514,8 +1514,10 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	shard := b.getShard(bufferKey)
 
 	// OPTIMIZATION: Extract-then-flush pattern
-	// Hold lock ONLY to extract records, flush outside lock
-	var recordsToFlush []interface{}
+	// Hold lock ONLY to update entry, flush outside lock
+	var dataForFlush map[string]interface{}
+	var validityForFlush map[string][]bool
+	var tagColumnsForFlush []string
 	var shouldFlush bool
 
 	shard.mu.Lock()
@@ -1524,6 +1526,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	entry, exists := shard.buffers[bufferKey]
 	if !exists {
 		entry = &bufferEntry{
+			data:      make(map[string]interface{}),
 			startTime: time.Now().UTC(),
 			schema:    newSignature,
 		}
@@ -1546,25 +1549,26 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		entry.arrowSchema = schema
 	}
 
-	// Add typed columns to buffer (already converted via zero-copy fast paths)
-	entry.batches = append(entry.batches, typedColumns)
+	// Append data to growing columnar arrays
+	appendTypedBatchToEntry(entry, typedColumns, numRecords)
 
-	// CRITICAL FIX: Track count incrementally instead of O(n) loop
-	entry.recordCount += numRecords
-	entry.estimatedBytes += uint64(numRecords) * estimateBytesPerRow(typedColumns)
 	totalBuffered := entry.recordCount
 
 	// Check if buffer needs flush (size-based).
 	// When adaptive flush engine is active, it owns all flush decisions and
 	// this fixed-size gate is skipped to allow memory-pressure-driven buffering.
 	if b.adaptiveFlush.Load() == nil && totalBuffered >= b.config.MaxBufferSize {
-		// Extract records to flush (hold lock for microseconds only)
-		recordsToFlush = make([]interface{}, len(entry.batches))
-		for i, batch := range entry.batches {
-			recordsToFlush[i] = batch
-		}
+		// Move data out of entry for flush
+		dataForFlush = entry.data
+		validityForFlush = entry.validity
+		tagColumnsForFlush = entry.tagColumns
+		entry.data = make(map[string]interface{})
+		entry.validity = nil
+		entry.tagColumns = nil
+		entry.recordCount = 0
+		entry.estimatedBytes = 0
 
-		// Try to enqueue BEFORE deleting the entry. tryEnqueueFlush is
+		// Try to enqueue BEFORE clearing data. tryEnqueueFlush is
 		// non-blocking (select with default) and does not acquire any
 		// shard locks — safe to call while holding shard.mu.
 		flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
@@ -1574,24 +1578,23 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 			bufferKey:   bufferKey,
 			database:    database,
 			measurement: record.Measurement,
-			records:     recordsToFlush,
+			data:        dataForFlush,
+			validity:    validityForFlush,
+			tagColumns:  tagColumnsForFlush,
 			recordCount: totalBuffered,
 			arrowSchema: entry.arrowSchema,
 		}
 		outcome := b.tryEnqueueFlush(task, flushCancel, bufferKey, totalBuffered)
 
 		if outcome == flushQueued {
-			// Only clear after confirmed enqueue — avoids data loss
-			// when flushQueue is full or buffer is closing.  Keep
-			// the entry as a schema shell so the cached arrowSchema
-			// survives across flush cycles.
-			entry.batches = nil
-			entry.recordCount = 0
-			entry.estimatedBytes = 0
+			// Data successfully moved to task; entry is empty shell
 			shouldFlush = true
+		} else {
+			// Enqueue failed — prepend data back into entry.
+			// Lock is still held, so no concurrent writes have occurred.
+			prependFlushDataToEntry(entry, dataForFlush, validityForFlush, tagColumnsForFlush, totalBuffered)
 		}
-		// On any non-queued outcome: keep entry in buffer for retry.
-		// flushCancel has already been called by tryEnqueueFlush.
+		// On any non-queued outcome: flushCancel already called by tryEnqueueFlush.
 	}
 
 	// Release lock IMMEDIATELY (lock held for <1ms)
