@@ -129,6 +129,85 @@ func BenchmarkBufferEntry_WriteZeroCopy(b *testing.B) {
 	}
 }
 
+// BenchmarkBufferEntry_SingleRow measures single-row-write overhead.
+// Each call appends 1 row (3 columns) to a growing entry without reset,
+// simulating a measurement that receives point-by-point ingestion.
+func BenchmarkBufferEntry_SingleRow(b *testing.B) {
+	const numBatches = 1000
+	const batchSize = 1
+
+	batches := make([]*TypedColumnBatch, numBatches)
+	for j := 0; j < numBatches; j++ {
+		batches[j] = &TypedColumnBatch{
+			Data: map[string]interface{}{
+				"time":  []int64{int64(j)},
+				"value": []float64{float64(j) * 0.5},
+				"host":  []string{"srv"},
+			},
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
+		for _, batch := range batches {
+			appendTypedBatchToEntry(entry, batch, batchSize)
+		}
+		// Flush: extract + wrap
+		_ = &TypedColumnBatch{Data: entry.data, Validity: entry.validity, TagColumns: entry.tagColumns}
+	}
+}
+
+// BenchmarkBufferEntry_SameTotalRows_BatchVsSingle compares total cost for
+// same 1000 rows delivered in different batch sizes.
+func BenchmarkBufferEntry_SameTotalRows(b *testing.B) {
+	const totalRows = 1000
+
+	makeBatches := func(batchSize int) []*TypedColumnBatch {
+		n := totalRows / batchSize
+		batches := make([]*TypedColumnBatch, n)
+		for j := 0; j < n; j++ {
+			times := make([]int64, batchSize)
+			vals := make([]float64, batchSize)
+			hosts := make([]string, batchSize)
+			for k := 0; k < batchSize; k++ {
+				times[k] = int64(j*batchSize + k)
+				vals[k] = float64(j*batchSize+k) * 0.5
+				hosts[k] = "srv"
+			}
+			batches[j] = &TypedColumnBatch{
+				Data: map[string]interface{}{
+					"time": times, "value": vals, "host": hosts,
+				},
+			}
+		}
+		return batches
+	}
+
+	b.Run("batchSize=1", func(b *testing.B) {
+		batches := makeBatches(1)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
+			for _, batch := range batches {
+				appendTypedBatchToEntry(entry, batch, 1)
+			}
+			_ = &TypedColumnBatch{Data: entry.data, Validity: entry.validity, TagColumns: entry.tagColumns}
+		}
+	})
+	b.Run("batchSize=100", func(b *testing.B) {
+		batches := makeBatches(100)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
+			for _, batch := range batches {
+				appendTypedBatchToEntry(entry, batch, 100)
+			}
+			_ = &TypedColumnBatch{Data: entry.data, Validity: entry.validity, TagColumns: entry.tagColumns}
+		}
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Benchmark: write throughput through ArrowBuffer with mock storage
 // ---------------------------------------------------------------------------
