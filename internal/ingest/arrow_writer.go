@@ -2299,10 +2299,9 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 			}
 			continue
 		}
-		records := make([]interface{}, len(entry.batches))
-		for j, batch := range entry.batches {
-			records[j] = batch
-		}
+		data := entry.data
+		validity := entry.validity
+		tagCols := entry.tagColumns
 		recordCount := entry.recordCount
 		arrowSchema := entry.arrowSchema
 		delete(shard.buffers, oldestKey)
@@ -2317,7 +2316,18 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 				Dur("age", now.Sub(oldestTime)).
 				Int("inline_flush", *inlineFlushCount).
 				Msg("Buffer overflow: flushing oldest entry inline")
-			b.flushRecordsAsync(context.Background(), oldestKey, parts[0], parts[1], records, recordCount, arrowSchema)
+
+			merged := &TypedColumnBatch{
+				Data:       data,
+				Validity:   validity,
+				TagColumns: tagCols,
+			}
+			startTime := time.Now()
+			if err := b.flushPartitionedData(context.Background(), oldestKey, parts[0], parts[1], merged, recordCount, "hard_limit", startTime, arrowSchema); err != nil {
+				b.logger.Error().Err(err).
+					Str("buffer_key", oldestKey).
+					Msg("Buffer overflow: inline flush failed — data lost from memory, recoverable from WAL")
+			}
 		} else {
 			if *inlineFlushCount >= maxInlineFlushes {
 				b.logger.Error().
