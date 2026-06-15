@@ -500,24 +500,26 @@ type TypedColumnBatch struct {
 }
 
 // bufferEntry holds all buffered data and metadata for a single measurement key.
-// Replaces 6 separate maps (buffers, bufferStartTimes, bufferRecordCounts,
-// bufferSchemas, bufferEstimatedBytes, bufferRefreshIndex) with a single struct,
-// reducing 5+ hash lookups to 1 on the write path.
+// Columnar data is grown directly in-place (data + validity maps) rather than
+// accumulating immutable TypedColumnBatch slices, reducing allocation overhead
+// on the hot write path.
 type bufferEntry struct {
-	batches        []*TypedColumnBatch // buffered data batches (immutable)
-	startTime      time.Time           // first record arrival time
-	recordCount    int                 // total record count
-	estimatedBytes uint64              // estimated memory usage
-	schema         string              // column signature for schema evolution
-	arrowSchema    *arrow.Schema       // inferred Arrow schema (nil until first flush preparation)
-	refreshIndex   int                 // Arrow VIEW incremental refresh cursor
+	data           map[string]interface{} // growing typed column arrays ([]int64, []float64, []string, []bool, []decimal128.Num)
+	validity       map[string][]bool      // growing null bitmaps; nil entry = all valid; nil map = no nulls at all
+	tagColumns     []string               // tag column names (stable for this schema, set on first write)
+	startTime      time.Time              // first record arrival time
+	recordCount    int                    // total record count
+	estimatedBytes uint64                 // estimated memory usage
+	schema         string                 // column signature for schema evolution
+	arrowSchema    *arrow.Schema          // inferred Arrow schema (nil until first flush preparation)
+	refreshIndex   int                    // Arrow VIEW incremental refresh cursor
 }
 
-// isEmpty returns true when the entry has no buffered data batches.
+// isEmpty returns true when the entry has no buffered columnar data.
 // Such entries are "empty shells" kept to preserve the cached arrowSchema
 // across flush cycles — they are eligible for GC after extended idleness.
 func (e *bufferEntry) isEmpty() bool {
-	return len(e.batches) == 0
+	return len(e.data) == 0
 }
 
 type bufferShard struct {
@@ -564,7 +566,9 @@ type flushTask struct {
 	bufferKey   string
 	database    string
 	measurement string
-	records     []interface{}
+	data        map[string]interface{} // typed columnar data (map["time"]->[]int64, etc.)
+	validity    map[string][]bool      // null bitmaps; nil = no nulls
+	tagColumns  []string               // tag column names for Parquet metadata
 	recordCount int
 	arrowSchema *arrow.Schema // cached schema from bufferEntry
 	trigger     string        // "size", "age", "hard_limit", or "manual"
