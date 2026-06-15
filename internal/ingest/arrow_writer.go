@@ -2660,15 +2660,35 @@ func prependFlushDataToEntry(entry *bufferEntry, data map[string]interface{}, va
 	for name, col := range data {
 		switch v := col.(type) {
 		case []int64:
-			entry.data[name] = append(v, entry.data[name].([]int64)...)
+			if existing, ok := entry.data[name]; ok {
+				entry.data[name] = append(v, existing.([]int64)...)
+			} else {
+				entry.data[name] = v
+			}
 		case []float64:
-			entry.data[name] = append(v, entry.data[name].([]float64)...)
+			if existing, ok := entry.data[name]; ok {
+				entry.data[name] = append(v, existing.([]float64)...)
+			} else {
+				entry.data[name] = v
+			}
 		case []string:
-			entry.data[name] = append(v, entry.data[name].([]string)...)
+			if existing, ok := entry.data[name]; ok {
+				entry.data[name] = append(v, existing.([]string)...)
+			} else {
+				entry.data[name] = v
+			}
 		case []bool:
-			entry.data[name] = append(v, entry.data[name].([]bool)...)
+			if existing, ok := entry.data[name]; ok {
+				entry.data[name] = append(v, existing.([]bool)...)
+			} else {
+				entry.data[name] = v
+			}
 		case []decimal128.Num:
-			entry.data[name] = append(v, entry.data[name].([]decimal128.Num)...)
+			if existing, ok := entry.data[name]; ok {
+				entry.data[name] = append(v, existing.([]decimal128.Num)...)
+			} else {
+				entry.data[name] = v
+			}
 		}
 	}
 
