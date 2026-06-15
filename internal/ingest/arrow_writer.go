@@ -522,6 +522,78 @@ func (e *bufferEntry) isEmpty() bool {
 	return len(e.data) == 0
 }
 
+// appendTypedBatchToEntry appends a TypedColumnBatch's typed column arrays into
+// a bufferEntry's growing data and validity maps. This is the core operation
+// for the columnar in-place accumulation approach: instead of storing immutable
+// TypedColumnBatch slices (old batches pattern), data is concatenated directly
+// into the entry's maps, reducing allocation overhead on the hot write path.
+func appendTypedBatchToEntry(entry *bufferEntry, batch *TypedColumnBatch, batchRows int) {
+	// 1. Safe-guard: ensure the data map is initialized.
+	if entry.data == nil {
+		entry.data = make(map[string]interface{})
+	}
+
+	// 2. Append each column from batch.Data to entry.data.
+	for name, v := range batch.Data {
+		if existing, ok := entry.data[name]; ok {
+			// Column exists — append new values.
+			switch newVals := v.(type) {
+			case []int64:
+				entry.data[name] = append(existing.([]int64), newVals...)
+			case []float64:
+				entry.data[name] = append(existing.([]float64), newVals...)
+			case []string:
+				entry.data[name] = append(existing.([]string), newVals...)
+			case []bool:
+				entry.data[name] = append(existing.([]bool), newVals...)
+			case []decimal128.Num:
+				entry.data[name] = append(existing.([]decimal128.Num), newVals...)
+			}
+		} else {
+			// Column doesn't exist — direct assign (slice header copy,
+			// zero-copy for first write — shares the backing array).
+			entry.data[name] = v
+		}
+	}
+
+	// 3. Merge validity bitmaps.
+	//
+	// When batch.Validity is nil there are no nulls in this batch, but
+	// columns already tracked in entry.validity still need to be padded
+	// with all-true values to maintain alignment.
+	if batch.Validity != nil || entry.validity != nil {
+		if entry.validity == nil {
+			entry.validity = make(map[string][]bool)
+		}
+
+		// Append batch validity entries for columns present in this batch.
+		for name, vals := range batch.Validity {
+			entry.validity[name] = append(entry.validity[name], vals...)
+		}
+
+		// Pad columns already in entry.validity that are NOT covered by
+		// this batch — they are fully valid (true) for all batchRows.
+		for name := range entry.validity {
+			if _, inBatch := batch.Validity[name]; !inBatch {
+				pad := make([]bool, batchRows)
+				for i := range pad {
+					pad[i] = true
+				}
+				entry.validity[name] = append(entry.validity[name], pad...)
+			}
+		}
+	}
+
+	// 4. Set tagColumns on first write (schema is stable once set).
+	if len(entry.tagColumns) == 0 && len(batch.TagColumns) > 0 {
+		entry.tagColumns = batch.TagColumns
+	}
+
+	// 5. Update counters.
+	entry.recordCount += batchRows
+	entry.estimatedBytes += uint64(batchRows) * estimateBytesPerRow(batch)
+}
+
 type bufferShard struct {
 	mu      sync.RWMutex
 	buffers map[string]*bufferEntry // bufferKey → merged buffer state
