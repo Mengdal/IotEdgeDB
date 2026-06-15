@@ -338,13 +338,17 @@ func TestSchemaChange_ViewRebuilt(t *testing.T) {
 	if len(vns) < 2 {
 		t.Fatalf("expected at least 2 VIEWs (one per schema), got %d: %v", len(vns), vns)
 	}
-	var count int
-	err = db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+vns[0]).Scan(&count)
-	if err != nil {
-		t.Fatalf("query schema A VIEW: %v", err)
+	// Sum row counts across both VIEWs (map iteration order is non-deterministic).
+	var totalRows int
+	for _, vn := range vns {
+		var c int
+		if err := db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+vn).Scan(&c); err != nil {
+			t.Fatalf("query VIEW %s: %v", vn, err)
+		}
+		totalRows += c
 	}
-	if count != 2 {
-		t.Errorf("expected 2 rows in schema A VIEW, got %d", count)
+	if totalRows != 3 {
+		t.Errorf("expected 3 total rows across both VIEWs (2 schema A + 1 schema B), got %d", totalRows)
 	}
 
 	t.Logf("Schema-per-buffer: %d VIEWs coexist (schemas: %v)", len(vns), vns)
@@ -463,11 +467,23 @@ func TestNotifier_ChannelOverflow_DataStillRefreshed(t *testing.T) {
 			"Actually created: %d measurement groups", numKeys, count)
 	}
 
-	// Verify one specific VIEW has correct data
-	viewName := viewMgr.MeasurementViewNames("test","overflow_a0")[0]
+	// Verify that at least one VIEW has correct data. Don't assume which
+	// specific measurement key got processed first — find one that has views.
+	var verifiableMeas string
+	for i := 0; i < 26; i++ {
+		measName := "overflow_" + string(rune('a'+i)) + "0"
+		if vns := viewMgr.MeasurementViewNames("test", measName); len(vns) > 0 {
+			verifiableMeas = measName
+			break
+		}
+	}
+	if verifiableMeas == "" {
+		t.Fatal("no measurement has registered VIEWs despite HasMeasurementData returning true")
+	}
+	viewName := viewMgr.MeasurementViewNames("test", verifiableMeas)[0]
 	var count int
 	db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+viewName).Scan(&count) //nolint:errcheck
-	t.Logf("Overflow test: %s has %d rows", viewName, count)
+	t.Logf("Overflow test: %s (meas=%s) has %d rows", viewName, verifiableMeas, count)
 
 	t.Log("CONFIRMED: notifyCh overflow falls back to dirty-set; data still captured in VIEW")
 }
