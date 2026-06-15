@@ -2107,7 +2107,7 @@ func (b *ArrowBuffer) gcEmptyEntries() {
 		shard := b.shards[i]
 		shard.mu.Lock()
 		for key, entry := range shard.buffers {
-			if len(entry.batches) == 0 && now.Sub(entry.startTime) > threshold {
+			if entry.isEmpty() && now.Sub(entry.startTime) > threshold {
 				delete(shard.buffers, key)
 				cleaned++
 			}
@@ -3804,21 +3804,44 @@ func (b *ArrowBuffer) SetNotifier(n BufferChangeNotifier) {
 	b.notifier = n
 }
 
-// SinceRefresh 返回指定 bufferKey 自上次 VIEW 刷新以来新增的 batch。
 func (b *ArrowBuffer) SinceRefresh(bufferKey string) ([]*TypedColumnBatch, error) {
-	var result []*TypedColumnBatch
 	for i := uint32(0); i < b.shardCount; i++ {
 		shard := b.shards[i]
 		shard.mu.RLock()
 		entry, ok := shard.buffers[bufferKey]
-		if ok && entry.refreshIndex < len(entry.batches) {
-			for _, b := range entry.batches[entry.refreshIndex:] {
-				result = append(result, b)
+		if ok && !entry.isEmpty() && entry.refreshIndex < entry.recordCount {
+			subData := make(map[string]interface{}, len(entry.data))
+			for name, col := range entry.data {
+				switch v := col.(type) {
+				case []int64:
+					subData[name] = v[entry.refreshIndex:]
+				case []float64:
+					subData[name] = v[entry.refreshIndex:]
+				case []string:
+					subData[name] = v[entry.refreshIndex:]
+				case []bool:
+					subData[name] = v[entry.refreshIndex:]
+				case []decimal128.Num:
+					subData[name] = v[entry.refreshIndex:]
+				}
 			}
+			var subValidity map[string][]bool
+			if entry.validity != nil {
+				subValidity = make(map[string][]bool, len(entry.validity))
+				for name, v := range entry.validity {
+					subValidity[name] = v[entry.refreshIndex:]
+				}
+			}
+			shard.mu.RUnlock()
+			return []*TypedColumnBatch{{
+				Data:       subData,
+				Validity:   subValidity,
+				TagColumns: entry.tagColumns,
+			}}, nil
 		}
 		shard.mu.RUnlock()
 	}
-	return result, nil
+	return nil, nil
 }
 
 // MarkRefreshed 更新指定 bufferKey 的刷新游标。
@@ -3827,7 +3850,7 @@ func (b *ArrowBuffer) MarkRefreshed(bufferKey string) {
 		shard := b.shards[i]
 		shard.mu.Lock()
 		if entry, ok := shard.buffers[bufferKey]; ok {
-			entry.refreshIndex = len(entry.batches)
+			entry.refreshIndex = entry.recordCount
 		}
 		shard.mu.Unlock()
 	}
