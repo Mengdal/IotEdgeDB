@@ -556,8 +556,21 @@ func appendTypedBatchToEntry(entry *bufferEntry, batch *TypedColumnBatch, batchR
 	// columns already tracked in entry.validity still need to be padded
 	// with all-true values to maintain alignment.
 	if batch.Validity != nil || entry.validity != nil {
-		if entry.validity == nil {
+		wasNil := entry.validity == nil
+		if wasNil {
 			entry.validity = make(map[string][]bool)
+		}
+
+		// Backfill: when validity tracking starts for the first time, all
+		// pre-existing rows were fully valid and need entries in the map.
+		if wasNil && entry.recordCount > 0 {
+			for name := range batch.Validity {
+				pad := make([]bool, entry.recordCount)
+				for i := range pad {
+					pad[i] = true
+				}
+				entry.validity[name] = pad
+			}
 		}
 
 		// Append batch validity entries for columns present in this batch.
@@ -2320,7 +2333,12 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 			if err := b.flushPartitionedData(context.Background(), oldestKey, parts[0], parts[1], merged, recordCount, "hard_limit", startTime, arrowSchema); err != nil {
 				b.logger.Error().Err(err).
 					Str("buffer_key", oldestKey).
-					Msg("Buffer overflow: inline flush failed — data lost from memory, recoverable from WAL")
+					Int("records", recordCount).
+					Msg("Buffer overflow: inline flush failed — restoring data to buffer")
+				// Restore data to buffer for retry. prependFlushData recreates
+				// the entry with fresh startTime so it won't be re-selected
+				// as oldest immediately on the next eviction iteration.
+				b.prependFlushData(oldestKey, data, validity, tagCols, recordCount)
 			}
 		} else {
 			if *inlineFlushCount >= maxInlineFlushes {
@@ -2632,11 +2650,14 @@ func (b *ArrowBuffer) prependFlushData(bufferKey string, data map[string]interfa
 	shard.mu.Lock()
 	entry, exists := shard.buffers[bufferKey]
 	if !exists {
-		// Entry was deleted by eviction — recreate it
+		// Entry was deleted by eviction — recreate it.
+		// Compute schema from data so type-conflict detection works.
+		schema := getColumnSignature(data)
 		entry = &bufferEntry{
 			data:        data,
 			validity:    validity,
 			tagColumns:  tagColumns,
+			schema:      schema,
 			startTime:   time.Now().UTC(),
 			recordCount: flushedRows,
 		}
@@ -2687,8 +2708,10 @@ func prependFlushDataToEntry(entry *bufferEntry, data map[string]interface{}, va
 		}
 	}
 
-	// Prepend validity bitmaps
-	if validity != nil {
+	// Prepend validity bitmaps.
+	// Must enter when either side has validity: old flushed data
+	// may have no nulls but concurrent writes may have introduced them.
+	if validity != nil || entry.validity != nil {
 		if entry.validity == nil {
 			entry.validity = make(map[string][]bool)
 		}
@@ -3372,6 +3395,7 @@ func (b *ArrowBuffer) SinceRefresh(bufferKey string) ([]*TypedColumnBatch, error
 				Data:       subData,
 				Validity:   subValidity,
 				TagColumns: entry.tagColumns,
+				Signature:  entry.schema,
 			}}, nil
 		}
 		shard.mu.RUnlock()
