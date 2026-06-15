@@ -222,29 +222,28 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	shard := e.buffer.shards[c.shardIdx]
 	shard.mu.Lock()
 	entry, exists := shard.buffers[c.bufferKey]
-	if !exists || len(entry.batches) == 0 {
+	if !exists || entry.isEmpty() {
 		shard.mu.Unlock()
 		return
 	}
 	recordCount := entry.recordCount
 	database, measurement := splitKeyToDBAndMeas(c.bufferKey)
-	// Extract batch references before deleting entry
-	records := make([]interface{}, len(entry.batches))
-	for i, batch := range entry.batches {
-		records[i] = batch
-	}
 
-	// Determine trigger type: age-expired uses "age", hard-limit uses "hard_limit",
-	// pressure-driven (yellow/red) uses "pressure".
+	// Move data out of entry
+	data := entry.data
+	validity := entry.validity
+	tagCols := entry.tagColumns
+	entry.data = make(map[string]interface{})
+	entry.validity = nil
+	entry.tagColumns = nil
+	entry.recordCount = 0
+	entry.estimatedBytes = 0
+
 	trigger := c.trigger
 	if trigger == "" {
 		trigger = "hard_limit"
 	}
 
-	// Try to enqueue BEFORE deleting the entry. tryEnqueueFlush is non-blocking
-	// and does not acquire shard locks — safe to call while holding shard.mu.
-	// Only delete the entry on successful enqueue; on failure the entry stays
-	// in buffer for retry on the next evaluate() cycle.
 	flushCtx, flushCancel := context.WithTimeout(e.buffer.ctx, e.buffer.flushTimeout)
 	task := flushTask{
 		ctx:         flushCtx,
@@ -252,7 +251,9 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 		bufferKey:   c.bufferKey,
 		database:    database,
 		measurement: measurement,
-		records:     records,
+		data:        data,
+		validity:    validity,
+		tagColumns:  tagCols,
 		recordCount: recordCount,
 		trigger:     trigger,
 		arrowSchema: entry.arrowSchema,
@@ -260,9 +261,9 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	outcome := e.buffer.tryEnqueueFlush(task, flushCancel, c.bufferKey, recordCount)
 
 	if outcome == flushQueued {
-		entry.batches = nil
-		entry.recordCount = 0
-		entry.estimatedBytes = 0
+		// Data moved to task; entry is empty shell
+	} else {
+		prependFlushDataToEntry(entry, data, validity, tagCols, recordCount)
 	}
 	shard.mu.Unlock()
 }
