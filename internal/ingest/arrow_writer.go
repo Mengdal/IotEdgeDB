@@ -2881,6 +2881,77 @@ func (b *ArrowBuffer) flushBufferLockedDataTime(ctx context.Context, bufferKey, 
 	return b.flushPartitionedData(ctx, bufferKey, database, measurement, merged, recordCount, flushTypeSync, startTime, arrowSchema)
 }
 
+// prependFlushData prepends flushed data back into the buffer entry after a flush failure.
+// Old data (the failed flush payload) is placed BEFORE new data that may have arrived
+// concurrently during the flush attempt, preserving arrival-time order.
+func (b *ArrowBuffer) prependFlushData(bufferKey string, data map[string]interface{}, validity map[string][]bool, tagColumns []string, flushedRows int) {
+	shard := b.getShard(bufferKey)
+	shard.mu.Lock()
+	entry, exists := shard.buffers[bufferKey]
+	if !exists {
+		// Entry was deleted by eviction — recreate it
+		entry = &bufferEntry{
+			data:        data,
+			validity:    validity,
+			tagColumns:  tagColumns,
+			startTime:   time.Now().UTC(),
+			recordCount: flushedRows,
+		}
+		shard.buffers[bufferKey] = entry
+		shard.mu.Unlock()
+		return
+	}
+	prependFlushDataToEntry(entry, data, validity, tagColumns, flushedRows)
+	shard.mu.Unlock()
+}
+
+// prependFlushDataToEntry prepends flush data into an existing entry.
+// Caller must hold shard.mu.
+func prependFlushDataToEntry(entry *bufferEntry, data map[string]interface{}, validity map[string][]bool, tagColumns []string, flushedRows int) {
+	// Prepend column data: old data first, new data second
+	for name, col := range data {
+		switch v := col.(type) {
+		case []int64:
+			entry.data[name] = append(v, entry.data[name].([]int64)...)
+		case []float64:
+			entry.data[name] = append(v, entry.data[name].([]float64)...)
+		case []string:
+			entry.data[name] = append(v, entry.data[name].([]string)...)
+		case []bool:
+			entry.data[name] = append(v, entry.data[name].([]bool)...)
+		case []decimal128.Num:
+			entry.data[name] = append(v, entry.data[name].([]decimal128.Num)...)
+		}
+	}
+
+	// Prepend validity bitmaps
+	if validity != nil {
+		if entry.validity == nil {
+			entry.validity = make(map[string][]bool)
+		}
+		for name, v := range validity {
+			entry.validity[name] = append(v, entry.validity[name]...)
+		}
+		for name := range entry.validity {
+			if _, has := validity[name]; !has {
+				padding := make([]bool, flushedRows)
+				for i := range padding {
+					padding[i] = true
+				}
+				entry.validity[name] = append(padding, entry.validity[name]...)
+			}
+		}
+	}
+
+	// Preserve tag columns
+	if len(entry.tagColumns) == 0 && len(tagColumns) > 0 {
+		entry.tagColumns = make([]string, len(tagColumns))
+		copy(entry.tagColumns, tagColumns)
+	}
+
+	entry.recordCount += flushedRows
+}
+
 // mergeBatches merges multiple column batches into a single TypedColumnBatch.
 // OPTIMIZATION: Pre-allocate merged arrays to avoid O(n²) append reallocations
 // Handles sparse columns (schema evolution) by marking missing positions as null via validity bitmaps.
