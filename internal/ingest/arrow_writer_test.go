@@ -726,7 +726,6 @@ func BenchmarkRowsToColumnar_SchemaVariation(b *testing.B) {
 	}
 }
 
-
 // TestSliceColumnsByIndices_BoundsCheck tests that sliceColumnsByIndices handles sparse columns
 func TestSliceColumnsByIndices_BoundsCheck(t *testing.T) {
 	// Create columns with different lengths (sparse scenario)

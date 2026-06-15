@@ -64,7 +64,6 @@ func getFlushMessageType(flushType string) string {
 	}
 }
 
-
 // ArrowWriter handles Arrow schema inference and Parquet writing
 type ArrowWriter struct {
 	compression     compress.Compression
@@ -2382,10 +2381,6 @@ func (b *ArrowBuffer) ensureBufferSpace(newEntryBytes uint64) error {
 // restoreBufferEntry rebuilds a bufferEntry from batch references when mergeBatches fails.
 // The entry was deleted by flushCandidate before the task was created; this puts it back.
 
-
-
-
-
 // flushPartitionedData is the shared core logic for partitioning and writing data by hour boundaries
 // Called by both async (flushWithDataTimePartitioning) and sync (flushBufferLockedDataTime) paths
 // Uses hash-based grouping to partition by hour, then sorts each hour independently
@@ -2719,7 +2714,6 @@ func prependFlushDataToEntry(entry *bufferEntry, data map[string]interface{}, va
 
 	entry.recordCount += flushedRows
 }
-
 
 // sortColumnsByTime sorts all columns by the time column in-place
 // Returns the sorted columns and any error encountered
