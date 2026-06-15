@@ -40,7 +40,7 @@ func addBufferEntry(buf *ArrowBuffer, key string, recordCount int, estimatedByte
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 	shard.buffers[key] = &bufferEntry{
-		batches:        []*TypedColumnBatch{{}}, // non-nil, non-empty so flushCandidate proceeds
+		data:           map[string]interface{}{"time": make([]int64, recordCount)}, // non-empty so flushCandidate proceeds
 		startTime:      time.Now().Add(-age),
 		recordCount:    recordCount,
 		estimatedBytes: estimatedBytes,

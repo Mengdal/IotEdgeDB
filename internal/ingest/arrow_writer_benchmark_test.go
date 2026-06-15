@@ -21,7 +21,7 @@ func BenchmarkBufferEntry_SingleLookup(b *testing.B) {
 	shards := make([]*bufferShard, 1)
 	shards[0] = &bufferShard{buffers: make(map[string]*bufferEntry)}
 	shards[0].buffers["db/test"] = &bufferEntry{
-		batches:        make([]*TypedColumnBatch, 5),
+		data:           map[string]interface{}{"time": make([]int64, 5000)},
 		startTime:      time.Now().Add(-30 * time.Second),
 		recordCount:    5000,
 		estimatedBytes: 500000,
@@ -61,8 +61,7 @@ func BenchmarkBufferEntry_WritePath(b *testing.B) {
 			entry = &bufferEntry{startTime: time.Now()}
 			shards[0].buffers[key] = entry
 		}
-		entry.batches = append(entry.batches, batch)
-		entry.recordCount += numRecords
+		appendTypedBatchToEntry(entry, batch, numRecords)
 	}
 }
 
@@ -300,7 +299,7 @@ func fakeArrowBufferForBench(b *testing.B, shardCount int, entriesPerShard int) 
 		for j := 0; j < entriesPerShard; j++ {
 			key := "db/meas_" + string(rune('a'+j%26))
 			buf.shards[i].buffers[key] = &bufferEntry{
-				batches:        []*TypedColumnBatch{{}},
+				data:           map[string]interface{}{"time": make([]int64, j*100)},
 				startTime:      time.Now().Add(-time.Duration(j) * time.Minute),
 				recordCount:    j * 100,
 				estimatedBytes: uint64(j * 10000),
