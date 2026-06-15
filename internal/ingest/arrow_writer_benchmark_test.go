@@ -41,27 +41,91 @@ func BenchmarkBufferEntry_SingleLookup(b *testing.B) {
 }
 
 func BenchmarkBufferEntry_WritePath(b *testing.B) {
-	// Simulate the write-path operation: append batch, update count + bytes
-	shards := make([]*bufferShard, 1)
-	shards[0] = &bufferShard{buffers: make(map[string]*bufferEntry)}
+	// Simulate the write-path operation with realistic entry lifecycle:
+	// writes accumulate until threshold, then entry is reset (simulating flush).
+	const batchSize = 100
+	const flushThreshold = 1000 // reset entry every 10 batches
 
 	batch := &TypedColumnBatch{
 		Data: map[string]interface{}{
-			"time":  make([]int64, 100),
-			"value": make([]float64, 100),
+			"time":  make([]int64, batchSize),
+			"value": make([]float64, batchSize),
+			"host":  make([]string, batchSize),
 		},
 	}
-	numRecords := 100
+
+	entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
+	itersSinceReset := 0
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		key := "db/test"
-		entry, ok := shards[0].buffers[key]
-		if !ok {
-			entry = &bufferEntry{startTime: time.Now()}
-			shards[0].buffers[key] = entry
+		if itersSinceReset >= flushThreshold {
+			// Simulate flush: extract data, create wrapper (zero-copy)
+			_ = &TypedColumnBatch{Data: entry.data, Validity: entry.validity, TagColumns: entry.tagColumns}
+			entry = &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
+			itersSinceReset = 0
 		}
-		appendTypedBatchToEntry(entry, batch, numRecords)
+		appendTypedBatchToEntry(entry, batch, batchSize)
+		itersSinceReset++
+	}
+}
+
+// BenchmarkBufferEntry_WriteFlushCycle measures the full write-to-flush cycle
+// including data extraction and TypedColumnBatch wrapper creation (the new
+// equivalent of mergeBatches).
+func BenchmarkBufferEntry_WriteFlushCycle(b *testing.B) {
+	const batchSize = 1000
+	const batchesPerCycle = 10
+	const totalRowsPerCycle = batchSize * batchesPerCycle
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		// Create batches (outside timing — same cost for both approaches)
+		batches := make([]*TypedColumnBatch, batchesPerCycle)
+		for j := 0; j < batchesPerCycle; j++ {
+			batches[j] = &TypedColumnBatch{
+				Data: map[string]interface{}{
+					"time":  make([]int64, batchSize),
+					"value": make([]float64, batchSize),
+					"host":  make([]string, batchSize),
+				},
+			}
+		}
+		entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
+
+		b.StartTimer()
+		// Write phase
+		for _, batch := range batches {
+			appendTypedBatchToEntry(entry, batch, batchSize)
+		}
+		// Flush phase: extract + wrap (replace mergeBatches)
+		_ = &TypedColumnBatch{
+			Data:       entry.data,
+			Validity:   entry.validity,
+			TagColumns: entry.tagColumns,
+		}
+		b.StopTimer()
+	}
+}
+
+// BenchmarkBufferEntry_WriteZeroCopy measures first-write path where entry is
+// empty — this exercises the zero-copy fast path in appendTypedBatchToEntry.
+func BenchmarkBufferEntry_WriteZeroCopy(b *testing.B) {
+	const batchSize = 1000
+
+	batch := &TypedColumnBatch{
+		Data: map[string]interface{}{
+			"time":  make([]int64, batchSize),
+			"value": make([]float64, batchSize),
+			"host":  make([]string, batchSize),
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
+		appendTypedBatchToEntry(entry, batch, batchSize)
 	}
 }
 
