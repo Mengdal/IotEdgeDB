@@ -2151,7 +2151,6 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 			return
 		case task, ok := <-b.flushQueue:
 			if !ok {
-				// Channel closed during shutdown
 				return
 			}
 			b.queueDepth.Add(-1)
@@ -2163,23 +2162,50 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 				Int64("queue_depth", b.queueDepth.Load()).
 				Msg("Worker processing flush task")
 
-			// Execute flush and gate post-flush cleanup on success.
-			// On failure, data was restored to buffer — skip OnFlushComplete
-			// (old VIEW is stale; new VIEW is created by the restore path)
-			// and skip RecordBufferFlushRecords (inflating metrics).
-			if b.flushRecordsAsync(task.ctx, task.bufferKey, task.database, task.measurement, task.records, task.recordCount, task.arrowSchema) {
-				// Notify VIEW manager that flush is complete
-				if b.notifier != nil {
-					b.notifier.OnFlushComplete(task.bufferKey)
-				}
-				// Record flush record count distribution
-				trigger := task.trigger
-				if trigger == "" {
-					trigger = "size"
-				}
-				metrics.Get().RecordBufferFlushRecords(trigger, task.recordCount)
+			// Wrap growing data as TypedColumnBatch for flushPartitionedData
+			merged := &TypedColumnBatch{
+				Data:       task.data,
+				Validity:   task.validity,
+				TagColumns: task.tagColumns,
 			}
-			// Release timeout context resources
+
+			startTime := time.Now()
+			database := task.database
+			measurement := task.measurement
+
+			if err := b.flushPartitionedData(task.ctx, task.bufferKey, database, measurement, merged, task.recordCount, "async", startTime, task.arrowSchema); err != nil {
+				b.prependFlushData(task.bufferKey, task.data, task.validity, task.tagColumns, task.recordCount)
+				b.logger.Error().
+					Err(err).
+					Str("buffer_key", task.bufferKey).
+					Int("records", task.recordCount).
+					Msg("Flush failed — data restored to buffer, will retry")
+
+				if b.wal != nil {
+					if cerr := b.wal.AppendControl(wal.FlushFail, database, measurement); cerr != nil {
+						b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_FAIL control record")
+					}
+				}
+				task.cancel()
+				continue
+			}
+
+			if b.wal != nil {
+				if cerr := b.wal.AppendControl(wal.FlushOK, database, measurement); cerr != nil {
+					b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_OK control record")
+				}
+			}
+
+			if b.notifier != nil {
+				b.notifier.OnFlushComplete(task.bufferKey)
+			}
+
+			trigger := task.trigger
+			if trigger == "" {
+				trigger = "size"
+			}
+			metrics.Get().RecordBufferFlushRecords(trigger, task.recordCount)
+
 			task.cancel()
 		}
 	}
@@ -2788,78 +2814,64 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 // Note: Caller must hold shard.mu lock
 func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard, bufferKey, database, measurement, trigger string) error {
 	entry, exists := shard.buffers[bufferKey]
-	if !exists || len(entry.batches) == 0 {
-		// Keep empty shell for schema caching; GC will clean if idle too long.
-		// Notify VIEW manager after synchronous flush
+	if !exists || entry.isEmpty() {
 		if b.notifier != nil {
 			b.notifier.OnFlushComplete(bufferKey)
 		}
 		return nil
 	}
 
-	// Get record count before clearing buffer
 	recordCount := entry.recordCount
 
-	// Extract records to flush (hold lock for minimal time)
-	recordsToFlush := make([]interface{}, len(entry.batches))
-	for i, batch := range entry.batches {
-		recordsToFlush[i] = batch
-	}
-
-	// Clear buffer immediately
-	entry.batches = nil
+	// Move data out of entry
+	data := entry.data
+	validity := entry.validity
+	tagCols := entry.tagColumns
+	entry.data = make(map[string]interface{})
+	entry.validity = nil
+	entry.tagColumns = nil
 	entry.recordCount = 0
 	entry.estimatedBytes = 0
 
 	// Release lock before expensive operations
 	shard.mu.Unlock()
 
-	// Merge typed column batches
-	merged, err := b.mergeBatches(recordsToFlush)
-	if err != nil {
-		// Restore original batch references back to buffer
-		b.restoreBufferEntry(bufferKey, recordsToFlush, entry.arrowSchema)
-		shard.mu.Lock() // Re-acquire lock for caller
-		return fmt.Errorf("failed to merge batches: %w", err)
+	merged := &TypedColumnBatch{
+		Data:       data,
+		Validity:   validity,
+		TagColumns: tagCols,
 	}
 
-	// Flush with data timestamp partitioning
 	startTime := time.Now().UTC()
 	if err := b.flushBufferLockedDataTime(ctx, bufferKey, database, measurement, merged, recordCount, startTime, entry.arrowSchema); err != nil {
-		// Put merged data back into buffer
-		b.writeBackMergedData(ctx, database, measurement, merged)
+		b.prependFlushData(bufferKey, data, validity, tagCols, recordCount)
 		b.logger.Warn().
 			Err(err).
 			Str("buffer_key", bufferKey).
 			Int("records", recordCount).
-			Msg("Flush failed — merged data restored to buffer, will retry")
+			Msg("Flush failed — data restored to buffer, will retry")
 
-		// Write FLUSH_FAIL control record for audit trail
 		if b.wal != nil {
 			if cerr := b.wal.AppendControl(wal.FlushFail, database, measurement); cerr != nil {
 				b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_FAIL control record")
 			}
 		}
-		shard.mu.Lock() // Re-acquire lock for caller
+		shard.mu.Lock()
 		return err
 	}
 
-	// Flush succeeded — write FLUSH_OK to mark data as confirmed in Parquet
 	if b.wal != nil {
 		if cerr := b.wal.AppendControl(wal.FlushOK, database, measurement); cerr != nil {
 			b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_OK control record")
 		}
 	}
 
-	// Notify VIEW manager after synchronous flush
 	if b.notifier != nil {
 		b.notifier.OnFlushComplete(bufferKey)
 	}
 
-	// Record flush record count distribution
 	metrics.Get().RecordBufferFlushRecords(trigger, recordCount)
 
-	// Re-acquire lock for caller
 	shard.mu.Lock()
 	return nil
 }
