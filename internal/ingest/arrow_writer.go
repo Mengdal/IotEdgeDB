@@ -638,6 +638,40 @@ func estimateBytesPerRow(batch *TypedColumnBatch) uint64 {
 	return totalBytes
 }
 
+// estimateBytesFromData estimates total memory usage from a columnar data map.
+// numRows is the row count (from any typed column's len). Used by prepend paths
+// where data arrives without a TypedColumnBatch wrapper.
+func estimateBytesFromData(data map[string]interface{}, numRows int) uint64 {
+	if len(data) == 0 {
+		return 0
+	}
+	var perRow uint64
+	for _, col := range data {
+		switch v := col.(type) {
+		case []int64:
+			perRow += 8
+		case []float64:
+			perRow += 8
+		case []bool:
+			perRow += 1
+		case []string:
+			n := len(v)
+			if n > 100 {
+				n = 100
+			}
+			var sumLen int
+			for i := 0; i < n; i++ {
+				sumLen += len(v[i])
+			}
+			perRow += uint64(sumLen / n)
+		default:
+			perRow += 64
+		}
+	}
+	perRow += uint64(len(data))
+	return perRow * uint64(numRows)
+}
+
 // flushTask represents a flush operation to be executed by workers
 type flushTask struct {
 	ctx         context.Context
@@ -2736,6 +2770,7 @@ func prependFlushDataToEntry(entry *bufferEntry, data map[string]interface{}, va
 	}
 
 	entry.recordCount += flushedRows
+	entry.estimatedBytes += estimateBytesFromData(data, flushedRows)
 }
 
 // sortColumnsByTime sorts all columns by the time column in-place
