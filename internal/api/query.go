@@ -2117,7 +2117,7 @@ func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement str
 	b.WriteByte(')')
 	for _, vn := range viewNames {
 		b.WriteString(" UNION ALL SELECT * FROM ")
-		b.WriteString(vn)
+		b.WriteString(database.QuoteIdent(vn))
 	}
 	b.WriteByte(')')
 	return b.String()

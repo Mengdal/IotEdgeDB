@@ -146,6 +146,13 @@ func ViewName(bufferKey string) string {
 	return "_iedb_buffer_" + strings.ReplaceAll(bufferKey, "/", "_")
 }
 
+// QuoteIdent wraps a SQL identifier in double quotes and escapes internal
+// double-quotes by doubling them, per the SQL standard. DuckDB follows the
+// same convention as PostgreSQL for quoted identifiers.
+func QuoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
 // refreshLoop 以 100ms 合并窗口批量处理待刷新的 bufferKey。
 func (m *ArrowViewManager) refreshLoop() {
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -234,7 +241,7 @@ func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ing
 	defer conn.Close()
 
 	// DROP + CREATE
-	if _, err := conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+viewName); err != nil {
+	if _, err := conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+QuoteIdent(viewName)); err != nil {
 		m.logger.Warn().Err(err).Str("table", viewName).Msg("Failed to drop old VIEW table — CREATE may be skipped by IF NOT EXISTS")
 	}
 	createSQL := m.buildCreateTableSQL(viewName, batches[0])
@@ -368,7 +375,7 @@ func (m *ArrowViewManager) buildCreateTableSQL(viewName string, batch *ingest.Ty
 	for i, name := range colNames {
 		colDefs[i] = fmt.Sprintf(`"%s" %s`, name, duckTypeFor(batch.Data[name]))
 	}
-	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)", viewName, strings.Join(colDefs, ", "))
+	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)", QuoteIdent(viewName), strings.Join(colDefs, ", "))
 }
 
 func duckTypeFor(col interface{}) string {
@@ -421,7 +428,7 @@ func (m *ArrowViewManager) Close() error {
 	defer m.mu.Unlock()
 	for bufferKey := range m.views {
 		viewName := ViewName(bufferKey)
-		m.db.DB().Exec("DROP TABLE IF EXISTS " + viewName)
+		m.db.DB().Exec("DROP TABLE IF EXISTS " + QuoteIdent(viewName))
 		delete(m.views, bufferKey)
 	}
 	// Clear measurement index

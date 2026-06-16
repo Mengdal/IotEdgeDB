@@ -563,8 +563,10 @@ func appendTypedBatchToEntry(entry *bufferEntry, batch *TypedColumnBatch, batchR
 
 		// Backfill: when validity tracking starts for the first time, all
 		// pre-existing rows were fully valid and need entries in the map.
+		// Iterate entry.data (not batch.Validity) so columns written before
+		// validity tracking began also get validity entries.
 		if wasNil && entry.recordCount > 0 {
-			for name := range batch.Validity {
+			for name := range entry.data {
 				pad := make([]bool, entry.recordCount)
 				for i := range pad {
 					pad[i] = true
@@ -622,6 +624,10 @@ func estimateBytesPerRow(batch *TypedColumnBatch) uint64 {
 			totalBytes += 1
 		case []string:
 			n := len(v)
+			if n == 0 {
+				totalBytes += 32 // default per-row byte estimate for empty string slices
+				continue
+			}
 			if n > 100 {
 				n = 100
 			}
@@ -656,6 +662,10 @@ func estimateBytesFromData(data map[string]interface{}, numRows int) uint64 {
 			perRow += 1
 		case []string:
 			n := len(v)
+			if n == 0 {
+				perRow += 32 // default per-row byte estimate for empty string slices
+				continue
+			}
 			if n > 100 {
 				n = 100
 			}
@@ -2215,7 +2225,7 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 			measurement := task.measurement
 
 			if err := b.flushPartitionedData(task.ctx, task.bufferKey, database, measurement, merged, task.recordCount, "async", startTime, task.arrowSchema); err != nil {
-				b.prependFlushData(task.bufferKey, task.data, task.validity, task.tagColumns, task.recordCount)
+				b.prependFlushData(task.bufferKey, task.data, task.validity, task.tagColumns, task.recordCount, task.arrowSchema)
 				b.logger.Error().
 					Err(err).
 					Str("buffer_key", task.bufferKey).
@@ -2372,7 +2382,7 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 				// Restore data to buffer for retry. prependFlushData recreates
 				// the entry with fresh startTime so it won't be re-selected
 				// as oldest immediately on the next eviction iteration.
-				b.prependFlushData(oldestKey, data, validity, tagCols, recordCount)
+				b.prependFlushData(oldestKey, data, validity, tagCols, recordCount, arrowSchema)
 			}
 		} else {
 			if *inlineFlushCount >= maxInlineFlushes {
@@ -2639,7 +2649,7 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 
 	startTime := time.Now().UTC()
 	if err := b.flushBufferLockedDataTime(ctx, bufferKey, database, measurement, merged, recordCount, startTime, entry.arrowSchema); err != nil {
-		b.prependFlushData(bufferKey, data, validity, tagCols, recordCount)
+		b.prependFlushData(bufferKey, data, validity, tagCols, recordCount, entry.arrowSchema)
 		b.logger.Warn().
 			Err(err).
 			Str("buffer_key", bufferKey).
@@ -2679,7 +2689,7 @@ func (b *ArrowBuffer) flushBufferLockedDataTime(ctx context.Context, bufferKey, 
 // prependFlushData prepends flushed data back into the buffer entry after a flush failure.
 // Old data (the failed flush payload) is placed BEFORE new data that may have arrived
 // concurrently during the flush attempt, preserving arrival-time order.
-func (b *ArrowBuffer) prependFlushData(bufferKey string, data map[string]interface{}, validity map[string][]bool, tagColumns []string, flushedRows int) {
+func (b *ArrowBuffer) prependFlushData(bufferKey string, data map[string]interface{}, validity map[string][]bool, tagColumns []string, flushedRows int, arrowSchema *arrow.Schema) {
 	shard := b.getShard(bufferKey)
 	shard.mu.Lock()
 	entry, exists := shard.buffers[bufferKey]
@@ -2688,12 +2698,14 @@ func (b *ArrowBuffer) prependFlushData(bufferKey string, data map[string]interfa
 		// Compute schema from data so type-conflict detection works.
 		schema := getColumnSignature(data)
 		entry = &bufferEntry{
-			data:        data,
-			validity:    validity,
-			tagColumns:  tagColumns,
-			schema:      schema,
-			startTime:   time.Now().UTC(),
-			recordCount: flushedRows,
+			data:           data,
+			validity:       validity,
+			tagColumns:     tagColumns,
+			schema:         schema,
+			startTime:      time.Now().UTC(),
+			recordCount:    flushedRows,
+			estimatedBytes: estimateBytesFromData(data, flushedRows),
+			arrowSchema:    arrowSchema,
 		}
 		shard.buffers[bufferKey] = entry
 		shard.mu.Unlock()
@@ -2746,9 +2758,25 @@ func prependFlushDataToEntry(entry *bufferEntry, data map[string]interface{}, va
 	// Must enter when either side has validity: old flushed data
 	// may have no nulls but concurrent writes may have introduced them.
 	if validity != nil || entry.validity != nil {
-		if entry.validity == nil {
+		wasNil := entry.validity == nil
+		if wasNil {
 			entry.validity = make(map[string][]bool)
 		}
+
+		// Backfill: when validity tracking starts for the first time, all
+		// pre-existing rows were fully valid and need entries in the map.
+		// Without this, the validity bitmap is shorter than the data arrays,
+		// causing panics in Arrow's AppendValues (length mismatch).
+		if wasNil && entry.recordCount > 0 {
+			for name := range entry.data {
+				pad := make([]bool, entry.recordCount)
+				for i := range pad {
+					pad[i] = true
+				}
+				entry.validity[name] = pad
+			}
+		}
+
 		for name, v := range validity {
 			entry.validity[name] = append(v, entry.validity[name]...)
 		}
@@ -3398,70 +3426,65 @@ func (b *ArrowBuffer) SetNotifier(n BufferChangeNotifier) {
 }
 
 func (b *ArrowBuffer) SinceRefresh(bufferKey string) ([]*TypedColumnBatch, error) {
-	for i := uint32(0); i < b.shardCount; i++ {
-		shard := b.shards[i]
-		shard.mu.RLock()
-		entry, ok := shard.buffers[bufferKey]
-		if ok && !entry.isEmpty() && entry.refreshIndex < entry.recordCount {
-			subData := make(map[string]interface{}, len(entry.data))
-			for name, col := range entry.data {
-				switch v := col.(type) {
-				case []int64:
-					subData[name] = v[entry.refreshIndex:]
-				case []float64:
-					subData[name] = v[entry.refreshIndex:]
-				case []string:
-					subData[name] = v[entry.refreshIndex:]
-				case []bool:
-					subData[name] = v[entry.refreshIndex:]
-				case []decimal128.Num:
-					subData[name] = v[entry.refreshIndex:]
-				}
+	shard := b.getShard(bufferKey)
+	shard.mu.RLock()
+	entry, ok := shard.buffers[bufferKey]
+	if ok && !entry.isEmpty() && entry.refreshIndex < entry.recordCount {
+		subData := make(map[string]interface{}, len(entry.data))
+		for name, col := range entry.data {
+			switch v := col.(type) {
+			case []int64:
+				subData[name] = v[entry.refreshIndex:]
+			case []float64:
+				subData[name] = v[entry.refreshIndex:]
+			case []string:
+				subData[name] = v[entry.refreshIndex:]
+			case []bool:
+				subData[name] = v[entry.refreshIndex:]
+			case []decimal128.Num:
+				subData[name] = v[entry.refreshIndex:]
 			}
-			var subValidity map[string][]bool
-			if entry.validity != nil {
-				subValidity = make(map[string][]bool, len(entry.validity))
-				for name, v := range entry.validity {
-					subValidity[name] = v[entry.refreshIndex:]
-				}
+		}
+		var subValidity map[string][]bool
+		if entry.validity != nil {
+			subValidity = make(map[string][]bool, len(entry.validity))
+			for name, v := range entry.validity {
+				subValidity[name] = v[entry.refreshIndex:]
 			}
-			shard.mu.RUnlock()
-			return []*TypedColumnBatch{{
-				Data:       subData,
-				Validity:   subValidity,
-				TagColumns: entry.tagColumns,
-				Signature:  entry.schema,
-			}}, nil
 		}
 		shard.mu.RUnlock()
+		return []*TypedColumnBatch{{
+			Data:       subData,
+			Validity:   subValidity,
+			TagColumns: entry.tagColumns,
+			Signature:  entry.schema,
+		}}, nil
 	}
+	shard.mu.RUnlock()
 	return nil, nil
 }
 
 // MarkRefreshed 更新指定 bufferKey 的刷新游标。
 func (b *ArrowBuffer) MarkRefreshed(bufferKey string) {
-	for i := uint32(0); i < b.shardCount; i++ {
-		shard := b.shards[i]
-		shard.mu.Lock()
-		if entry, ok := shard.buffers[bufferKey]; ok {
-			entry.refreshIndex = entry.recordCount
-		}
-		shard.mu.Unlock()
+	shard := b.getShard(bufferKey)
+	shard.mu.Lock()
+	if entry, ok := shard.buffers[bufferKey]; ok {
+		entry.refreshIndex = entry.recordCount
 	}
+	shard.mu.Unlock()
 }
 
 // TotalBufferedRecords 返回指定 bufferKey 的总缓冲记录数。
 func (b *ArrowBuffer) TotalBufferedRecords(bufferKey string) int {
-	total := 0
-	for i := uint32(0); i < b.shardCount; i++ {
-		shard := b.shards[i]
-		shard.mu.RLock()
-		if entry, ok := shard.buffers[bufferKey]; ok {
-			total += entry.recordCount
-		}
+	shard := b.getShard(bufferKey)
+	shard.mu.RLock()
+	if entry, ok := shard.buffers[bufferKey]; ok {
+		count := entry.recordCount
 		shard.mu.RUnlock()
+		return count
 	}
-	return total
+	shard.mu.RUnlock()
+	return 0
 }
 
 // TotalBufferedBytes 返回所有 bufferKey 的估算内存总占用。
