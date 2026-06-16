@@ -21,6 +21,7 @@ import (
 // WALWriter interface for writing to local WAL
 type WALWriter interface {
 	AppendRaw(payload []byte) error
+	AppendControl(ctrlType wal.ControlType, database, measurement string) error
 }
 
 // IngestHandler interface for applying entries to the ingest buffer

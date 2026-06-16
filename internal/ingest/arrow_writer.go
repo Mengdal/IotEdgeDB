@@ -2150,7 +2150,14 @@ func (b *ArrowBuffer) tryBoolZeroCopy(col []interface{}) ([]bool, bool) {
 // measurement hasn't been written to recently. The factor of 2 provides
 // a safety margin so entries aren't collected between frequent flushes.
 func (b *ArrowBuffer) gcEmptyEntries() {
-	threshold := b.maxBufferAge * 2
+	// Read maxAge from the adaptive flush engine when available so
+	// SIGHUP hot reload changes take effect. Fall back to the static
+	// maxBufferAge for compatibility with test setups that skip the engine.
+	maxAge := b.maxBufferAge
+	if e := b.adaptiveFlush.Load(); e != nil {
+		maxAge = time.Duration(e.MaxAge())
+	}
+	threshold := maxAge * 2
 	now := time.Now().UTC()
 	var cleaned int
 

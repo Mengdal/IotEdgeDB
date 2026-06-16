@@ -321,3 +321,9 @@ func (e *AdaptiveFlushEngine) ReloadConfig(payload *config.ReloadPayload) error 
 		Msg("自适应刷盘引擎配置已热加载")
 	return nil
 }
+
+// MaxAge returns the current max buffer age as nanoseconds (for use with time.Duration).
+// Reads the atomic value directly, safe for concurrent access including SIGHUP hot reload.
+func (e *AdaptiveFlushEngine) MaxAge() int64 {
+	return e.maxAge.Load()
+}
