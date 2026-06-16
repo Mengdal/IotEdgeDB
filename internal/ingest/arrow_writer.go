@@ -781,7 +781,7 @@ type ArrowBuffer struct {
 
 	// Flush timeout for storage writes (prevents workers from blocking forever on S3 hangs)
 	flushTimeout time.Duration
-	maxBufferAge time.Duration // pre-calculated from cfg.MaxBufferAgeMS
+	maxBufferAge time.Duration // pre-calculated; prefers MaxBufferAgeSeconds, falls back to MaxBufferAgeMS
 
 	// Metrics (using atomic operations to avoid lock contention)
 	totalRecordsBuffered atomic.Int64
@@ -864,11 +864,31 @@ func schemaKey(database, measurement, signature string) string {
 
 // StripSchemaHash removes the "__hash" suffix from a buffer key if present.
 // Returns the original key and an empty string if no hash suffix exists.
+// Only treats a suffix as a hash when it is exactly 8 lowercase hex characters
+// (matching schemaHash), so measurement names containing "__" are not
+// incorrectly truncated.
 func StripSchemaHash(bufferKey string) (baseKey string, hash string) {
 	if idx := strings.LastIndex(bufferKey, "__"); idx >= 0 {
-		return bufferKey[:idx], bufferKey[idx+1:]
+		suffix := bufferKey[idx+2:]
+		if isSchemaHashHex(suffix) {
+			return bufferKey[:idx], suffix
+		}
 	}
 	return bufferKey, ""
+}
+
+// isSchemaHashHex returns true when s is exactly 8 lowercase hex characters.
+func isSchemaHashHex(s string) bool {
+	if len(s) != 8 {
+		return false
+	}
+	for i := 0; i < 8; i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // hasTypeConflict returns true if oldSig and newSig share any field name
@@ -1011,6 +1031,16 @@ func (b *ArrowBuffer) getDecimalColumns(measurement string) map[string]config.De
 	return b.defaultDecimalConfig
 }
 
+// bufferMaxAgeFromConfig derives the max buffer age from config,
+// preferring the new MaxBufferAgeSeconds field over the deprecated
+// MaxBufferAgeMS. 0 for both means "use the adaptive engine's default."
+func bufferMaxAgeFromConfig(cfg *config.IngestConfig) time.Duration {
+	if cfg.MaxBufferAgeSeconds > 0 {
+		return time.Duration(cfg.MaxBufferAgeSeconds) * time.Second
+	}
+	return time.Duration(cfg.MaxBufferAgeMS) * time.Millisecond
+}
+
 // NewArrowBuffer creates a new Arrow buffer with automatic flushing
 func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger zerolog.Logger) *ArrowBuffer {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1064,7 +1094,7 @@ func NewArrowBuffer(cfg *config.IngestConfig, storage storage.Backend, logger ze
 		flushQueue:           make(chan flushTask, queueSize),
 		flushWorkers:         flushWorkers,
 		flushTimeout:         flushTimeout,
-		maxBufferAge:         time.Duration(cfg.MaxBufferAgeMS) * time.Millisecond,
+		maxBufferAge:         bufferMaxAgeFromConfig(cfg),
 		sortKeysConfig:       sortKeysConfig,
 		defaultSortKeys:      defaultSortKeys,
 		decimalConfig:        decimalConfig,

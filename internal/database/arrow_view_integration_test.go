@@ -1,3 +1,5 @@
+//go:build duckdb_arrow
+
 package database
 
 import (
@@ -95,7 +97,7 @@ func setupIntegrationTest(t *testing.T) (*DuckDB, *ingest.ArrowBuffer, *ArrowVie
 	storage := &capturingIngestStorage{}
 	buf := ingest.NewArrowBuffer(&config.IngestConfig{
 		MaxBufferSize:  100,
-		MaxBufferAgeMS: 60000, // long enough to not interfere with tests
+		MaxBufferAgeMS: 60000,  // long enough to not interfere with tests
 		Compression:    "none", // faster for tests
 		ShardCount:     4,
 		FlushWorkers:   2,
@@ -118,7 +120,7 @@ func makeColumns(measurement string, count int, tags map[string]string) map[stri
 	now := time.Now().UTC()
 	times := make([]interface{}, count)
 	for i := 0; i < count; i++ {
-		times[i] = now.Add(time.Duration(i)*time.Second).UnixMicro()
+		times[i] = now.Add(time.Duration(i) * time.Second).UnixMicro()
 	}
 
 	cols := map[string][]interface{}{
@@ -308,7 +310,7 @@ func TestSchemaChange_ViewRebuilt(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify schema A columns
-	cols, err := db.QueryContext(ctx, `SELECT column_name FROM information_schema.columns WHERE table_name='`+viewMgr.MeasurementViewNames("test","schema_evolve")[0]+`' ORDER BY column_name`)
+	cols, err := db.QueryContext(ctx, `SELECT column_name FROM information_schema.columns WHERE table_name='`+viewMgr.MeasurementViewNames("test", "schema_evolve")[0]+`' ORDER BY column_name`)
 	if err != nil {
 		t.Fatalf("query schema: %v", err)
 	}
