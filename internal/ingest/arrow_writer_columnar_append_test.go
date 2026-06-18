@@ -7,18 +7,19 @@ import (
 )
 
 // Test 1: Empty entry, no nulls — verify data/recordCount/tagColumns/estimatedBytes
-func TestAppendTypedBatchToEntry_EmptyEntry(t *testing.T) {
+func TestAppendEntryToEntry_EmptyEntry(t *testing.T) {
 	entry := &bufferEntry{data: make(map[string]interface{}), validity: nil}
-	batch := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{1, 2, 3},
 			"temp": []float64{23.5, 24.0, 25.1},
 		},
-		Validity:   nil,
-		TagColumns: []string{"sensor"},
-		Signature:  "temp:f64,time:i64",
+		recordCount: 3,
+		validity:    nil,
+		tagColumns:  []string{"sensor"},
+		schema:  "temp:f64,time:i64",
 	}
-	appendTypedBatchToEntry(entry, batch, 3)
+	appendEntryToEntry(entry, batch)
 
 	// recordCount
 	if entry.recordCount != 3 {
@@ -60,18 +61,19 @@ func TestAppendTypedBatchToEntry_EmptyEntry(t *testing.T) {
 }
 
 // Test 2: Batch with validity map — verify validity is merged
-func TestAppendTypedBatchToEntry_WithNulls(t *testing.T) {
+func TestAppendEntryToEntry_WithNulls(t *testing.T) {
 	entry := &bufferEntry{data: make(map[string]interface{}), validity: nil}
-	batch := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{1, 2, 3},
 			"val":  []float64{10.0, 20.0, 30.0},
 		},
-		Validity: map[string][]bool{
+		recordCount: 3,
+		validity: map[string][]bool{
 			"val": {true, false, true},
 		},
 	}
-	appendTypedBatchToEntry(entry, batch, 3)
+	appendEntryToEntry(entry, batch)
 
 	if entry.recordCount != 3 {
 		t.Errorf("expected recordCount=3, got %d", entry.recordCount)
@@ -107,26 +109,28 @@ func TestAppendTypedBatchToEntry_WithNulls(t *testing.T) {
 }
 
 // Test 3: Multiple appends — verify concatenation order
-func TestAppendTypedBatchToEntry_MultipleAppends(t *testing.T) {
+func TestAppendEntryToEntry_MultipleAppends(t *testing.T) {
 	entry := &bufferEntry{data: make(map[string]interface{}), validity: nil}
 
-	batch1 := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch1 := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{1, 2},
 			"val":  []float64{10, 20},
 		},
-		Validity: nil,
+		recordCount: 2,
+		validity: nil,
 	}
-	batch2 := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch2 := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{3, 4, 5},
 			"val":  []float64{30, 40, 50},
 		},
-		Validity: nil,
+		recordCount: 3,
+		validity: nil,
 	}
 
-	appendTypedBatchToEntry(entry, batch1, 2)
-	appendTypedBatchToEntry(entry, batch2, 3)
+	appendEntryToEntry(entry, batch1)
+	appendEntryToEntry(entry, batch2)
 
 	if entry.recordCount != 5 {
 		t.Errorf("expected recordCount=5, got %d", entry.recordCount)
@@ -157,28 +161,30 @@ func TestAppendTypedBatchToEntry_MultipleAppends(t *testing.T) {
 }
 
 // Test 4: Mixed nulls — first batch has nulls, second doesn't (must pad with true)
-func TestAppendTypedBatchToEntry_MixedNulls(t *testing.T) {
+func TestAppendEntryToEntry_MixedNulls(t *testing.T) {
 	entry := &bufferEntry{data: make(map[string]interface{}), validity: nil}
 
-	batch1 := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch1 := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{1, 2},
 			"val":  []float64{10, 20},
 		},
-		Validity: map[string][]bool{
+		recordCount: 2,
+		validity: map[string][]bool{
 			"val": {true, false},
 		},
 	}
-	batch2 := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch2 := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{3, 4},
 			"val":  []float64{30, 40},
 		},
-		Validity: nil, // all valid
+		recordCount: 2,
+		validity: nil, // all valid
 	}
 
-	appendTypedBatchToEntry(entry, batch1, 2)
-	appendTypedBatchToEntry(entry, batch2, 2)
+	appendEntryToEntry(entry, batch1)
+	appendEntryToEntry(entry, batch2)
 
 	if entry.recordCount != 4 {
 		t.Errorf("expected recordCount=4, got %d", entry.recordCount)
@@ -217,20 +223,21 @@ func TestAppendTypedBatchToEntry_MixedNulls(t *testing.T) {
 }
 
 // Test 5: Decimal128 column type — verify decimal128.Num columns are appended
-func TestAppendTypedBatchToEntry_Decimal(t *testing.T) {
+func TestAppendEntryToEntry_Decimal(t *testing.T) {
 	val1, _ := decimal128.FromString("123.45", 10, 2)
 	val2, _ := decimal128.FromString("678.90", 10, 2)
 
 	entry := &bufferEntry{data: make(map[string]interface{}), validity: nil}
-	batch := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch := &bufferEntry{
+		data: map[string]interface{}{
 			"time":  []int64{1, 2},
 			"price": []decimal128.Num{val1, val2},
 		},
-		Validity: nil,
+		recordCount: 2,
+		validity: nil,
 	}
 
-	appendTypedBatchToEntry(entry, batch, 2)
+	appendEntryToEntry(entry, batch)
 
 	if entry.recordCount != 2 {
 		t.Errorf("expected recordCount=2, got %d", entry.recordCount)
@@ -249,16 +256,17 @@ func TestAppendTypedBatchToEntry_Decimal(t *testing.T) {
 }
 
 // Test 6: String and Bool column types
-func TestAppendTypedBatchToEntry_StringAndBool(t *testing.T) {
+func TestAppendEntryToEntry_StringAndBool(t *testing.T) {
 	entry := &bufferEntry{data: make(map[string]interface{}), validity: nil}
-	batch := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch := &bufferEntry{
+		data: map[string]interface{}{
 			"id":     []string{"a", "b", "c"},
 			"active": []bool{true, false, true},
 		},
-		Validity: nil,
+		recordCount: 3,
+		validity: nil,
 	}
-	appendTypedBatchToEntry(entry, batch, 3)
+	appendEntryToEntry(entry, batch)
 
 	if entry.recordCount != 3 {
 		t.Errorf("expected recordCount=3, got %d", entry.recordCount)
@@ -284,37 +292,39 @@ func TestAppendTypedBatchToEntry_StringAndBool(t *testing.T) {
 // Test 7: First batch has validity, creates new validity map
 // Second batch has additional validity columns that don't exist in entry yet
 // Third batch has nil validity — pads existing columns
-func TestAppendTypedBatchToEntry_MultipleValidityAppends(t *testing.T) {
+func TestAppendEntryToEntry_MultipleValidityAppends(t *testing.T) {
 	entry := &bufferEntry{data: make(map[string]interface{}), validity: nil}
 
 	// Batch 1: with nulls in "val"
-	batch1 := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch1 := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{1, 2},
 			"val":  []float64{10.0, 20.0},
 		},
-		Validity: map[string][]bool{
+		recordCount: 2,
+		validity: map[string][]bool{
 			"val": {true, false},
 		},
 	}
-	appendTypedBatchToEntry(entry, batch1, 2)
+	appendEntryToEntry(entry, batch1)
 	if v := entry.validity["val"]; len(v) != 2 || v[0] != true || v[1] != false {
 		t.Fatalf("after batch1: expected validity[val]=[true,false], got %v", v)
 	}
 
 	// Batch 2: with nulls in "val" and "flag"
-	batch2 := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch2 := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{3, 4},
 			"val":  []float64{30.0, 40.0},
 			"flag": []bool{true, false},
 		},
-		Validity: map[string][]bool{
+		recordCount: 2,
+		validity: map[string][]bool{
 			"val":  {false, true},
 			"flag": {true, true},
 		},
 	}
-	appendTypedBatchToEntry(entry, batch2, 2)
+	appendEntryToEntry(entry, batch2)
 
 	// val: existing (true,false) + batch2 (false,true) = [true,false,false,true]
 	if v := entry.validity["val"]; len(v) != 4 || v[0] != true || v[1] != false || v[2] != false || v[3] != true {
@@ -326,15 +336,16 @@ func TestAppendTypedBatchToEntry_MultipleValidityAppends(t *testing.T) {
 	}
 
 	// Batch 3: nil validity — pad existing columns with all-true
-	batch3 := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch3 := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{5},
 			"val":  []float64{50.0},
 			"flag": []bool{true},
 		},
-		Validity: nil,
+		recordCount: 1,
+		validity: nil,
 	}
-	appendTypedBatchToEntry(entry, batch3, 1)
+	appendEntryToEntry(entry, batch3)
 
 	// val: [true,false,false,true] padded with 1 true = [true,false,false,true,true]
 	if v := entry.validity["val"]; len(v) != 5 || v[4] != true {

@@ -46,8 +46,8 @@ func BenchmarkBufferEntry_WritePath(b *testing.B) {
 	const batchSize = 100
 	const flushThreshold = 1000 // reset entry every 10 batches
 
-	batch := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch := &bufferEntry{
+		data: map[string]interface{}{
 			"time":  make([]int64, batchSize),
 			"value": make([]float64, batchSize),
 			"host":  make([]string, batchSize),
@@ -61,11 +61,11 @@ func BenchmarkBufferEntry_WritePath(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if itersSinceReset >= flushThreshold {
 			// Simulate flush: extract data, create wrapper (zero-copy)
-			_ = &TypedColumnBatch{Data: entry.data, Validity: entry.validity, TagColumns: entry.tagColumns}
+			_ = &bufferEntry{data: entry.data, validity: entry.validity, tagColumns: entry.tagColumns}
 			entry = &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
 			itersSinceReset = 0
 		}
-		appendTypedBatchToEntry(entry, batch, batchSize)
+		appendEntryToEntry(entry, batch)
 		itersSinceReset++
 	}
 }
@@ -82,10 +82,10 @@ func BenchmarkBufferEntry_WriteFlushCycle(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		// Create batches (outside timing — same cost for both approaches)
-		batches := make([]*TypedColumnBatch, batchesPerCycle)
+		batches := make([]*bufferEntry, batchesPerCycle)
 		for j := 0; j < batchesPerCycle; j++ {
-			batches[j] = &TypedColumnBatch{
-				Data: map[string]interface{}{
+			batches[j] = &bufferEntry{
+				data: map[string]interface{}{
 					"time":  make([]int64, batchSize),
 					"value": make([]float64, batchSize),
 					"host":  make([]string, batchSize),
@@ -97,13 +97,13 @@ func BenchmarkBufferEntry_WriteFlushCycle(b *testing.B) {
 		b.StartTimer()
 		// Write phase
 		for _, batch := range batches {
-			appendTypedBatchToEntry(entry, batch, batchSize)
+			appendEntryToEntry(entry, batch)
 		}
 		// Flush phase: extract + wrap (replace mergeBatches)
-		_ = &TypedColumnBatch{
-			Data:       entry.data,
-			Validity:   entry.validity,
-			TagColumns: entry.tagColumns,
+		_ = &bufferEntry{
+			data:       entry.data,
+			validity:   entry.validity,
+			tagColumns: entry.tagColumns,
 		}
 		b.StopTimer()
 	}
@@ -114,8 +114,8 @@ func BenchmarkBufferEntry_WriteFlushCycle(b *testing.B) {
 func BenchmarkBufferEntry_WriteZeroCopy(b *testing.B) {
 	const batchSize = 1000
 
-	batch := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	batch := &bufferEntry{
+		data: map[string]interface{}{
 			"time":  make([]int64, batchSize),
 			"value": make([]float64, batchSize),
 			"host":  make([]string, batchSize),
@@ -125,7 +125,7 @@ func BenchmarkBufferEntry_WriteZeroCopy(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
-		appendTypedBatchToEntry(entry, batch, batchSize)
+		appendEntryToEntry(entry, batch)
 	}
 }
 
@@ -136,10 +136,10 @@ func BenchmarkBufferEntry_SingleRow(b *testing.B) {
 	const numBatches = 1000
 	const batchSize = 1
 
-	batches := make([]*TypedColumnBatch, numBatches)
+	batches := make([]*bufferEntry, numBatches)
 	for j := 0; j < numBatches; j++ {
-		batches[j] = &TypedColumnBatch{
-			Data: map[string]interface{}{
+		batches[j] = &bufferEntry{
+			data: map[string]interface{}{
 				"time":  []int64{int64(j)},
 				"value": []float64{float64(j) * 0.5},
 				"host":  []string{"srv"},
@@ -151,10 +151,10 @@ func BenchmarkBufferEntry_SingleRow(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
 		for _, batch := range batches {
-			appendTypedBatchToEntry(entry, batch, batchSize)
+			appendEntryToEntry(entry, batch)
 		}
 		// Flush: extract + wrap
-		_ = &TypedColumnBatch{Data: entry.data, Validity: entry.validity, TagColumns: entry.tagColumns}
+		_ = &bufferEntry{data: entry.data, validity: entry.validity, tagColumns: entry.tagColumns}
 	}
 }
 
@@ -163,9 +163,9 @@ func BenchmarkBufferEntry_SingleRow(b *testing.B) {
 func BenchmarkBufferEntry_SameTotalRows(b *testing.B) {
 	const totalRows = 1000
 
-	makeBatches := func(batchSize int) []*TypedColumnBatch {
+	makeBatches := func(batchSize int) []*bufferEntry {
 		n := totalRows / batchSize
-		batches := make([]*TypedColumnBatch, n)
+		batches := make([]*bufferEntry, n)
 		for j := 0; j < n; j++ {
 			times := make([]int64, batchSize)
 			vals := make([]float64, batchSize)
@@ -175,8 +175,8 @@ func BenchmarkBufferEntry_SameTotalRows(b *testing.B) {
 				vals[k] = float64(j*batchSize+k) * 0.5
 				hosts[k] = "srv"
 			}
-			batches[j] = &TypedColumnBatch{
-				Data: map[string]interface{}{
+			batches[j] = &bufferEntry{
+				data: map[string]interface{}{
 					"time": times, "value": vals, "host": hosts,
 				},
 			}
@@ -190,9 +190,9 @@ func BenchmarkBufferEntry_SameTotalRows(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
 			for _, batch := range batches {
-				appendTypedBatchToEntry(entry, batch, 1)
+				appendEntryToEntry(entry, batch)
 			}
-			_ = &TypedColumnBatch{Data: entry.data, Validity: entry.validity, TagColumns: entry.tagColumns}
+			_ = &bufferEntry{data: entry.data, validity: entry.validity, tagColumns: entry.tagColumns}
 		}
 	})
 	b.Run("batchSize=100", func(b *testing.B) {
@@ -201,9 +201,9 @@ func BenchmarkBufferEntry_SameTotalRows(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			entry := &bufferEntry{data: make(map[string]interface{}), startTime: time.Now()}
 			for _, batch := range batches {
-				appendTypedBatchToEntry(entry, batch, 100)
+				appendEntryToEntry(entry, batch)
 			}
-			_ = &TypedColumnBatch{Data: entry.data, Validity: entry.validity, TagColumns: entry.tagColumns}
+			_ = &bufferEntry{data: entry.data, validity: entry.validity, tagColumns: entry.tagColumns}
 		}
 	})
 }

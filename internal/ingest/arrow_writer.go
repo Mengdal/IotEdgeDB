@@ -627,14 +627,29 @@ func colMake(firstVal any, n int) any {
 func colAppend(dst, src any) any {
 	switch v := src.(type) {
 	case []int64:
+		if dst == nil {
+			return v
+		}
 		return append(dst.([]int64), v...)
 	case []float64:
+		if dst == nil {
+			return v
+		}
 		return append(dst.([]float64), v...)
 	case []string:
+		if dst == nil {
+			return v
+		}
 		return append(dst.([]string), v...)
 	case []bool:
+		if dst == nil {
+			return v
+		}
 		return append(dst.([]bool), v...)
 	case []decimal128.Num:
+		if dst == nil {
+			return v
+		}
 		return append(dst.([]decimal128.Num), v...)
 	default:
 		return dst
@@ -1790,6 +1805,9 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 				entry.data[name] = colAppend(entry.data[name], arr)
 				if valid != nil {
 					hasNils = true
+					if entry.validity == nil {
+						entry.validity = make(map[string][]bool)
+					}
 					entry.validity[name] = append(entry.validity[name], valid...)
 				} else if entry.validity != nil {
 					// Pad: no nulls in this column but validity tracking is active
@@ -1832,6 +1850,9 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 			entry.data[name] = colAppend(entry.data[name], arr)
 			if colHasNils {
 				hasNils = true
+				if entry.validity == nil {
+					entry.validity = make(map[string][]bool)
+				}
 				entry.validity[name] = append(entry.validity[name], valid...)
 			}
 
@@ -1858,6 +1879,9 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 			entry.data[name] = colAppend(entry.data[name], arr)
 			if colHasNils {
 				hasNils = true
+				if entry.validity == nil {
+					entry.validity = make(map[string][]bool)
+				}
 				entry.validity[name] = append(entry.validity[name], valid...)
 			}
 
@@ -1884,6 +1908,9 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 			entry.data[name] = colAppend(entry.data[name], arr)
 			if colHasNils {
 				hasNils = true
+				if entry.validity == nil {
+					entry.validity = make(map[string][]bool)
+				}
 				entry.validity[name] = append(entry.validity[name], valid...)
 			}
 
@@ -1910,6 +1937,9 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 			entry.data[name] = colAppend(entry.data[name], arr)
 			if colHasNils {
 				hasNils = true
+				if entry.validity == nil {
+					entry.validity = make(map[string][]bool)
+				}
 				entry.validity[name] = append(entry.validity[name], valid...)
 			}
 

@@ -384,16 +384,17 @@ func TestDecimal128_ConvertColumnsToTyped(t *testing.T) {
 		"symbol": {"AAPL", "GOOG", "MSFT"},
 	}
 
-	batch, numRecords, err := buffer.convertColumnsToTyped("trades", columns)
+	entry := &bufferEntry{data: make(map[string]interface{})}
+	numRecords, err := buffer.convertAndAppendToEntry(entry, "trades", columns)
 	if err != nil {
-		t.Fatalf("convertColumnsToTyped failed: %v", err)
+		t.Fatalf("convertAndAppendToEntry failed: %v", err)
 	}
 	if numRecords != 3 {
 		t.Fatalf("expected 3 records, got %d", numRecords)
 	}
 
 	// Verify price is []decimal128.Num
-	priceCol, ok := batch.Data["price"]
+	priceCol, ok := entry.data["price"]
 	if !ok {
 		t.Fatal("missing 'price' column")
 	}
@@ -404,13 +405,17 @@ func TestDecimal128_ConvertColumnsToTyped(t *testing.T) {
 	if len(prices) != 3 {
 		t.Fatalf("expected 3 prices, got %d", len(prices))
 	}
-	// No validity for price (no nils)
-	if batch.Validity["price"] != nil {
-		t.Error("expected no validity bitmap for price (no nils)")
+	// Price has backfilled all-true validity (because amount had nils)
+	priceValidity := entry.validity["price"]
+	if priceValidity == nil {
+		t.Fatal("expected backfilled validity for price")
+	}
+	if len(priceValidity) != 3 || !priceValidity[0] || !priceValidity[1] || !priceValidity[2] {
+		t.Errorf("expected all-true validity for price, got %v", priceValidity)
 	}
 
 	// Verify amount has validity (has nil)
-	amountCol, ok := batch.Data["amount"]
+	amountCol, ok := entry.data["amount"]
 	if !ok {
 		t.Fatal("missing 'amount' column")
 	}
@@ -421,7 +426,7 @@ func TestDecimal128_ConvertColumnsToTyped(t *testing.T) {
 	if len(amounts) != 3 {
 		t.Fatalf("expected 3 amounts, got %d", len(amounts))
 	}
-	amountValidity := batch.Validity["amount"]
+	amountValidity := entry.validity["amount"]
 	if amountValidity == nil {
 		t.Fatal("expected validity bitmap for amount (has nil)")
 	}
@@ -430,17 +435,17 @@ func TestDecimal128_ConvertColumnsToTyped(t *testing.T) {
 	}
 
 	// Verify non-decimal columns are unaffected
-	timeCol, ok := batch.Data["time"].([]int64)
+	timeCol, ok := entry.data["time"].([]int64)
 	if !ok {
-		t.Fatalf("expected []int64 for time, got %T", batch.Data["time"])
+		t.Fatalf("expected []int64 for time, got %T", entry.data["time"])
 	}
 	if len(timeCol) != 3 {
 		t.Fatalf("expected 3 times, got %d", len(timeCol))
 	}
 
-	symbolCol, ok := batch.Data["symbol"].([]string)
+	symbolCol, ok := entry.data["symbol"].([]string)
 	if !ok {
-		t.Fatalf("expected []string for symbol, got %T", batch.Data["symbol"])
+		t.Fatalf("expected []string for symbol, got %T", entry.data["symbol"])
 	}
 	if symbolCol[0] != "AAPL" {
 		t.Errorf("expected AAPL, got %s", symbolCol[0])
@@ -470,8 +475,9 @@ func TestDecimal128_WriteParquetRoundTrip(t *testing.T) {
 		"price": {Precision: 18, Scale: 8},
 	}
 
+	entry := &bufferEntry{data: columns}
 	ctx := context.Background()
-	data, err := writer.WriteParquetColumnar(ctx, "trades", columns, nil, nil, decimalCols, nil)
+	data, err := writer.WriteParquetColumnar(ctx, "trades", entry, decimalCols, nil)
 	if err != nil {
 		t.Fatalf("WriteParquetColumnar failed: %v", err)
 	}
@@ -497,14 +503,15 @@ func TestDecimal128_StringConversion(t *testing.T) {
 		"price": {"123.456789012345678901"},
 	}
 
-	batch, _, err := buffer.convertColumnsToTyped("trades", columns)
+	entry := &bufferEntry{data: make(map[string]interface{})}
+	_, err := buffer.convertAndAppendToEntry(entry, "trades", columns)
 	if err != nil {
-		t.Fatalf("convertColumnsToTyped with string decimal failed: %v", err)
+		t.Fatalf("convertAndAppendToEntry with string decimal failed: %v", err)
 	}
 
-	prices, ok := batch.Data["price"].([]decimal128.Num)
+	prices, ok := entry.data["price"].([]decimal128.Num)
 	if !ok {
-		t.Fatalf("expected []decimal128.Num, got %T", batch.Data["price"])
+		t.Fatalf("expected []decimal128.Num, got %T", entry.data["price"])
 	}
 
 	// Verify the value was parsed (non-zero)
@@ -524,15 +531,16 @@ func TestDecimal128_NoConfigNoImpact(t *testing.T) {
 		"price": {float64(123.45)},
 	}
 
-	batch, _, err := buffer.convertColumnsToTyped("trades", columns)
+	entry := &bufferEntry{data: make(map[string]interface{})}
+	_, err := buffer.convertAndAppendToEntry(entry, "trades", columns)
 	if err != nil {
-		t.Fatalf("convertColumnsToTyped failed: %v", err)
+		t.Fatalf("convertAndAppendToEntry failed: %v", err)
 	}
 
 	// Price should be []float64, not []decimal128.Num
-	_, ok := batch.Data["price"].([]float64)
+	_, ok := entry.data["price"].([]float64)
 	if !ok {
-		t.Fatalf("expected []float64 for price without decimal config, got %T", batch.Data["price"])
+		t.Fatalf("expected []float64 for price without decimal config, got %T", entry.data["price"])
 	}
 }
 
@@ -789,26 +797,26 @@ func TestSliceColumnsByIndices_BoundsCheck(t *testing.T) {
 	}
 }
 
-// TestSortTypedColumnBatchByKeys_NilValidityEntry verifies that a nil validity entry
-// is preserved as nil per the TypedColumnBatch contract (nil = "all valid").
+// TestSortEntryByKeys_NilValidityEntry verifies that a nil validity entry
+// is preserved as nil per the bufferEntry contract (nil = "all valid").
 // Without the nil guard, the reorder loop would panic with index out of range.
-func TestSortTypedColumnBatchByKeys_NilValidityEntry(t *testing.T) {
-	batch := &TypedColumnBatch{
-		Data: map[string]interface{}{
+func TestSortEntryByKeys_NilValidityEntry(t *testing.T) {
+	entry := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{3, 1, 2},
 			"val":  []float64{30.0, 10.0, 20.0},
 		},
-		Validity: map[string][]bool{
+		validity: map[string][]bool{
 			"val": nil, // contract: nil = all valid
 		},
-		TagColumns: []string{},
-		Signature:  "time:i64,val:f64",
+		tagColumns: []string{},
+		schema:     "time:i64,val:f64",
 	}
 
-	sorted := sortTypedColumnBatchByKeys(batch, []string{"time"})
+	sorted := sortEntryByKeys(entry, []string{"time"})
 
 	// Data should be sorted ascending
-	sortedTime := sorted.Data["time"].([]int64)
+	sortedTime := sorted.data["time"].([]int64)
 	expected := []int64{1, 2, 3}
 	for i, v := range expected {
 		if sortedTime[i] != v {
@@ -817,52 +825,52 @@ func TestSortTypedColumnBatchByKeys_NilValidityEntry(t *testing.T) {
 	}
 
 	// Validity entry for "val" must remain nil (not a zero-initialized false slice)
-	if got, ok := sorted.Validity["val"]; !ok {
+	if got, ok := sorted.validity["val"]; !ok {
 		t.Errorf("validity entry for 'val' missing")
 	} else if got != nil {
 		t.Errorf("validity entry for 'val' = %v, want nil (all-valid contract)", got)
 	}
 
-	// Signature should be preserved
-	if sorted.Signature != batch.Signature {
-		t.Errorf("signature = %q, want %q", sorted.Signature, batch.Signature)
+	// Schema should be preserved
+	if sorted.schema != entry.schema {
+		t.Errorf("schema = %q, want %q", sorted.schema, entry.schema)
 	}
 }
 
-// TestSliceTypedColumnBatchByIndices_NilValidityEntry verifies that a nil validity
-// entry is preserved as nil per the TypedColumnBatch contract. Without the nil
+// TestSliceEntryByIndices_NilValidityEntry verifies that a nil validity
+// entry is preserved as nil per the bufferEntry contract. Without the nil
 // guard, the original loop would produce an all-false slice (meaning "all null"),
 // incorrectly converting valid data to null.
-func TestSliceTypedColumnBatchByIndices_NilValidityEntry(t *testing.T) {
-	batch := &TypedColumnBatch{
-		Data: map[string]interface{}{
+func TestSliceEntryByIndices_NilValidityEntry(t *testing.T) {
+	entry := &bufferEntry{
+		data: map[string]interface{}{
 			"time": []int64{1, 2, 3, 4},
 			"val":  []float64{10.0, 20.0, 30.0, 40.0},
 		},
-		Validity: map[string][]bool{
+		validity: map[string][]bool{
 			"val": nil, // contract: nil = all valid
 		},
-		TagColumns: []string{},
-		Signature:  "time:i64,val:f64",
+		tagColumns: []string{},
+		schema:     "time:i64,val:f64",
 	}
 
-	sliced := sliceTypedColumnBatchByIndices(batch, []int{0, 2})
+	sliced := sliceEntryByIndices(entry, []int{0, 2})
 
 	// Data should be sliced to indices 0, 2
-	slicedTime := sliced.Data["time"].([]int64)
+	slicedTime := sliced.data["time"].([]int64)
 	if len(slicedTime) != 2 || slicedTime[0] != 1 || slicedTime[1] != 3 {
 		t.Errorf("sliced time = %v, want [1 3]", slicedTime)
 	}
 
 	// Validity entry for "val" must remain nil
-	if got, ok := sliced.Validity["val"]; !ok {
+	if got, ok := sliced.validity["val"]; !ok {
 		t.Errorf("validity entry for 'val' missing")
 	} else if got != nil {
 		t.Errorf("validity entry for 'val' = %v, want nil (all-valid contract)", got)
 	}
 
-	// Signature should be preserved
-	if sliced.Signature != batch.Signature {
-		t.Errorf("signature = %q, want %q", sliced.Signature, batch.Signature)
+	// Schema should be preserved
+	if sliced.schema != entry.schema {
+		t.Errorf("schema = %q, want %q", sliced.schema, entry.schema)
 	}
 }
