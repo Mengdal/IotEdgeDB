@@ -531,18 +531,7 @@ func appendTypedBatchToEntry(entry *bufferEntry, batch *TypedColumnBatch, batchR
 	for name, v := range batch.Data {
 		if existing, ok := entry.data[name]; ok {
 			// Column exists — append new values.
-			switch newVals := v.(type) {
-			case []int64:
-				entry.data[name] = append(existing.([]int64), newVals...)
-			case []float64:
-				entry.data[name] = append(existing.([]float64), newVals...)
-			case []string:
-				entry.data[name] = append(existing.([]string), newVals...)
-			case []bool:
-				entry.data[name] = append(existing.([]bool), newVals...)
-			case []decimal128.Num:
-				entry.data[name] = append(existing.([]decimal128.Num), newVals...)
-			}
+			entry.data[name] = colAppend(existing, v)
 		} else {
 			// Column doesn't exist — direct assign (slice header copy,
 			// zero-copy for first write — shares the backing array).
@@ -719,6 +708,24 @@ func colSlice(col any, indices []int) any {
 	}
 }
 
+// colSliceFrom returns the sub-slice of col from start index to end.
+func colSliceFrom(col any, start int) any {
+	switch v := col.(type) {
+	case []int64:
+		return v[start:]
+	case []float64:
+		return v[start:]
+	case []string:
+		return v[start:]
+	case []bool:
+		return v[start:]
+	case []decimal128.Num:
+		return v[start:]
+	default:
+		return col
+	}
+}
+
 // colPermute reorders a column according to permutation indices. Allocates a new slice.
 func colPermute(col any, indices []int) any {
 	n := len(indices)
@@ -862,30 +869,7 @@ func estimateBytesPerRow(batch *TypedColumnBatch) uint64 {
 	}
 	var totalBytes uint64
 	for _, col := range batch.Data {
-		switch v := col.(type) {
-		case []int64:
-			totalBytes += 8
-		case []float64:
-			totalBytes += 8
-		case []bool:
-			totalBytes += 1
-		case []string:
-			n := len(v)
-			if n == 0 {
-				totalBytes += 32 // default per-row byte estimate for empty string slices
-				continue
-			}
-			if n > 100 {
-				n = 100
-			}
-			var sumLen int
-			for i := 0; i < n; i++ {
-				sumLen += len(v[i])
-			}
-			totalBytes += uint64(sumLen / n)
-		default:
-			totalBytes += 64
-		}
+		totalBytes += colEstBytesPerRow(col)
 	}
 	totalBytes += uint64(len(batch.Data))
 	return totalBytes
@@ -900,30 +884,7 @@ func estimateBytesFromData(data map[string]interface{}, numRows int) uint64 {
 	}
 	var perRow uint64
 	for _, col := range data {
-		switch v := col.(type) {
-		case []int64:
-			perRow += 8
-		case []float64:
-			perRow += 8
-		case []bool:
-			perRow += 1
-		case []string:
-			n := len(v)
-			if n == 0 {
-				perRow += 32 // default per-row byte estimate for empty string slices
-				continue
-			}
-			if n > 100 {
-				n = 100
-			}
-			var sumLen int
-			for i := 0; i < n; i++ {
-				sumLen += len(v[i])
-			}
-			perRow += uint64(sumLen / n)
-		default:
-			perRow += 64
-		}
+		perRow += colEstBytesPerRow(col)
 	}
 	perRow += uint64(len(data))
 	return perRow * uint64(numRows)
@@ -1062,21 +1023,7 @@ func getColumnSignature(columns map[string]interface{}) string {
 		if len(name) == 0 || name[0] == '_' {
 			continue // skip empty and internal columns
 		}
-		var typ string
-		switch val.(type) {
-		case []int64:
-			typ = "i64"
-		case []float64:
-			typ = "f64"
-		case []string:
-			typ = "str"
-		case []bool:
-			typ = "bool"
-		case []decimal128.Num:
-			typ = "dec"
-		default:
-			typ = "unk"
-		}
+		typ := colTypeTag(val)
 		entries = append(entries, colEntry{name, typ})
 		size += 1 + len(name) + 1 + len(typ) // comma + name + colon + typ
 	}
@@ -2094,36 +2041,19 @@ func typedBatchToWALRecords(database, measurement string, batch *TypedColumnBatc
 			"_measurement": measurement,
 		}
 		for colName, colData := range batch.Data {
-			switch arr := colData.(type) {
-			case []int64:
-				if i < len(arr) {
-					row[colName] = arr[i]
-				}
-			case []float64:
-				if i < len(arr) {
-					row[colName] = arr[i]
-				}
-			case []string:
-				if i < len(arr) {
-					row[colName] = arr[i]
-				}
-			case []bool:
-				if i < len(arr) {
-					row[colName] = arr[i]
-				}
-			case []decimal128.Num:
-				// WAL stores decimals as float64 (lossy but WAL is recovery-only)
-				if i < len(arr) {
-					s := int32(0)
-					if decimalCols != nil {
-						if spec, ok := decimalCols[colName]; ok {
-							s = spec.Scale
-						}
+			val := colIthVal(colData, i)
+			// WAL stores decimals as float64 (lossy but WAL is recovery-only)
+			if dec, ok := val.(decimal128.Num); ok {
+				s := int32(0)
+				if decimalCols != nil {
+					if spec, ok2 := decimalCols[colName]; ok2 {
+						s = spec.Scale
 					}
-					f := arr[i].ToBigFloat(s)
-					row[colName], _ = f.Float64()
 				}
+				f := dec.ToBigFloat(s)
+				val, _ = f.Float64()
 			}
+			row[colName] = val
 		}
 		records[i] = row
 	}
@@ -3004,37 +2934,10 @@ func (b *ArrowBuffer) prependFlushData(bufferKey string, data map[string]interfa
 func prependFlushDataToEntry(entry *bufferEntry, data map[string]interface{}, validity map[string][]bool, tagColumns []string, flushedRows int) {
 	// Prepend column data: old data first, new data second
 	for name, col := range data {
-		switch v := col.(type) {
-		case []int64:
-			if existing, ok := entry.data[name]; ok {
-				entry.data[name] = append(v, existing.([]int64)...)
-			} else {
-				entry.data[name] = v
-			}
-		case []float64:
-			if existing, ok := entry.data[name]; ok {
-				entry.data[name] = append(v, existing.([]float64)...)
-			} else {
-				entry.data[name] = v
-			}
-		case []string:
-			if existing, ok := entry.data[name]; ok {
-				entry.data[name] = append(v, existing.([]string)...)
-			} else {
-				entry.data[name] = v
-			}
-		case []bool:
-			if existing, ok := entry.data[name]; ok {
-				entry.data[name] = append(v, existing.([]bool)...)
-			} else {
-				entry.data[name] = v
-			}
-		case []decimal128.Num:
-			if existing, ok := entry.data[name]; ok {
-				entry.data[name] = append(v, existing.([]decimal128.Num)...)
-			} else {
-				entry.data[name] = v
-			}
+		if existing, ok := entry.data[name]; ok {
+			entry.data[name] = colAppend(col, existing)
+		} else {
+			entry.data[name] = col
 		}
 	}
 
@@ -3126,19 +3029,7 @@ func sortColumnsByKeysWithPermutation(columns map[string]interface{}, sortKeys [
 	// Get first column to determine row count
 	var n int
 	for _, col := range columns {
-		switch c := col.(type) {
-		case []int64:
-			n = len(c)
-		case []float64:
-			n = len(c)
-		case []string:
-			n = len(c)
-		case []bool:
-			n = len(c)
-		case []decimal128.Num:
-			n = len(c)
-		}
-		if n > 0 {
+		if n = colLen(col); n > 0 {
 			break
 		}
 	}
@@ -3229,48 +3120,13 @@ func sortColumnsByTimeOnlyWithPermutation(columns map[string]interface{}) (map[s
 // This avoids map lookups on every comparison (called O(n log n) times)
 func compareMultiKeyCached(cachedCols []interface{}, i, j int) bool {
 	for _, col := range cachedCols {
-		switch c := col.(type) {
-		case []int64:
-			if c[i] < c[j] {
-				return true
-			}
-			if c[i] > c[j] {
-				return false
-			}
-			// Equal, continue to next key
-
-		case []float64:
-			if c[i] < c[j] {
-				return true
-			}
-			if c[i] > c[j] {
-				return false
-			}
-
-		case []string:
-			if c[i] < c[j] {
-				return true
-			}
-			if c[i] > c[j] {
-				return false
-			}
-
-		case []bool:
-			if !c[i] && c[j] { // false < true
-				return true
-			}
-			if c[i] && !c[j] {
-				return false
-			}
-
-		case []decimal128.Num:
-			if c[i].Less(c[j]) {
-				return true
-			}
-			if c[i].Greater(c[j]) {
-				return false
-			}
+		if colLess(col, i, j) {
+			return true
 		}
+		if colLess(col, j, i) {
+			return false
+		}
+		// Equal, continue to next key
 	}
 
 	// All keys equal
@@ -3279,45 +3135,7 @@ func compareMultiKeyCached(cachedCols []interface{}, i, j int) bool {
 
 // applyPermutation reorders a column according to permutation indices
 func applyPermutation(colData interface{}, indices []int) interface{} {
-	switch col := colData.(type) {
-	case []int64:
-		result := make([]int64, len(indices))
-		for i, idx := range indices {
-			result[i] = col[idx]
-		}
-		return result
-
-	case []float64:
-		result := make([]float64, len(indices))
-		for i, idx := range indices {
-			result[i] = col[idx]
-		}
-		return result
-
-	case []string:
-		result := make([]string, len(indices))
-		for i, idx := range indices {
-			result[i] = col[idx]
-		}
-		return result
-
-	case []bool:
-		result := make([]bool, len(indices))
-		for i, idx := range indices {
-			result[i] = col[idx]
-		}
-		return result
-
-	case []decimal128.Num:
-		result := make([]decimal128.Num, len(indices))
-		for i, idx := range indices {
-			result[i] = col[idx]
-		}
-		return result
-
-	default:
-		return colData // Unknown type, return as-is
-	}
+	return colPermute(colData, indices)
 }
 
 // sortTypedColumnBatchByKeys sorts a TypedColumnBatch by the given keys,
@@ -3455,72 +3273,11 @@ func groupByHour(times []int64) (map[int64]*hourBucket, int64, int64, error) {
 
 // sliceColumnsByIndices extracts rows from all columns based on a list of indices
 // Returns a new column map with only the selected rows
-// Handles sparse columns (columns shorter than indices) by using zero values for out-of-bounds access
 func sliceColumnsByIndices(columns map[string]interface{}, indices []int) map[string]interface{} {
 	result := make(map[string]interface{}, len(columns))
-
 	for colName, colData := range columns {
-		switch col := colData.(type) {
-		case []int64:
-			newCol := make([]int64, len(indices))
-			colLen := len(col)
-			for i, idx := range indices {
-				if idx < colLen {
-					newCol[i] = col[idx]
-				}
-				// else: leave as zero value (sparse column handling)
-			}
-			result[colName] = newCol
-
-		case []float64:
-			newCol := make([]float64, len(indices))
-			colLen := len(col)
-			for i, idx := range indices {
-				if idx < colLen {
-					newCol[i] = col[idx]
-				}
-				// else: leave as zero value (sparse column handling)
-			}
-			result[colName] = newCol
-
-		case []string:
-			newCol := make([]string, len(indices))
-			colLen := len(col)
-			for i, idx := range indices {
-				if idx < colLen {
-					newCol[i] = col[idx]
-				}
-				// else: leave as empty string (sparse column handling)
-			}
-			result[colName] = newCol
-
-		case []bool:
-			newCol := make([]bool, len(indices))
-			colLen := len(col)
-			for i, idx := range indices {
-				if idx < colLen {
-					newCol[i] = col[idx]
-				}
-				// else: leave as false (sparse column handling)
-			}
-			result[colName] = newCol
-
-		case []decimal128.Num:
-			newCol := make([]decimal128.Num, len(indices))
-			colLen := len(col)
-			for i, idx := range indices {
-				if idx < colLen {
-					newCol[i] = col[idx]
-				}
-			}
-			result[colName] = newCol
-
-		default:
-			// Unknown type, copy as-is
-			result[colName] = colData
-		}
+		result[colName] = colSlice(colData, indices)
 	}
-
 	return result
 }
 
@@ -3716,18 +3473,7 @@ func (b *ArrowBuffer) SinceRefresh(bufferKey string) ([]*TypedColumnBatch, error
 	if ok && !entry.isEmpty() && entry.refreshIndex < entry.recordCount {
 		subData := make(map[string]interface{}, len(entry.data))
 		for name, col := range entry.data {
-			switch v := col.(type) {
-			case []int64:
-				subData[name] = v[entry.refreshIndex:]
-			case []float64:
-				subData[name] = v[entry.refreshIndex:]
-			case []string:
-				subData[name] = v[entry.refreshIndex:]
-			case []bool:
-				subData[name] = v[entry.refreshIndex:]
-			case []decimal128.Num:
-				subData[name] = v[entry.refreshIndex:]
-			}
+			subData[name] = colSliceFrom(col, entry.refreshIndex)
 		}
 		var subValidity map[string][]bool
 		if entry.validity != nil {
