@@ -510,7 +510,7 @@ func TLERecordsToTypedColumnar(records []TLERecord) (*bufferEntry, int) {
 	n := len(records)
 	if n == 0 {
 		return &bufferEntry{
-			data: make(map[string]interface{}),
+			columns: make(map[string]ColumnData),
 		}, 0
 	}
 
@@ -562,27 +562,27 @@ func TLERecordsToTypedColumnar(records []TLERecord) (*bufferEntry, int) {
 	}
 
 	entry := &bufferEntry{
-		data: map[string]interface{}{
-			"time":                     timeCol,
-			"norad_id":                 noradID,
-			"object_name":              objectName,
-			"classification":           classification,
-			"international_designator": intlDesignator,
-			"orbit_type":               orbitType,
-			"inclination_deg":          inclinationDeg,
-			"raan_deg":                 raanDeg,
-			"eccentricity":             eccentricity,
-			"arg_perigee_deg":          argPerigeeDeg,
-			"mean_anomaly_deg":         meanAnomalyDeg,
-			"mean_motion_rev_day":      meanMotionRevDay,
-			"bstar":                    bstar,
-			"mean_motion_dot":          meanMotionDot,
-			"mean_motion_ddot":         meanMotionDDot,
-			"revolution_number":        revolutionNumber,
-			"semi_major_axis_km":       semiMajorAxisKm,
-			"period_min":               periodMin,
-			"apogee_km":                apogeeKm,
-			"perigee_km":               perigeeKm,
+		columns: map[string]ColumnData{
+			"time":                     {Data: timeCol},
+			"norad_id":                 {Data: noradID},
+			"object_name":              {Data: objectName},
+			"classification":           {Data: classification},
+			"international_designator": {Data: intlDesignator},
+			"orbit_type":               {Data: orbitType},
+			"inclination_deg":          {Data: inclinationDeg},
+			"raan_deg":                 {Data: raanDeg},
+			"eccentricity":             {Data: eccentricity},
+			"arg_perigee_deg":          {Data: argPerigeeDeg},
+			"mean_anomaly_deg":         {Data: meanAnomalyDeg},
+			"mean_motion_rev_day":      {Data: meanMotionRevDay},
+			"bstar":                    {Data: bstar},
+			"mean_motion_dot":          {Data: meanMotionDot},
+			"mean_motion_ddot":         {Data: meanMotionDDot},
+			"revolution_number":        {Data: revolutionNumber},
+			"semi_major_axis_km":       {Data: semiMajorAxisKm},
+			"period_min":               {Data: periodMin},
+			"apogee_km":                {Data: apogeeKm},
+			"perigee_km":               {Data: perigeeKm},
 		},
 		recordCount: n,
 		// No validity bitmaps — TLE records never have null values

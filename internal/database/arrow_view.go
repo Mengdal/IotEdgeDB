@@ -297,8 +297,8 @@ func (m *ArrowViewManager) appendToTable(bufferKey string, entries []*ingest.Ent
 
 // appendEntryToTable 使用 DuckDB Appender API 批量列式写入单个 batch 到临时表。
 func (m *ArrowViewManager) appendEntryToTable(conn *sql.Conn, viewName string, entry *ingest.Entry) (int, error) {
-	colNames := make([]string, 0, len(entry.GetData()))
-	for name := range entry.GetData() {
+	colNames := make([]string, 0, len(entry.GetColumns()))
+	for name := range entry.GetColumns() {
 		colNames = append(colNames, name)
 	}
 	sort.Strings(colNames)
@@ -308,8 +308,8 @@ func (m *ArrowViewManager) appendEntryToTable(conn *sql.Conn, viewName string, e
 	}
 
 	rowCount := 0
-	for _, col := range entry.GetData() {
-		switch v := col.(type) {
+	for _, col := range entry.GetColumns() {
+		switch v := col.Data.(type) {
 		case []int64:
 			rowCount = len(v)
 		case []float64:
@@ -342,7 +342,7 @@ func (m *ArrowViewManager) appendEntryToTable(conn *sql.Conn, viewName string, e
 		for row := 0; row < rowCount; row++ {
 			values := make([]driver.Value, len(colNames))
 			for i, name := range colNames {
-				values[i] = columnValue(entry.GetData()[name], entry.GetValidity()[name], row)
+				values[i] = columnValue(entry.GetColumns()[name].Data, entry.GetColumns()[name].Validity, row)
 			}
 			if err := appender.AppendRow(values...); err != nil {
 				_ = appender.Close()
@@ -365,15 +365,15 @@ func (m *ArrowViewManager) appendEntryToTable(conn *sql.Conn, viewName string, e
 
 // buildCreateTableSQL 从 TypedColumnBatch 构建 CREATE TABLE 语句。
 func (m *ArrowViewManager) buildCreateTableSQL(viewName string, entry *ingest.Entry) string {
-	colNames := make([]string, 0, len(entry.GetData()))
-	for name := range entry.GetData() {
+	colNames := make([]string, 0, len(entry.GetColumns()))
+	for name := range entry.GetColumns() {
 		colNames = append(colNames, name)
 	}
 	sort.Strings(colNames)
 
 	colDefs := make([]string, len(colNames))
 	for i, name := range colNames {
-		colDefs[i] = fmt.Sprintf(`"%s" %s`, name, duckTypeFor(entry.GetData()[name]))
+		colDefs[i] = fmt.Sprintf(`"%s" %s`, name, duckTypeFor(entry.GetColumns()[name].Data))
 	}
 	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)", QuoteIdent(viewName), strings.Join(colDefs, ", "))
 }

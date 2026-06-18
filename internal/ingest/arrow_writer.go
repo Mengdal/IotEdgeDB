@@ -250,7 +250,7 @@ func sortColumnsTimeFirst(colNames []string) {
 // inferSchema infers Arrow schema from columnar data.
 // tagColumns optionally lists which columns are tags (stored as schema metadata for compaction dedup).
 // decimalCols optionally maps column names to DecimalSpec for Decimal128 columns.
-func (w *ArrowWriter) inferSchema(columns map[string]interface{}, tagColumns []string, decimalCols map[string]config.DecimalSpec) (*arrow.Schema, error) {
+func (w *ArrowWriter) inferSchema(columns map[string]ColumnData, tagColumns []string, decimalCols map[string]config.DecimalSpec) (*arrow.Schema, error) {
 	var fields []arrow.Field
 
 	for name, col := range columns {
@@ -261,7 +261,7 @@ func (w *ArrowWriter) inferSchema(columns map[string]interface{}, tagColumns []s
 
 		var arrowType arrow.DataType
 
-		switch arr := col.(type) {
+		switch arr := col.Data.(type) {
 		case []int64:
 			// Special case: time column uses timestamp type
 			if name == "time" {
@@ -330,7 +330,7 @@ func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement stri
 	// Use provided schema, or infer as fallback (defense-in-depth)
 	if schema == nil {
 		var err error
-		schema, err = w.inferSchema(entry.data, entry.tagColumns, decimalCols)
+		schema, err = w.inferSchema(entry.columns, entry.tagColumns, decimalCols)
 		if err != nil {
 			return nil, fmt.Errorf("failed to infer schema: %w", err)
 		}
@@ -358,16 +358,12 @@ func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement stri
 
 	// Build arrays
 	for i, field := range schema.Fields() {
-		col, ok := entry.data[field.Name]
+		cd, ok := entry.columns[field.Name]
 		if !ok {
 			return nil, fmt.Errorf("column %s not found in data", field.Name)
 		}
-
-		// Get validity bitmap for this column (nil means all valid)
-		var colValidity []bool
-		if entry.validity != nil {
-			colValidity = entry.validity[field.Name]
-		}
+		col := cd.Data
+		colValidity := cd.Validity
 
 		switch field.Type.ID() {
 		case arrow.INT64:
@@ -490,15 +486,14 @@ func (w *ArrowWriter) writeRecordToParquet(schema *arrow.Schema, arrays []arrow.
 // In snapshot scenarios (sort intermediates, VIEW returns), startTime,
 // estimatedBytes, and refreshIndex are zero-value dead fields.
 type bufferEntry struct {
-	data           map[string]interface{} // growing typed column arrays ([]int64, []float64, []string, []bool, []decimal128.Num)
-	validity       map[string][]bool      // growing null bitmaps; nil entry = all valid; nil map = no nulls at all
-	tagColumns     []string               // tag column names (stable for this schema, set on first write)
-	startTime      time.Time              // first record arrival time
-	recordCount    int                    // total record count
-	estimatedBytes uint64                 // estimated memory usage
-	schema         string                 // column signature for schema evolution
-	arrowSchema    *arrow.Schema          // inferred Arrow schema (nil until first flush preparation)
-	refreshIndex   int                    // Arrow VIEW incremental refresh cursor
+	columns        map[string]ColumnData // growing typed column arrays with null bitmaps
+	tagColumns     []string              // tag column names (stable for this schema, set on first write)
+	startTime      time.Time             // first record arrival time
+	recordCount    int                   // total record count
+	estimatedBytes uint64                // estimated memory usage
+	schema         string                // column signature for schema evolution
+	arrowSchema    *arrow.Schema         // inferred Arrow schema (nil until first flush preparation)
+	refreshIndex   int                   // Arrow VIEW incremental refresh cursor
 }
 
 // Entry is the exported alias for bufferEntry. External consumers
@@ -510,15 +505,12 @@ type Entry = bufferEntry
 // Such entries are "empty shells" kept to preserve the cached arrowSchema
 // across flush cycles — they are eligible for GC after extended idleness.
 func (e *bufferEntry) isEmpty() bool {
-	return len(e.data) == 0
+	return len(e.columns) == 0
 }
 
 
-// GetData returns the data map for external consumers (database package).
-func (e *bufferEntry) GetData() map[string]interface{} { return e.data }
-
-// GetValidity returns the validity map for external consumers (database package).
-func (e *bufferEntry) GetValidity() map[string][]bool { return e.validity }
+// GetColumns returns the columns map for external consumers (database package).
+func (e *bufferEntry) GetColumns() map[string]ColumnData { return e.columns }
 
 // GetSchema returns the column signature for external consumers (database package).
 func (e *bufferEntry) GetSchema() string { return e.schema }
@@ -530,51 +522,19 @@ func (e *bufferEntry) GetTagColumns() []string { return e.tagColumns }
 
 // This is the core operation for the columnar in-place accumulation approach.
 func appendEntryToEntry(dst, src *bufferEntry) {
-	if dst.data == nil {
-		dst.data = make(map[string]interface{})
+	if dst.columns == nil {
+		dst.columns = make(map[string]ColumnData)
 	}
-
-	for name, col := range src.data {
-		if existing, ok := dst.data[name]; ok {
-			dst.data[name] = colAppend(existing, col)
+	for name, col := range src.columns {
+		if existing, ok := dst.columns[name]; ok {
+			dst.columns[name] = colAppend(existing, col)
 		} else {
-			dst.data[name] = col
+			dst.columns[name] = col
 		}
 	}
-
-	// Validity merge (identical logic to before, just src.validity instead of batch.validity)
-	if src.validity != nil || dst.validity != nil {
-		wasNil := dst.validity == nil
-		if wasNil {
-			dst.validity = make(map[string][]bool)
-		}
-		if wasNil && dst.recordCount > 0 {
-			for name := range dst.data {
-				pad := make([]bool, dst.recordCount)
-				for i := range pad {
-					pad[i] = true
-				}
-				dst.validity[name] = pad
-			}
-		}
-		for name, vals := range src.validity {
-			dst.validity[name] = append(dst.validity[name], vals...)
-		}
-		for name := range dst.validity {
-			if _, inSrc := src.validity[name]; !inSrc {
-				pad := make([]bool, src.recordCount)
-				for i := range pad {
-					pad[i] = true
-				}
-				dst.validity[name] = append(dst.validity[name], pad...)
-			}
-		}
-	}
-
 	if len(dst.tagColumns) == 0 && len(src.tagColumns) > 0 {
 		dst.tagColumns = src.tagColumns
 	}
-
 	dst.recordCount += src.recordCount
 	dst.estimatedBytes += uint64(src.recordCount) * estimateBytesPerRow(src)
 }
@@ -968,29 +928,29 @@ type bufferShard struct {
 
 // estimateBytesPerRow estimates per-row memory usage for a bufferEntry.
 func estimateBytesPerRow(entry *bufferEntry) uint64 {
-	if entry == nil || len(entry.data) == 0 {
+	if entry == nil || len(entry.columns) == 0 {
 		return 256
 	}
 	var totalBytes uint64
-	for _, col := range entry.data {
+	for _, col := range entry.columns {
 		totalBytes += colEstBytesPerRow(col)
 	}
-	totalBytes += uint64(len(entry.data))
+	totalBytes += uint64(len(entry.columns))
 	return totalBytes
 }
 
 // estimateBytesFromData estimates total memory usage from a columnar data map.
 // numRows is the row count (from any typed column's len). Used by prepend paths
 // where data arrives without a TypedColumnBatch wrapper.
-func estimateBytesFromData(data map[string]interface{}, numRows int) uint64 {
-	if len(data) == 0 {
+func estimateBytesFromData(columns map[string]ColumnData, numRows int) uint64 {
+	if len(columns) == 0 {
 		return 0
 	}
 	var perRow uint64
-	for _, col := range data {
+	for _, col := range columns {
 		perRow += colEstBytesPerRow(col)
 	}
-	perRow += uint64(len(data))
+	perRow += uint64(len(columns))
 	return perRow * uint64(numRows)
 }
 
@@ -1115,7 +1075,7 @@ type ArrowBuffer struct {
 // Encodes both column names and their Go slice types so that a type change (e.g.
 // int64→float64 on the same column) is detected as schema evolution and triggers a
 // flush before the new-schema data is appended.
-func getColumnSignature(columns map[string]interface{}) string {
+func getColumnSignature(columns map[string]ColumnData) string {
 	type colEntry struct{ name, typ string }
 	entries := make([]colEntry, 0, len(columns))
 	size := -1 // will add 1 per comma; starts at -1 so the first entry adds 0 commas
@@ -1888,7 +1848,6 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 	decimalCols := b.getDecimalColumns(measurement)
 	var numRecords int
 
-	hasNils := false
 	for name, col := range columns {
 		if len(col) == 0 {
 			continue
@@ -1904,21 +1863,7 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 				if err != nil {
 					return 0, fmt.Errorf("decimal conversion error in column '%s': %w", name, err)
 				}
-				entry.data[name] = colAppend(entry.data[name], arr)
-				if valid != nil {
-					hasNils = true
-					if entry.validity == nil {
-						entry.validity = make(map[string][]bool)
-					}
-					entry.validity[name] = append(entry.validity[name], valid...)
-				} else if entry.validity != nil {
-					// Pad: no nulls in this column but validity tracking is active
-					pad := make([]bool, numRecords)
-					for i := range pad {
-						pad[i] = true
-					}
-					entry.validity[name] = append(entry.validity[name], pad...)
-				}
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr, Validity: valid})
 				continue
 			}
 		}
@@ -1931,7 +1876,7 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 		switch firstVal.(type) {
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 			if arr, ok := b.tryInt64ZeroCopy(col); ok {
-				entry.data[name] = colAppend(entry.data[name], arr)
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr})
 				continue
 			}
 			arr := make([]int64, len(col))
@@ -1949,18 +1894,15 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 				}
 				arr[i] = val
 			}
-			entry.data[name] = colAppend(entry.data[name], arr)
 			if colHasNils {
-				hasNils = true
-				if entry.validity == nil {
-					entry.validity = make(map[string][]bool)
-				}
-				entry.validity[name] = append(entry.validity[name], valid...)
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr, Validity: valid})
+			} else {
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr})
 			}
 
 		case float32, float64:
 			if arr, ok := b.tryFloat64ZeroCopy(col); ok {
-				entry.data[name] = colAppend(entry.data[name], arr)
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr})
 				continue
 			}
 			arr := make([]float64, len(col))
@@ -1978,18 +1920,15 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 				}
 				arr[i] = val
 			}
-			entry.data[name] = colAppend(entry.data[name], arr)
 			if colHasNils {
-				hasNils = true
-				if entry.validity == nil {
-					entry.validity = make(map[string][]bool)
-				}
-				entry.validity[name] = append(entry.validity[name], valid...)
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr, Validity: valid})
+			} else {
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr})
 			}
 
 		case string:
 			if arr, ok := b.tryStringZeroCopy(col); ok {
-				entry.data[name] = colAppend(entry.data[name], arr)
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr})
 				continue
 			}
 			arr := make([]string, len(col))
@@ -2007,18 +1946,15 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 				}
 				arr[i] = str
 			}
-			entry.data[name] = colAppend(entry.data[name], arr)
 			if colHasNils {
-				hasNils = true
-				if entry.validity == nil {
-					entry.validity = make(map[string][]bool)
-				}
-				entry.validity[name] = append(entry.validity[name], valid...)
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr, Validity: valid})
+			} else {
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr})
 			}
 
 		case bool:
 			if arr, ok := b.tryBoolZeroCopy(col); ok {
-				entry.data[name] = colAppend(entry.data[name], arr)
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr})
 				continue
 			}
 			arr := make([]bool, len(col))
@@ -2036,13 +1972,10 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 				}
 				arr[i] = bval
 			}
-			entry.data[name] = colAppend(entry.data[name], arr)
 			if colHasNils {
-				hasNils = true
-				if entry.validity == nil {
-					entry.validity = make(map[string][]bool)
-				}
-				entry.validity[name] = append(entry.validity[name], valid...)
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr, Validity: valid})
+			} else {
+				entry.columns[name] = colAppend(entry.columns[name], ColumnData{Data: arr})
 			}
 
 		default:
@@ -2050,26 +1983,10 @@ func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement st
 		}
 	}
 
-	// Backfill validity for columns without nulls in this batch
-	if hasNils && entry.validity != nil {
-		for name := range entry.data {
-			if _, has := entry.validity[name]; has {
-				continue
-			}
-			// This column had no nulls in this batch but other columns did
-			pad := make([]bool, numRecords)
-			for i := range pad {
-				pad[i] = true
-			}
-			entry.validity[name] = append(entry.validity[name], pad...)
-		}
-	}
-
 	entry.recordCount += numRecords
-	entry.estimatedBytes += estimateBytesFromData(entry.data, numRecords)
+	entry.estimatedBytes += estimateBytesFromData(entry.columns, numRecords)
 	return numRecords, nil
 }
-
 func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string, record *models.ColumnarRecord, skipWAL bool) error {
 	// WAL: Write to WAL before buffering (if enabled)
 	// Skip WAL during recovery to avoid re-writing recovered data
@@ -2109,8 +2026,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 
 	shard := b.getShard(bufferKey)
 
-	var dataForFlush map[string]interface{}
-	var validityForFlush map[string][]bool
+	var columnsForFlush map[string]ColumnData
 	var tagColumnsForFlush []string
 	var shouldFlush bool
 
@@ -2119,7 +2035,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	entry, exists := shard.buffers[bufferKey]
 	if !exists {
 		entry = &bufferEntry{
-			data:      make(map[string]interface{}),
+			columns:   make(map[string]ColumnData),
 			startTime: time.Now().UTC(),
 			schema:    newSignature,
 		}
@@ -2149,10 +2065,10 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 	}
 
 	// Infer Arrow schema on first data arrival
-	if entry.arrowSchema == nil && len(entry.data) > 0 {
+	if entry.arrowSchema == nil && len(entry.columns) > 0 {
 		tagCols := record.TagColumns
 		decCols := b.getDecimalColumns(record.Measurement)
-		schema, err := b.writer.inferSchema(entry.data, tagCols, decCols)
+		schema, err := b.writer.inferSchema(entry.columns, tagCols, decCols)
 		if err != nil {
 			shard.mu.Unlock()
 			return fmt.Errorf("failed to infer Arrow schema: %w", err)
@@ -2164,11 +2080,9 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 
 	// Flush gate
 	if b.adaptiveFlush.Load() == nil && totalBuffered >= b.config.MaxBufferSize {
-		dataForFlush = entry.data
-		validityForFlush = entry.validity
+		columnsForFlush = entry.columns
 		tagColumnsForFlush = entry.tagColumns
-		entry.data = make(map[string]interface{})
-		entry.validity = nil
+		entry.columns = make(map[string]ColumnData)
 		entry.tagColumns = nil
 		entry.recordCount = 0
 		entry.estimatedBytes = 0
@@ -2181,8 +2095,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 			database:    database,
 			measurement: record.Measurement,
 			entry: &bufferEntry{
-				data:        dataForFlush,
-				validity:    validityForFlush,
+				columns:     columnsForFlush,
 				tagColumns:  tagColumnsForFlush,
 				recordCount: totalBuffered,
 				arrowSchema: entry.arrowSchema,
@@ -2193,7 +2106,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		if outcome == flushQueued {
 			shouldFlush = true
 		} else {
-			prependFlushDataToEntry(entry, dataForFlush, validityForFlush, tagColumnsForFlush, totalBuffered)
+			prependFlushDataToEntry(entry, columnsForFlush, tagColumnsForFlush, totalBuffered)
 		}
 	}
 
@@ -2239,8 +2152,8 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	}
 
 	newSignature := src.schema
-	if newSignature == "" && len(src.data) > 0 {
-		newSignature = getColumnSignature(src.data)
+	if newSignature == "" && len(src.columns) > 0 {
+		newSignature = getColumnSignature(src.columns)
 	}
 
 	bufferKey := schemaKey(database, measurement, newSignature)
@@ -2250,8 +2163,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 
 	shard := b.getShard(bufferKey)
 
-	var dataForFlush map[string]interface{}
-	var validityForFlush map[string][]bool
+	var columnsForFlush map[string]ColumnData
 	var tagColumnsForFlush []string
 	var shouldFlush bool
 
@@ -2260,7 +2172,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	entry, exists := shard.buffers[bufferKey]
 	if !exists {
 		entry = &bufferEntry{
-			data:      make(map[string]interface{}),
+			columns:   make(map[string]ColumnData),
 			startTime: time.Now().UTC(),
 			schema:    newSignature,
 		}
@@ -2271,10 +2183,10 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		entry.estimatedBytes = 0
 		entry.refreshIndex = 0
 	}
-	if entry.arrowSchema == nil && len(src.data) > 0 {
+	if entry.arrowSchema == nil && len(src.columns) > 0 {
 		tagCols := src.tagColumns
 		decCols := b.getDecimalColumns(measurement)
-		schema, err := b.writer.inferSchema(src.data, tagCols, decCols)
+		schema, err := b.writer.inferSchema(src.columns, tagCols, decCols)
 		if err != nil {
 			shard.mu.Unlock()
 			return fmt.Errorf("failed to infer Arrow schema: %w", err)
@@ -2288,11 +2200,9 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 	numRecords := src.recordCount
 
 	if b.adaptiveFlush.Load() == nil && totalBuffered >= b.config.MaxBufferSize {
-		dataForFlush = entry.data
-		validityForFlush = entry.validity
+		columnsForFlush = entry.columns
 		tagColumnsForFlush = entry.tagColumns
-		entry.data = make(map[string]interface{})
-		entry.validity = nil
+		entry.columns = make(map[string]ColumnData)
 		entry.tagColumns = nil
 		entry.recordCount = 0
 		entry.estimatedBytes = 0
@@ -2305,8 +2215,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 			database:    database,
 			measurement: measurement,
 			entry: &bufferEntry{
-				data:        dataForFlush,
-				validity:    validityForFlush,
+				columns:     columnsForFlush,
 				tagColumns:  tagColumnsForFlush,
 				recordCount: totalBuffered,
 				arrowSchema: entry.arrowSchema,
@@ -2317,7 +2226,7 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		if outcome == flushQueued {
 			shouldFlush = true
 		} else {
-			prependFlushDataToEntry(entry, dataForFlush, validityForFlush, tagColumnsForFlush, totalBuffered)
+			prependFlushDataToEntry(entry, columnsForFlush, tagColumnsForFlush, totalBuffered)
 		}
 	}
 
@@ -2356,7 +2265,7 @@ func entryToWALRecords(database, measurement string, entry *bufferEntry, decimal
 			"_database":    database,
 			"_measurement": measurement,
 		}
-		for colName, colData := range entry.data {
+		for colName, colData := range entry.columns {
 			val := colIthVal(colData, i)
 			// WAL stores decimals as float64 (lossy but WAL is recovery-only)
 			if dec, ok := val.(decimal128.Num); ok {
@@ -2594,7 +2503,7 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 			measurement := task.measurement
 
 			if err := b.flushPartitionedData(task.ctx, task.bufferKey, database, measurement, task.entry, "async", startTime); err != nil {
-				b.prependFlushData(task.bufferKey, task.entry.data, task.entry.validity, task.entry.tagColumns, task.entry.recordCount, task.entry.arrowSchema)
+				b.prependFlushData(task.bufferKey, task.entry.columns, task.entry.tagColumns, task.entry.recordCount, task.entry.arrowSchema)
 				b.logger.Error().
 					Err(err).
 					Str("buffer_key", task.bufferKey).
@@ -2719,8 +2628,7 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 			}
 			continue
 		}
-		data := entry.data
-		validity := entry.validity
+		columns := entry.columns
 		tagCols := entry.tagColumns
 		recordCount := entry.recordCount
 		arrowSchema := entry.arrowSchema
@@ -2738,8 +2646,7 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 				Msg("Buffer overflow: flushing oldest entry inline")
 
 			merged := &bufferEntry{
-				data:        data,
-				validity:    validity,
+				columns:     columns,
 				tagColumns:  tagCols,
 				schema:      entry.schema,
 				recordCount: recordCount,
@@ -2753,7 +2660,7 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 				// Restore data to buffer for retry. prependFlushData recreates
 				// the entry with fresh startTime so it won't be re-selected
 				// as oldest immediately on the next eviction iteration.
-				b.prependFlushData(oldestKey, data, validity, tagCols, recordCount, arrowSchema)
+				b.prependFlushData(oldestKey, columns, tagCols, recordCount, arrowSchema)
 			}
 		} else {
 			if *inlineFlushCount >= maxInlineFlushes {
@@ -2825,7 +2732,7 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 	decimalCols := b.getDecimalColumns(measurement)
 
 	// Extract time column (doesn't need to be sorted yet)
-	times, ok := merged.data["time"].([]int64)
+	times, ok := merged.columns["time"].Data.([]int64)
 	if !ok || len(times) == 0 {
 		return fmt.Errorf("no time data in batch")
 	}
@@ -3000,11 +2907,9 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 	recordCount := entry.recordCount
 
 	// Move data out of entry
-	data := entry.data
-	validity := entry.validity
+	columns := entry.columns
 	tagCols := entry.tagColumns
-	entry.data = make(map[string]interface{})
-	entry.validity = nil
+	entry.columns = make(map[string]ColumnData)
 	entry.tagColumns = nil
 	entry.recordCount = 0
 	entry.estimatedBytes = 0
@@ -3013,8 +2918,7 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 	shard.mu.Unlock()
 
 	merged := &bufferEntry{
-		data:       data,
-		validity:   validity,
+		columns:    columns,
 		tagColumns: tagCols,
 		schema:     entry.schema,
 		recordCount: recordCount,
@@ -3022,7 +2926,7 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 
 	startTime := time.Now().UTC()
 	if err := b.flushPartitionedData(ctx, bufferKey, database, measurement, merged, flushTypeSync, startTime); err != nil {
-		b.prependFlushData(bufferKey, data, validity, tagCols, recordCount, entry.arrowSchema)
+		b.prependFlushData(bufferKey, columns, tagCols, recordCount, entry.arrowSchema)
 		b.logger.Warn().
 			Err(err).
 			Str("buffer_key", bufferKey).
@@ -3058,78 +2962,40 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 // prependFlushData prepends flushed data back into the buffer entry after a flush failure.
 // Old data (the failed flush payload) is placed BEFORE new data that may have arrived
 // concurrently during the flush attempt, preserving arrival-time order.
-func (b *ArrowBuffer) prependFlushData(bufferKey string, data map[string]interface{}, validity map[string][]bool, tagColumns []string, flushedRows int, arrowSchema *arrow.Schema) {
+func (b *ArrowBuffer) prependFlushData(bufferKey string, columns map[string]ColumnData, tagColumns []string, flushedRows int, arrowSchema *arrow.Schema) {
 	shard := b.getShard(bufferKey)
 	shard.mu.Lock()
 	entry, exists := shard.buffers[bufferKey]
 	if !exists {
 		// Entry was deleted by eviction — recreate it.
 		// Compute schema from data so type-conflict detection works.
-		schema := getColumnSignature(data)
+		schema := getColumnSignature(columns)
 		entry = &bufferEntry{
-			data:           data,
-			validity:       validity,
+			columns:        columns,
 			tagColumns:     tagColumns,
 			schema:         schema,
 			startTime:      time.Now().UTC(),
 			recordCount:    flushedRows,
-			estimatedBytes: estimateBytesFromData(data, flushedRows),
+			estimatedBytes: estimateBytesFromData(columns, flushedRows),
 			arrowSchema:    arrowSchema,
 		}
 		shard.buffers[bufferKey] = entry
 		shard.mu.Unlock()
 		return
 	}
-	prependFlushDataToEntry(entry, data, validity, tagColumns, flushedRows)
+	prependFlushDataToEntry(entry, columns, tagColumns, flushedRows)
 	shard.mu.Unlock()
 }
 
 // prependFlushDataToEntry prepends flush data into an existing entry.
 // Caller must hold shard.mu.
-func prependFlushDataToEntry(entry *bufferEntry, data map[string]interface{}, validity map[string][]bool, tagColumns []string, flushedRows int) {
+func prependFlushDataToEntry(entry *bufferEntry, columns map[string]ColumnData, tagColumns []string, flushedRows int) {
 	// Prepend column data: old data first, new data second
-	for name, col := range data {
-		if existing, ok := entry.data[name]; ok {
-			entry.data[name] = colAppend(col, existing)
+	for name, col := range columns {
+		if existing, ok := entry.columns[name]; ok {
+			entry.columns[name] = colAppend(col, existing)
 		} else {
-			entry.data[name] = col
-		}
-	}
-
-	// Prepend validity bitmaps.
-	// Must enter when either side has validity: old flushed data
-	// may have no nulls but concurrent writes may have introduced them.
-	if validity != nil || entry.validity != nil {
-		wasNil := entry.validity == nil
-		if wasNil {
-			entry.validity = make(map[string][]bool)
-		}
-
-		// Backfill: when validity tracking starts for the first time, all
-		// pre-existing rows were fully valid and need entries in the map.
-		// Without this, the validity bitmap is shorter than the data arrays,
-		// causing panics in Arrow's AppendValues (length mismatch).
-		if wasNil && entry.recordCount > 0 {
-			for name := range entry.data {
-				pad := make([]bool, entry.recordCount)
-				for i := range pad {
-					pad[i] = true
-				}
-				entry.validity[name] = pad
-			}
-		}
-
-		for name, v := range validity {
-			entry.validity[name] = append(v, entry.validity[name]...)
-		}
-		for name := range entry.validity {
-			if _, has := validity[name]; !has {
-				padding := make([]bool, flushedRows)
-				for i := range padding {
-					padding[i] = true
-				}
-				entry.validity[name] = append(padding, entry.validity[name]...)
-			}
+			entry.columns[name] = col
 		}
 	}
 
@@ -3140,19 +3006,19 @@ func prependFlushDataToEntry(entry *bufferEntry, data map[string]interface{}, va
 	}
 
 	entry.recordCount += flushedRows
-	entry.estimatedBytes += estimateBytesFromData(data, flushedRows)
+	entry.estimatedBytes += estimateBytesFromData(entry.columns, entry.recordCount)
 }
 
 // sortColumnsByTime sorts all columns by the time column in-place
 // Returns the sorted columns and any error encountered
-func sortColumnsByTime(columns map[string]interface{}) (map[string]interface{}, error) {
+func sortColumnsByTime(columns map[string]ColumnData) (map[string]ColumnData, error) {
 	// Delegate to multi-key sort with just "time" key
 	return sortColumnsByKeys(columns, []string{"time"})
 }
 
 // sortColumnsByKeys sorts columns by multiple keys (e.g., sensor_id, then time)
 // Returns the sorted columns and any error encountered
-func sortColumnsByKeys(columns map[string]interface{}, sortKeys []string) (map[string]interface{}, error) {
+func sortColumnsByKeys(columns map[string]ColumnData, sortKeys []string) (map[string]ColumnData, error) {
 	sorted, _, err := sortColumnsByKeysWithPermutation(columns, sortKeys)
 	return sorted, err
 }
@@ -3160,7 +3026,7 @@ func sortColumnsByKeys(columns map[string]interface{}, sortKeys []string) (map[s
 // sortColumnsByKeysWithPermutation sorts columns and returns the permutation indices used.
 // The permutation can be applied to validity bitmaps or other parallel arrays by the caller,
 // avoiding a second sort pass.
-func sortColumnsByKeysWithPermutation(columns map[string]interface{}, sortKeys []string) (map[string]interface{}, []int, error) {
+func sortColumnsByKeysWithPermutation(columns map[string]ColumnData, sortKeys []string) (map[string]ColumnData, []int, error) {
 	if len(sortKeys) == 0 {
 		return nil, nil, fmt.Errorf("no sort keys provided")
 	}
@@ -3172,7 +3038,7 @@ func sortColumnsByKeysWithPermutation(columns map[string]interface{}, sortKeys [
 	}
 
 	// Validate all sort keys exist and cache column pointers
-	cachedCols := make([]interface{}, len(sortKeys))
+	cachedCols := make([]ColumnData, len(sortKeys))
 	for i, key := range sortKeys {
 		col, exists := columns[key]
 		if !exists {
@@ -3205,9 +3071,9 @@ func sortColumnsByKeysWithPermutation(columns map[string]interface{}, sortKeys [
 	})
 
 	// Apply permutation to all columns
-	result := make(map[string]interface{}, len(columns))
+	result := make(map[string]ColumnData, len(columns))
 	for colName, colData := range columns {
-		result[colName] = applyPermutation(colData, indices)
+		result[colName] = colPermute(colData, indices)
 	}
 
 	return result, indices, nil
@@ -3215,20 +3081,20 @@ func sortColumnsByKeysWithPermutation(columns map[string]interface{}, sortKeys [
 
 // sortColumnsByTimeOnly is an optimized path for time-only sorting.
 // Avoids the multi-key comparator overhead for the common case.
-func sortColumnsByTimeOnly(columns map[string]interface{}) (map[string]interface{}, error) {
+func sortColumnsByTimeOnly(columns map[string]ColumnData) (map[string]ColumnData, error) {
 	sorted, _, err := sortColumnsByTimeOnlyWithPermutation(columns)
 	return sorted, err
 }
 
 // sortColumnsByTimeOnlyWithPermutation sorts by time and returns the permutation used.
 // Returns nil indices when data is already sorted (no permutation needed).
-func sortColumnsByTimeOnlyWithPermutation(columns map[string]interface{}) (map[string]interface{}, []int, error) {
-	timeCol, exists := columns["time"]
+func sortColumnsByTimeOnlyWithPermutation(columns map[string]ColumnData) (map[string]ColumnData, []int, error) {
+timeCol, exists := columns["time"]
 	if !exists {
 		return nil, nil, fmt.Errorf("time column not found")
 	}
 
-	times, ok := timeCol.([]int64)
+	times, ok := timeCol.Data.([]int64)
 	if !ok {
 		return nil, nil, fmt.Errorf("time column is not []int64")
 	}
@@ -3263,9 +3129,9 @@ func sortColumnsByTimeOnlyWithPermutation(columns map[string]interface{}) (map[s
 	})
 
 	// Apply permutation to all columns
-	result := make(map[string]interface{}, len(columns))
+	result := make(map[string]ColumnData, len(columns))
 	for colName, colData := range columns {
-		result[colName] = applyPermutation(colData, indices)
+		result[colName] = colPermute(colData, indices)
 	}
 
 	return result, indices, nil
@@ -3273,7 +3139,7 @@ func sortColumnsByTimeOnlyWithPermutation(columns map[string]interface{}) (map[s
 
 // compareMultiKeyCached compares two rows by multiple sort keys using cached column pointers
 // This avoids map lookups on every comparison (called O(n log n) times)
-func compareMultiKeyCached(cachedCols []interface{}, i, j int) bool {
+func compareMultiKeyCached(cachedCols []ColumnData, i, j int) bool {
 	for _, col := range cachedCols {
 		if colLess(col, i, j) {
 			return true
@@ -3288,72 +3154,40 @@ func compareMultiKeyCached(cachedCols []interface{}, i, j int) bool {
 	return false
 }
 
-// applyPermutation reorders a column according to permutation indices
-func applyPermutation(colData interface{}, indices []int) interface{} {
-	return colPermute(colData, indices)
-}
+
 
 // sortEntryByKeys sorts a TypedColumnBatch by the given keys,
 // keeping validity bitmaps aligned with the reordered data.
 // Uses the permutation returned by sortColumnsByKeysWithPermutation to avoid
 // a second sort pass when validity bitmaps need reordering.
 func sortEntryByKeys(batch *bufferEntry, sortKeys []string) *bufferEntry {
-	sorted, indices, err := sortColumnsByKeysWithPermutation(batch.data, sortKeys)
+	sorted, _, err := sortColumnsByKeysWithPermutation(batch.columns, sortKeys)
 	if err != nil {
 		return batch
 	}
-
-	// nil indices means data was already sorted — no permutation needed
-	if indices == nil || batch.validity == nil {
-		return &bufferEntry{data: sorted, validity: batch.validity, tagColumns: batch.tagColumns, schema: batch.schema}
+	// nil indices means already sorted
+	result := &bufferEntry{
+		columns:    sorted,
+		tagColumns: batch.tagColumns,
+		schema:     batch.schema,
+		recordCount: batch.recordCount,
 	}
-
-	// Apply the same permutation to validity bitmaps (no second sort)
-	sortedValidity := make(map[string][]bool, len(batch.validity))
-	for name, valid := range batch.validity {
-		// Per bufferEntry contract, a nil entry means "all valid" — preserve as nil.
-		if valid == nil {
-			sortedValidity[name] = nil
-			continue
-		}
-		newValid := make([]bool, len(indices))
-		for i, idx := range indices {
-			newValid[i] = valid[idx]
-		}
-		sortedValidity[name] = newValid
-	}
-
-	return &bufferEntry{data: sorted, validity: sortedValidity, tagColumns: batch.tagColumns, schema: batch.schema}
+	return result
 }
 
 // sliceEntryByIndices extracts rows from a TypedColumnBatch by index list,
 // keeping validity bitmaps aligned.
 func sliceEntryByIndices(batch *bufferEntry, indices []int) *bufferEntry {
-	slicedData := sliceColumnsByIndices(batch.data, indices)
-
-	if batch.validity == nil {
-		return &bufferEntry{data: slicedData, validity: nil, tagColumns: batch.tagColumns, schema: batch.schema}
+	sliced := make(map[string]ColumnData, len(batch.columns))
+	for name, col := range batch.columns {
+		sliced[name] = colSlice(col, indices)
 	}
-
-	slicedValidity := make(map[string][]bool, len(batch.validity))
-	for name, valid := range batch.validity {
-		// Per bufferEntry contract, a nil entry means "all valid" — preserve as nil.
-		if valid == nil {
-			slicedValidity[name] = nil
-			continue
-		}
-		newValid := make([]bool, len(indices))
-		validLen := len(valid)
-		for i, idx := range indices {
-			if idx < validLen {
-				newValid[i] = valid[idx]
-			}
-			// else: out-of-bounds stays false (null)
-		}
-		slicedValidity[name] = newValid
+	return &bufferEntry{
+		columns:    sliced,
+		tagColumns: batch.tagColumns,
+		schema:     batch.schema,
+		recordCount: len(indices),
 	}
-
-	return &bufferEntry{data: slicedData, validity: slicedValidity, tagColumns: batch.tagColumns, schema: batch.schema}
 }
 
 // microPerHour is the number of microseconds in one hour (3600 * 1,000,000)
@@ -3426,15 +3260,7 @@ func groupByHour(times []int64) (map[int64]*hourBucket, int64, int64, error) {
 	return buckets, globalMin, globalMax, nil
 }
 
-// sliceColumnsByIndices extracts rows from all columns based on a list of indices
-// Returns a new column map with only the selected rows
-func sliceColumnsByIndices(columns map[string]interface{}, indices []int) map[string]interface{} {
-	result := make(map[string]interface{}, len(columns))
-	for colName, colData := range columns {
-		result[colName] = colSlice(colData, indices)
-	}
-	return result
-}
+
 
 // generateStoragePath creates a hierarchical storage path for partition pruning
 // Format: {database}/{measurement}/{YYYY}/{MM}/{DD}/{HH}/{measurement}_{timestamp}_{nanos}.parquet
@@ -3626,21 +3452,13 @@ func (b *ArrowBuffer) SinceRefresh(bufferKey string) ([]*Entry, error) {
 	shard.mu.RLock()
 	entry, ok := shard.buffers[bufferKey]
 	if ok && !entry.isEmpty() && entry.refreshIndex < entry.recordCount {
-		subData := make(map[string]interface{}, len(entry.data))
-		for name, col := range entry.data {
-			subData[name] = colSliceFrom(col, entry.refreshIndex)
-		}
-		var subValidity map[string][]bool
-		if entry.validity != nil {
-			subValidity = make(map[string][]bool, len(entry.validity))
-			for name, v := range entry.validity {
-				subValidity[name] = v[entry.refreshIndex:]
-			}
+		subColumns := make(map[string]ColumnData, len(entry.columns))
+		for name, col := range entry.columns {
+			subColumns[name] = colSliceFrom(col, entry.refreshIndex)
 		}
 		shard.mu.RUnlock()
 		return []*Entry{{
-			data:        subData,
-			validity:    subValidity,
+			columns:     subColumns,
 			tagColumns:  entry.tagColumns,
 			schema:      entry.schema,
 			recordCount: entry.recordCount - entry.refreshIndex,

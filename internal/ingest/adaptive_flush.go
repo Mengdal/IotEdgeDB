@@ -230,11 +230,9 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	database, measurement := splitKeyToDBAndMeas(c.bufferKey)
 
 	// Move data out of entry
-	data := entry.data
-	validity := entry.validity
+	columns := entry.columns
 	tagCols := entry.tagColumns
-	entry.data = make(map[string]interface{})
-	entry.validity = nil
+	entry.columns = make(map[string]ColumnData)
 	entry.tagColumns = nil
 	entry.recordCount = 0
 	entry.estimatedBytes = 0
@@ -252,8 +250,7 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 		database:    database,
 		measurement: measurement,
 		entry: &bufferEntry{
-			data:        data,
-			validity:    validity,
+			columns:     columns,
 			tagColumns:  tagCols,
 			recordCount: recordCount,
 			arrowSchema: entry.arrowSchema,
@@ -265,7 +262,7 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	if outcome == flushQueued {
 		// Data moved to task; entry is empty shell
 	} else {
-		prependFlushDataToEntry(entry, data, validity, tagCols, recordCount)
+		prependFlushDataToEntry(entry, columns, tagCols, recordCount)
 	}
 	shard.mu.Unlock()
 }
