@@ -1711,6 +1711,233 @@ func (b *ArrowBuffer) writeColumnar(ctx context.Context, database string, record
 	return b.writeColumnarInternal(ctx, database, record, false)
 }
 
+// computeColumnSignature infers the column signature for a raw map[string][]interface{}
+// by checking the Go type of the first non-nil value in each column. This avoids
+// allocating typed arrays just to compute the buffer key. The result matches
+// getColumnSignature called on already-typed data.
+func computeColumnSignature(columns map[string][]interface{}) string {
+	type colEntry struct{ name, typ string }
+	entries := make([]colEntry, 0, len(columns))
+	size := -1
+	for name, col := range columns {
+		if len(name) == 0 || name[0] == '_' {
+			continue
+		}
+		if len(col) == 0 {
+			continue
+		}
+		firstVal := firstNonNil(col)
+		if firstVal == nil {
+			continue
+		}
+		var typ string
+		switch firstVal.(type) {
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			typ = "i64"
+		case float32, float64:
+			typ = "f64"
+		case string:
+			typ = "str"
+		case bool:
+			typ = "bool"
+		default:
+			typ = "unk"
+		}
+		entries = append(entries, colEntry{name, typ})
+		size += 1 + len(name) + 1 + len(typ)
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
+	var sb strings.Builder
+	sb.Grow(size)
+	for i, e := range entries {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(e.name)
+		sb.WriteByte(':')
+		sb.WriteString(e.typ)
+	}
+	return sb.String()
+}
+
+// convertAndAppendToEntry converts []interface{} columns to typed slices and
+// appends them directly into entry's growing data/validity maps. Single-pass:
+// conversion and append happen in one loop, eliminating the intermediate
+// TypedColumnBatch allocation that existed in convertColumnsToTyped+appendEntryToEntry.
+func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement string, columns map[string][]interface{}) (int, error) {
+	decimalCols := b.getDecimalColumns(measurement)
+	var numRecords int
+
+	hasNils := false
+	for name, col := range columns {
+		if len(col) == 0 {
+			continue
+		}
+		if numRecords == 0 {
+			numRecords = len(col)
+		}
+
+		// Decimal column — special path
+		if decimalCols != nil {
+			if spec, isDecimal := decimalCols[name]; isDecimal {
+				arr, valid, err := convertToDecimal128Slice(col, spec.Precision, spec.Scale)
+				if err != nil {
+					return 0, fmt.Errorf("decimal conversion error in column '%s': %w", name, err)
+				}
+				entry.data[name] = colAppend(entry.data[name], arr)
+				if valid != nil {
+					hasNils = true
+					entry.validity[name] = append(entry.validity[name], valid...)
+				} else if entry.validity != nil {
+					// Pad: no nulls in this column but validity tracking is active
+					pad := make([]bool, numRecords)
+					for i := range pad {
+						pad[i] = true
+					}
+					entry.validity[name] = append(entry.validity[name], pad...)
+				}
+				continue
+			}
+		}
+
+		firstVal := firstNonNil(col)
+		if firstVal == nil {
+			continue
+		}
+
+		switch firstVal.(type) {
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			if arr, ok := b.tryInt64ZeroCopy(col); ok {
+				entry.data[name] = colAppend(entry.data[name], arr)
+				continue
+			}
+			arr := make([]int64, len(col))
+			valid := make([]bool, len(col))
+			colHasNils := false
+			for i, v := range col {
+				if v == nil {
+					colHasNils = true
+					continue
+				}
+				valid[i] = true
+				val, ok := toInt64(v)
+				if !ok {
+					return 0, fmt.Errorf("cannot convert %T to int64 in column '%s'", v, name)
+				}
+				arr[i] = val
+			}
+			entry.data[name] = colAppend(entry.data[name], arr)
+			if colHasNils {
+				hasNils = true
+				entry.validity[name] = append(entry.validity[name], valid...)
+			}
+
+		case float32, float64:
+			if arr, ok := b.tryFloat64ZeroCopy(col); ok {
+				entry.data[name] = colAppend(entry.data[name], arr)
+				continue
+			}
+			arr := make([]float64, len(col))
+			valid := make([]bool, len(col))
+			colHasNils := false
+			for i, v := range col {
+				if v == nil {
+					colHasNils = true
+					continue
+				}
+				valid[i] = true
+				val, ok := toFloat64(v)
+				if !ok {
+					return 0, fmt.Errorf("cannot convert %T to float64 in column '%s'", v, name)
+				}
+				arr[i] = val
+			}
+			entry.data[name] = colAppend(entry.data[name], arr)
+			if colHasNils {
+				hasNils = true
+				entry.validity[name] = append(entry.validity[name], valid...)
+			}
+
+		case string:
+			if arr, ok := b.tryStringZeroCopy(col); ok {
+				entry.data[name] = colAppend(entry.data[name], arr)
+				continue
+			}
+			arr := make([]string, len(col))
+			valid := make([]bool, len(col))
+			colHasNils := false
+			for i, v := range col {
+				if v == nil {
+					colHasNils = true
+					continue
+				}
+				valid[i] = true
+				str, ok := v.(string)
+				if !ok {
+					return 0, fmt.Errorf("unexpected type in string column '%s': %T", name, v)
+				}
+				arr[i] = str
+			}
+			entry.data[name] = colAppend(entry.data[name], arr)
+			if colHasNils {
+				hasNils = true
+				entry.validity[name] = append(entry.validity[name], valid...)
+			}
+
+		case bool:
+			if arr, ok := b.tryBoolZeroCopy(col); ok {
+				entry.data[name] = colAppend(entry.data[name], arr)
+				continue
+			}
+			arr := make([]bool, len(col))
+			valid := make([]bool, len(col))
+			colHasNils := false
+			for i, v := range col {
+				if v == nil {
+					colHasNils = true
+					continue
+				}
+				valid[i] = true
+				bval, ok := v.(bool)
+				if !ok {
+					return 0, fmt.Errorf("unexpected type in bool column '%s': %T", name, v)
+				}
+				arr[i] = bval
+			}
+			entry.data[name] = colAppend(entry.data[name], arr)
+			if colHasNils {
+				hasNils = true
+				entry.validity[name] = append(entry.validity[name], valid...)
+			}
+
+		default:
+			return 0, fmt.Errorf("unsupported column type for '%s': %T", name, firstVal)
+		}
+	}
+
+	// Backfill validity for columns without nulls in this batch
+	if hasNils && entry.validity != nil {
+		for name := range entry.data {
+			if _, has := entry.validity[name]; has {
+				continue
+			}
+			// This column had no nulls in this batch but other columns did
+			pad := make([]bool, numRecords)
+			for i := range pad {
+				pad[i] = true
+			}
+			entry.validity[name] = append(entry.validity[name], pad...)
+		}
+	}
+
+	entry.recordCount += numRecords
+	entry.estimatedBytes += estimateBytesFromData(entry.data, numRecords)
+	return numRecords, nil
+}
+
 func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string, record *models.ColumnarRecord, skipWAL bool) error {
 	// WAL: Write to WAL before buffering (if enabled)
 	// Skip WAL during recovery to avoid re-writing recovered data
@@ -1718,10 +1945,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		// ZERO-COPY PATH: Use raw msgpack bytes if available (avoids re-serialization)
 		if len(record.RawPayload) > 0 {
 			if err := b.wal.AppendRawWithMeta(database, record.RawPayload); err != nil {
-				// Don't fail the write — WAL is for durability, not
-				// correctness. recordWALError differentiates backpressure
-				// drops (sampled Warn) from real I/O failures (unsampled
-				// Error) so operators can alert on the right signal.
 				b.recordWALError(err, func(ev *zerolog.Event) {
 					ev.Str("database", database).
 						Str("measurement", record.Measurement).
@@ -1729,8 +1952,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 				})
 			}
 		} else {
-			// FALLBACK: Convert columnar to row format for WAL storage
-			// This path is used for LineProtocol or when raw bytes aren't available
 			walRecords := b.columnarToWALRecords(database, record)
 			if len(walRecords) > 0 {
 				if err := b.wal.Append(walRecords); err != nil {
@@ -1744,23 +1965,13 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		}
 	}
 
-	// Convert []interface{} columns to typed arrays (optimized with zero-copy fast paths)
-	typedColumns, numRecords, err := b.convertColumnsToTyped(record.Measurement, record.Columns)
-	if err != nil {
-		return fmt.Errorf("failed to convert columns: %w", err)
-	}
+	// Lock-outside: compute column signature for buffer key
+	newSignature := computeColumnSignature(record.Columns)
 
-	// Propagate tag column names for Parquet metadata (enables auto-dedup in compaction)
-	typedColumns.tagColumns = record.TagColumns
-
-	// Column signature for schema evolution detection (pre-computed in convertColumnsToTyped)
-	newSignature := typedColumns.schema
-	if newSignature == "" && len(typedColumns.data) > 0 {
-		newSignature = getColumnSignature(typedColumns.data)
-	}
-
+	// Construct schema-specific buffer key
 	bufferKey := schemaKey(database, record.Measurement, newSignature)
 
+	// Flush type conflicts
 	baseKey := database + "/" + record.Measurement
 	b.flushTypeConflicts(baseKey, newSignature)
 
@@ -1787,10 +1998,24 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		entry.estimatedBytes = 0
 		entry.refreshIndex = 0
 	}
-	if entry.arrowSchema == nil && len(typedColumns.data) > 0 {
+
+	// Infer Arrow schema eagerly on first entry creation
+	if entry.arrowSchema == nil && len(record.Columns) > 0 {
+		// Will infer after the first append since convertAndAppendToEntry produces typed data
+	}
+
+	// Single-pass: convert []interface{} -> typed slices + append to entry
+	numRecords, err := b.convertAndAppendToEntry(entry, record.Measurement, record.Columns)
+	if err != nil {
+		shard.mu.Unlock()
+		return fmt.Errorf("failed to convert and append columns: %w", err)
+	}
+
+	// Infer Arrow schema on first data arrival
+	if entry.arrowSchema == nil && len(entry.data) > 0 {
 		tagCols := record.TagColumns
 		decCols := b.getDecimalColumns(record.Measurement)
-		schema, err := b.writer.inferSchema(typedColumns.data, tagCols, decCols)
+		schema, err := b.writer.inferSchema(entry.data, tagCols, decCols)
 		if err != nil {
 			shard.mu.Unlock()
 			return fmt.Errorf("failed to infer Arrow schema: %w", err)
@@ -1798,10 +2023,9 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		entry.arrowSchema = schema
 	}
 
-	appendEntryToEntry(entry, typedColumns)
-
 	totalBuffered := entry.recordCount
 
+	// Flush gate
 	if b.adaptiveFlush.Load() == nil && totalBuffered >= b.config.MaxBufferSize {
 		dataForFlush = entry.data
 		validityForFlush = entry.validity
@@ -1840,9 +2064,7 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 
 	b.totalRecordsBuffered.Add(int64(numRecords))
 
-	// Hard-limit enforcement: after releasing the shard lock, check if
-	// the buffer exceeded the hard limit and evict oldest entries if so.
-	// Called with 0 because the new data is already in the entry.
+	// Hard-limit enforcement
 	if err := b.ensureBufferSpace(0); err != nil {
 		return err
 	}
@@ -1854,7 +2076,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		Bool("flushing", shouldFlush).
 		Msg("Added columnar data to buffer")
 
-	// Notify VIEW manager of new data
 	if b.notifier != nil {
 		b.notifier.OnNewData(bufferKey)
 	}
@@ -2019,167 +2240,7 @@ func entryToWALRecords(database, measurement string, entry *bufferEntry, decimal
 	return records
 }
 
-// convertColumnsToTyped converts []interface{} columns to typed arrays with null tracking.
-// Returns a bufferEntry where validity maps track which values are null (false=null).
-// Columns with no nil values have no entry in validity (all valid).
-// ZERO-COPY OPTIMIZATION: Try bulk type assertion first before element-by-element conversion
-func (b *ArrowBuffer) convertColumnsToTyped(measurement string, columns map[string][]interface{}) (*bufferEntry, int, error) {
-	typed := make(map[string]interface{})
-	validity := make(map[string][]bool)
-	var numRecords int
 
-	// Look up decimal column config for this measurement (nil if none configured)
-	decimalCols := b.getDecimalColumns(measurement)
-
-	for name, col := range columns {
-		if len(col) == 0 {
-			continue
-		}
-
-		// Set record count from first column
-		if numRecords == 0 {
-			numRecords = len(col)
-		}
-
-		// Check if this column is declared as decimal — override normal type inference
-		if decimalCols != nil {
-			if spec, isDecimal := decimalCols[name]; isDecimal {
-				arr, valid, err := convertToDecimal128Slice(col, spec.Precision, spec.Scale)
-				if err != nil {
-					return nil, 0, fmt.Errorf("decimal conversion error in column '%s': %w", name, err)
-				}
-				typed[name] = arr
-				if valid != nil {
-					validity[name] = valid
-				}
-				continue
-			}
-		}
-
-		// Infer type from first non-nil value
-		firstVal := firstNonNil(col)
-		if firstVal == nil {
-			continue // Skip all-nil columns
-		}
-
-		// FAST PATH: Try zero-copy bulk conversion first (fails fast on nils or mixed types).
-		// If zero-copy succeeds, no nils exist and no validity bitmap is needed.
-		switch firstVal.(type) {
-		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-			if arr, ok := b.tryInt64ZeroCopy(col); ok {
-				typed[name] = arr
-				continue
-			}
-			// Zero-copy failed (has nils or mixed types) — single-pass conversion with validity
-			arr := make([]int64, len(col))
-			valid := make([]bool, len(col))
-			hasNils := false
-			for i, v := range col {
-				if v == nil {
-					hasNils = true
-					continue
-				}
-				valid[i] = true
-				val, ok := toInt64(v)
-				if !ok {
-					return nil, 0, fmt.Errorf("cannot convert %T to int64 in column '%s'", v, name)
-				}
-				arr[i] = val
-			}
-			typed[name] = arr
-			if hasNils {
-				validity[name] = valid
-			}
-
-		case float32, float64:
-			if arr, ok := b.tryFloat64ZeroCopy(col); ok {
-				typed[name] = arr
-				continue
-			}
-			arr := make([]float64, len(col))
-			valid := make([]bool, len(col))
-			hasNils := false
-			for i, v := range col {
-				if v == nil {
-					hasNils = true
-					continue
-				}
-				valid[i] = true
-				val, ok := toFloat64(v)
-				if !ok {
-					return nil, 0, fmt.Errorf("cannot convert %T to float64 in column '%s'", v, name)
-				}
-				arr[i] = val
-			}
-			typed[name] = arr
-			if hasNils {
-				validity[name] = valid
-			}
-
-		case string:
-			if arr, ok := b.tryStringZeroCopy(col); ok {
-				typed[name] = arr
-				continue
-			}
-			arr := make([]string, len(col))
-			valid := make([]bool, len(col))
-			hasNils := false
-			for i, v := range col {
-				if v == nil {
-					hasNils = true
-					continue
-				}
-				valid[i] = true
-				str, ok := v.(string)
-				if !ok {
-					return nil, 0, fmt.Errorf("unexpected type in string column '%s': %T", name, v)
-				}
-				arr[i] = str
-			}
-			typed[name] = arr
-			if hasNils {
-				validity[name] = valid
-			}
-
-		case bool:
-			if arr, ok := b.tryBoolZeroCopy(col); ok {
-				typed[name] = arr
-				continue
-			}
-			arr := make([]bool, len(col))
-			valid := make([]bool, len(col))
-			hasNils := false
-			for i, v := range col {
-				if v == nil {
-					hasNils = true
-					continue
-				}
-				valid[i] = true
-				bval, ok := v.(bool)
-				if !ok {
-					return nil, 0, fmt.Errorf("unexpected type in bool column '%s': %T", name, v)
-				}
-				arr[i] = bval
-			}
-			typed[name] = arr
-			if hasNils {
-				validity[name] = valid
-			}
-
-		default:
-			return nil, 0, fmt.Errorf("unsupported column type for '%s': %T", name, firstVal)
-		}
-	}
-
-	entry := &bufferEntry{
-		data:        typed,
-		validity:    validity,
-		tagColumns:  nil,
-		schema:      getColumnSignature(typed),
-		recordCount: numRecords,
-	}
-	return entry, numRecords, nil
-}
 
 // convertToDecimal128Slice converts a []interface{} column to []decimal128.Num.
 // Accepts float64, float32, int64, int*, uint*, and string values.
