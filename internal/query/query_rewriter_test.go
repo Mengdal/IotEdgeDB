@@ -94,8 +94,8 @@ func buildRewriteSQL(userSQL, measurementKey, partitionPath, viewName string) st
 func TestQueryRewriter_HasBufferData(t *testing.T) {
 	// Test the mock directly to verify the delegation pattern
 	mgr := &mockViewMgr{data: map[string]bool{
-		"db/has_data":  true,
-		"db/no_data":   false,
+		"db/has_data": true,
+		"db/no_data":  false,
 	}}
 
 	if !mgr.HasData("db/has_data") {

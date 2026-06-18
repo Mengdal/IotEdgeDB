@@ -65,10 +65,10 @@ type Metrics struct {
 
 	// Flush records distribution histogram (per trigger type)
 	// Buckets: 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000
-	flushRecDistSize    [9]atomic.Int64
-	flushRecDistAge     [9]atomic.Int64
-	flushRecDistHard    [9]atomic.Int64
-	flushRecDistManual  [9]atomic.Int64
+	flushRecDistSize     [9]atomic.Int64
+	flushRecDistAge      [9]atomic.Int64
+	flushRecDistHard     [9]atomic.Int64
+	flushRecDistManual   [9]atomic.Int64
 	flushRecDistPressure [9]atomic.Int64
 
 	// Storage metrics
@@ -235,11 +235,11 @@ func (m *Metrics) RecordQueryLatency(durationMicros int64) {
 
 // Buffer Metrics
 func (m *Metrics) SetBufferRecordsBuffered(count int64) { m.bufferRecordsBuffered.Store(count) }
-func (m *Metrics) SetMemoryPressureLevel(level int64)  { m.memoryPressureLevel.Store(level) }
+func (m *Metrics) SetMemoryPressureLevel(level int64)   { m.memoryPressureLevel.Store(level) }
 func (m *Metrics) SetBufferEstimatedBytes(bytes int64)  { m.bufferEstimatedBytes.Store(bytes) }
-func (m *Metrics) IncAdaptiveFlush()                   { m.adaptiveFlushTotal.Add(1) }
-func (m *Metrics) IncHardLimitFlush()                  { m.hardLimitFlushTotal.Add(1) }
-func (m *Metrics) IncAgeExpiredFlush()                 { m.ageExpiredFlushTotal.Add(1) }
+func (m *Metrics) IncAdaptiveFlush()                    { m.adaptiveFlushTotal.Add(1) }
+func (m *Metrics) IncHardLimitFlush()                   { m.hardLimitFlushTotal.Add(1) }
+func (m *Metrics) IncAgeExpiredFlush()                  { m.ageExpiredFlushTotal.Add(1) }
 
 // RecordBufferFlushRecords records a flush record count into the distribution histogram.
 // trigger is one of: "size", "age", "hard_limit", "manual", "pressure".
@@ -266,11 +266,11 @@ func (m *Metrics) RecordBufferFlushRecords(trigger string, recordCount int) {
 	}
 }
 
-func (m *Metrics) SetBufferRecordsWritten(count int64)  { m.bufferRecordsWritten.Store(count) }
-func (m *Metrics) SetBufferFlushes(count int64)         { m.bufferFlushesTotal.Store(count) }
-func (m *Metrics) SetBufferErrors(count int64)          { m.bufferErrorsTotal.Store(count) }
-func (m *Metrics) IncBufferFlushFailures()              { m.bufferFlushFailures.Add(1) }
-func (m *Metrics) SetBufferQueueDepth(depth int64)      { m.bufferQueueDepth.Store(depth) }
+func (m *Metrics) SetBufferRecordsWritten(count int64) { m.bufferRecordsWritten.Store(count) }
+func (m *Metrics) SetBufferFlushes(count int64)        { m.bufferFlushesTotal.Store(count) }
+func (m *Metrics) SetBufferErrors(count int64)         { m.bufferErrorsTotal.Store(count) }
+func (m *Metrics) IncBufferFlushFailures()             { m.bufferFlushFailures.Add(1) }
+func (m *Metrics) SetBufferQueueDepth(depth int64)     { m.bufferQueueDepth.Store(depth) }
 
 // Storage Metrics
 func (m *Metrics) IncStorageWrites()                { m.storageWritesTotal.Add(1) }
@@ -411,11 +411,11 @@ func (m *Metrics) Snapshot() map[string]interface{} {
 		"buffer_queue_depth":          m.bufferQueueDepth.Load(),
 
 		// Adaptive buffer
-		"memory_pressure_level":      m.memoryPressureLevel.Load(),
-		"buffer_estimated_bytes":     m.bufferEstimatedBytes.Load(),
-		"adaptive_flush_total":       m.adaptiveFlushTotal.Load(),
-		"hard_limit_flush_total":     m.hardLimitFlushTotal.Load(),
-		"age_expired_flush_total":    m.ageExpiredFlushTotal.Load(),
+		"memory_pressure_level":   m.memoryPressureLevel.Load(),
+		"buffer_estimated_bytes":  m.bufferEstimatedBytes.Load(),
+		"adaptive_flush_total":    m.adaptiveFlushTotal.Load(),
+		"hard_limit_flush_total":  m.hardLimitFlushTotal.Load(),
+		"age_expired_flush_total": m.ageExpiredFlushTotal.Load(),
 
 		// Storage
 		"storage_writes_total":      m.storageWritesTotal.Load(),

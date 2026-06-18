@@ -328,36 +328,36 @@ func main() {
 	}
 	shutdownCoordinator.Register("arrow-buffer", arrowBuffer, shutdown.PriorityBuffer)
 
-		// === Adaptive buffer wiring ===
-		// 1. Memory monitor (cgroup-aware memory pressure detection)
-		// Parse DuckDB memory_limit to properly compute buffer ceiling:
-		//   bufferLimit = totalMemory * 50% - duckdbMemoryLimit
-		duckdbLimitMB := 0
-		if cfg.Database.MemoryLimit != "" {
-			if limitBytes, err := config.ParseSize(cfg.Database.MemoryLimit); err == nil {
-				duckdbLimitMB = int(limitBytes / (1024 * 1024))
-			}
+	// === Adaptive buffer wiring ===
+	// 1. Memory monitor (cgroup-aware memory pressure detection)
+	// Parse DuckDB memory_limit to properly compute buffer ceiling:
+	//   bufferLimit = totalMemory * 50% - duckdbMemoryLimit
+	duckdbLimitMB := 0
+	if cfg.Database.MemoryLimit != "" {
+		if limitBytes, err := config.ParseSize(cfg.Database.MemoryLimit); err == nil {
+			duckdbLimitMB = int(limitBytes / (1024 * 1024))
 		}
-		memoryMonitor := ingest.NewMemoryMonitor(ingest.MemoryMonitorConfig{
-			MaxBufferMemoryMB: cfg.Ingest.MaxBufferMemoryMB,
-			MinBufferMemoryMB: cfg.Ingest.MinBufferMemoryMB,
-			GreenPct:          cfg.Ingest.MemoryPressureGreenPct,
-			RedPct:            cfg.Ingest.MemoryPressureRedPct,
-			CheckIntervalMS:   cfg.Ingest.MemoryCheckIntervalMS,
-		}, duckdbLimitMB, logger.Get("memory-monitor"))
-		go memoryMonitor.Run(context.Background())
+	}
+	memoryMonitor := ingest.NewMemoryMonitor(ingest.MemoryMonitorConfig{
+		MaxBufferMemoryMB: cfg.Ingest.MaxBufferMemoryMB,
+		MinBufferMemoryMB: cfg.Ingest.MinBufferMemoryMB,
+		GreenPct:          cfg.Ingest.MemoryPressureGreenPct,
+		RedPct:            cfg.Ingest.MemoryPressureRedPct,
+		CheckIntervalMS:   cfg.Ingest.MemoryCheckIntervalMS,
+	}, duckdbLimitMB, logger.Get("memory-monitor"))
+	go memoryMonitor.Run(context.Background())
 
-		// 2. Adaptive flush engine (replaces fixed-size periodic flush)
-		maxAge := time.Duration(cfg.Ingest.MaxBufferAgeSeconds) * time.Second
-		adaptiveEngine := ingest.NewAdaptiveFlushEngine(arrowBuffer, memoryMonitor, maxAge, logger.Get("adaptive-flush"))
-		arrowBuffer.SetAdaptiveFlushEngine(adaptiveEngine)
-		arrowBuffer.StartAdaptiveFlush()
+	// 2. Adaptive flush engine (replaces fixed-size periodic flush)
+	maxAge := time.Duration(cfg.Ingest.MaxBufferAgeSeconds) * time.Second
+	adaptiveEngine := ingest.NewAdaptiveFlushEngine(arrowBuffer, memoryMonitor, maxAge, logger.Get("adaptive-flush"))
+	arrowBuffer.SetAdaptiveFlushEngine(adaptiveEngine)
+	arrowBuffer.StartAdaptiveFlush()
 
-		// 2b. Buffer overflow protection: hard limit = memory limit × 2.
-		// When exceeded, oldest entries are evicted; if still over, 503 backpressure.
-		arrowBuffer.SetBufferHardLimit(memoryMonitor.BufferLimit() * 2)
+	// 2b. Buffer overflow protection: hard limit = memory limit × 2.
+	// When exceeded, oldest entries are evicted; if still over, 503 backpressure.
+	arrowBuffer.SetBufferHardLimit(memoryMonitor.BufferLimit() * 2)
 
-		// 3. Arrow VIEW manager (buffer data queryable via DuckDB temp tables)
+	// 3. Arrow VIEW manager (buffer data queryable via DuckDB temp tables)
 	// Registered with shutdown coordinator so refreshLoop goroutine is
 	// stopped before the DuckDB pool closes.
 	arrowViewMgr := database.NewArrowViewManager(db, arrowBuffer, logger.Get("arrow-view"))
@@ -368,36 +368,36 @@ func main() {
 	queryRewriter := query.NewQueryRewriter(arrowViewMgr)
 	_ = queryRewriter // held for future direct use; currently integrated via buildReadParquetExpr
 
-		// === SIGHUP 配置热加载 ===
-		reloadCoordinator := config.NewReloadCoordinator(
-			cfg.ConfigFilePath,
-			logger.Get("config-reloader"),
-		)
-		reloadCoordinator.Register("memory-monitor", memoryMonitor)
-		reloadCoordinator.Register("adaptive-flush", adaptiveEngine)
+	// === SIGHUP 配置热加载 ===
+	reloadCoordinator := config.NewReloadCoordinator(
+		cfg.ConfigFilePath,
+		logger.Get("config-reloader"),
+	)
+	reloadCoordinator.Register("memory-monitor", memoryMonitor)
+	reloadCoordinator.Register("adaptive-flush", adaptiveEngine)
 
-		doneCh := make(chan struct{})
-		sighupCh := make(chan os.Signal, 1)
-		signal.Notify(sighupCh, syscall.SIGHUP)
-		go func() {
-			for {
-				select {
-				case <-sighupCh:
-					func() {
-						defer func() {
-							if r := recover(); r != nil {
-								log.Error().Interface("panic", r).Msg("SIGHUP reload panicked")
-							}
-						}()
-						if err := reloadCoordinator.Reload(); err != nil {
-							log.Warn().Err(err).Msg("config hot reload failed")
+	doneCh := make(chan struct{})
+	sighupCh := make(chan os.Signal, 1)
+	signal.Notify(sighupCh, syscall.SIGHUP)
+	go func() {
+		for {
+			select {
+			case <-sighupCh:
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Error().Interface("panic", r).Msg("SIGHUP reload panicked")
 						}
 					}()
-				case <-doneCh:
-					return
-				}
+					if err := reloadCoordinator.Reload(); err != nil {
+						log.Warn().Err(err).Msg("config hot reload failed")
+					}
+				}()
+			case <-doneCh:
+				return
 			}
-		}()
+		}
+	}()
 
 	// After ArrowBuffer flushes (priority 30) but before WAL closes (priority 40),
 	// purge WAL files since all data has been flushed to storage.
@@ -1734,8 +1734,8 @@ func main() {
 
 	// Wait for shutdown signal
 	sig := shutdownCoordinator.WaitForSignal()
-	close(doneCh)           // stop SIGHUP goroutine before component shutdown
-	signal.Stop(sighupCh)   // stop OS signal delivery
+	close(doneCh)         // stop SIGHUP goroutine before component shutdown
+	signal.Stop(sighupCh) // stop OS signal delivery
 	log.Info().Str("signal", sig.String()).Msg("Initiating graceful shutdown...")
 
 	// Perform graceful shutdown of all components

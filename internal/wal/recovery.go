@@ -19,12 +19,12 @@ type ColumnarRecoveryCallback func(ctx context.Context, database, measurement st
 
 // RecoveryStats holds statistics about WAL recovery
 type RecoveryStats struct {
-	RecoveredFiles    int
-	RecoveredBatches  int
-	RecoveredEntries  int
-	CorruptedEntries  int
-	StagingCleared    int // measurements whose staging was cleared by FLUSH_OK
-	RecoveryDuration  time.Duration
+	RecoveredFiles   int
+	RecoveredBatches int
+	RecoveredEntries int
+	CorruptedEntries int
+	StagingCleared   int // measurements whose staging was cleared by FLUSH_OK
+	RecoveryDuration time.Duration
 }
 
 // DefaultMaxStagingRecords is the default per-measurement staging threshold.

@@ -103,7 +103,7 @@ type IngestConfig struct {
 	MemoryCheckIntervalMS  int // 内存检查间隔（毫秒），默认 1000
 
 	// === 以下字段不变 ===
-	Compression            string // Parquet compression: snappy, gzip, zstd
+	Compression           string   // Parquet compression: snappy, gzip, zstd
 	UseDictionary         bool     // Use dictionary encoding
 	WriteStatistics       bool     // Write Parquet statistics
 	DataPageVersion       string   // Parquet data page version: 1.0 or 2.0
@@ -497,8 +497,8 @@ func Load() (*Config, error) {
 			AzureUseManagedIdentity: v.GetBool("storage.azure_use_managed_identity"),
 		},
 		Ingest: IngestConfig{
-			MaxBufferSize:         v.GetInt("ingest.max_buffer_size"),
-			MaxBufferAgeMS:        v.GetInt("ingest.max_buffer_age_ms"),
+			MaxBufferSize:          v.GetInt("ingest.max_buffer_size"),
+			MaxBufferAgeMS:         v.GetInt("ingest.max_buffer_age_ms"),
 			MaxBufferMemoryMB:      v.GetInt("ingest.max_buffer_memory_mb"),
 			MinBufferMemoryMB:      v.GetInt("ingest.min_buffer_memory_mb"),
 			MaxBufferAgeSeconds:    v.GetInt("ingest.max_buffer_age_seconds"),
@@ -506,17 +506,17 @@ func Load() (*Config, error) {
 			MemoryPressureRedPct:   v.GetInt("ingest.memory_pressure_red_pct"),
 			MemoryCheckIntervalMS:  v.GetInt("ingest.memory_check_interval_ms"),
 			Compression:            v.GetString("ingest.compression"),
-			UseDictionary:         v.GetBool("ingest.use_dictionary"),
-			WriteStatistics:       v.GetBool("ingest.write_statistics"),
-			DataPageVersion:       v.GetString("ingest.data_page_version"),
-			FlushWorkers:          v.GetInt("ingest.flush_workers"),
-			FlushQueueSize:        v.GetInt("ingest.flush_queue_size"),
-			FlushTimeoutSeconds:   v.GetInt("ingest.flush_timeout_seconds"),
-			ShardCount:            v.GetInt("ingest.shard_count"),
-			SortKeys:              v.GetStringSlice("ingest.sort_keys"),
-			DefaultSortKeys:       v.GetString("ingest.default_sort_keys"),
-			DecimalColumns:        v.GetStringSlice("ingest.decimal_columns"),
-			DefaultDecimalColumns: v.GetString("ingest.default_decimal_columns"),
+			UseDictionary:          v.GetBool("ingest.use_dictionary"),
+			WriteStatistics:        v.GetBool("ingest.write_statistics"),
+			DataPageVersion:        v.GetString("ingest.data_page_version"),
+			FlushWorkers:           v.GetInt("ingest.flush_workers"),
+			FlushQueueSize:         v.GetInt("ingest.flush_queue_size"),
+			FlushTimeoutSeconds:    v.GetInt("ingest.flush_timeout_seconds"),
+			ShardCount:             v.GetInt("ingest.shard_count"),
+			SortKeys:               v.GetStringSlice("ingest.sort_keys"),
+			DefaultSortKeys:        v.GetString("ingest.default_sort_keys"),
+			DecimalColumns:         v.GetStringSlice("ingest.decimal_columns"),
+			DefaultDecimalColumns:  v.GetString("ingest.default_decimal_columns"),
 		},
 		Cache: CacheConfig{
 			Enabled:    v.GetBool("cache.enabled"),
@@ -788,13 +788,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ingest.decimal_columns", []string{})
 	v.SetDefault("ingest.default_decimal_columns", "")
 
-		// Adaptive buffer defaults
-		v.SetDefault("ingest.max_buffer_memory_mb", 0)
-		v.SetDefault("ingest.min_buffer_memory_mb", 128)
-		v.SetDefault("ingest.max_buffer_age_seconds", 900)
-		v.SetDefault("ingest.memory_pressure_green_pct", 50)
-		v.SetDefault("ingest.memory_pressure_red_pct", 20)
-		v.SetDefault("ingest.memory_check_interval_ms", 1000)
+	// Adaptive buffer defaults
+	v.SetDefault("ingest.max_buffer_memory_mb", 0)
+	v.SetDefault("ingest.min_buffer_memory_mb", 128)
+	v.SetDefault("ingest.max_buffer_age_seconds", 900)
+	v.SetDefault("ingest.memory_pressure_green_pct", 50)
+	v.SetDefault("ingest.memory_pressure_red_pct", 20)
+	v.SetDefault("ingest.memory_check_interval_ms", 1000)
 
 	// Log defaults
 	v.SetDefault("log.level", "info")
