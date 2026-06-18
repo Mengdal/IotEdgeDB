@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.22+, duckdb_arrow build tag, Apache Arrow v18, CGO
 
-**Spec:** `docs/superpowers/specs/2026-06-18-columnslice-consolidation-design.md`
+**Spec:** `docs/superpowers/specs/2026-06-18-buffer-entry-unification-design.md`
 
 ## Global Constraints
 
