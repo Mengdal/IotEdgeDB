@@ -190,6 +190,10 @@ func appendEntryToEntry(dst, src *bufferEntry) {
 - **Merge 冲突**：`bufferEntry` 和 `TypedColumnBatch` 的合并涉及 flushTask 等结构体字段，需一次性改完所有引用点
 - **测试适配**：测试中大量构造 `TypedColumnBatch` 的地方需改为 `bufferEntry`，量虽大但机械
 
+## 后续待评估
+
+- **data + validity 合并为一个 map**：`map[string]columnData{data, validity}`，减半 map lookup，消除 validity/data 不同步风险。需独立设计（影响 8 个集中函数接口、所有 sort/slice/flush/VIEW 操作）
+
 ## 不做
 
 - 不改 parser 层
