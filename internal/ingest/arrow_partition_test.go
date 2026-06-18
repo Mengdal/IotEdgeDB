@@ -101,35 +101,35 @@ func TestGetSortKeys(t *testing.T) {
 func TestSortColumnsByTime(t *testing.T) {
 	tests := []struct {
 		name      string
-		columns   map[string]interface{}
+		columns   map[string]ColumnData
 		wantTimes []int64
 		wantError bool
 	}{
 		{
 			name: "already sorted",
-			columns: map[string]interface{}{
-				"time":  []int64{1000, 2000, 3000},
-				"value": []float64{10.0, 20.0, 30.0},
+			columns: map[string]ColumnData{
+				"time":  {Data: []int64{1000, 2000, 3000}},
+				"value": {Data: []float64{10.0, 20.0, 30.0}},
 			},
 			wantTimes: []int64{1000, 2000, 3000},
 			wantError: false,
 		},
 		{
 			name: "reverse sorted",
-			columns: map[string]interface{}{
-				"time":  []int64{3000, 2000, 1000},
-				"value": []float64{30.0, 20.0, 10.0},
+			columns: map[string]ColumnData{
+				"time":  {Data: []int64{3000, 2000, 1000}},
+				"value": {Data: []float64{30.0, 20.0, 10.0}},
 			},
 			wantTimes: []int64{1000, 2000, 3000},
 			wantError: false,
 		},
 		{
 			name: "random order with multiple columns",
-			columns: map[string]interface{}{
-				"time":   []int64{2000, 1000, 3000},
-				"value":  []float64{20.0, 10.0, 30.0},
-				"name":   []string{"b", "a", "c"},
-				"active": []bool{false, true, false},
+			columns: map[string]ColumnData{
+				"time":   {Data: []int64{2000, 1000, 3000}},
+				"value":  {Data: []float64{20.0, 10.0, 30.0}},
+				"name":   {Data: []string{"b", "a", "c"}},
+				"active": {Data: []bool{false, true, false}},
 			},
 			wantTimes: []int64{1000, 2000, 3000},
 			wantError: false,
@@ -153,7 +153,7 @@ func TestSortColumnsByTime(t *testing.T) {
 			}
 
 			// Check that times are sorted
-			times := sorted["time"].([]int64)
+			times := sorted["time"].Data.([]int64)
 			if len(times) != len(tt.wantTimes) {
 				t.Errorf("sortColumnsByTime() got %d times, want %d", len(times), len(tt.wantTimes))
 				return
@@ -169,7 +169,7 @@ func TestSortColumnsByTime(t *testing.T) {
 			numRows := len(times)
 			for colName, colData := range sorted {
 				var colLen int
-				switch col := colData.(type) {
+				switch col := colData.Data.(type) {
 				case []int64:
 					colLen = len(col)
 				case []float64:
@@ -187,8 +187,8 @@ func TestSortColumnsByTime(t *testing.T) {
 
 			// For the detailed test, verify the permutation was applied correctly
 			if tt.name == "random order with multiple columns" {
-				values := sorted["value"].([]float64)
-				names := sorted["name"].([]string)
+				values := sorted["value"].Data.([]float64)
+				names := sorted["name"].Data.([]string)
 				expected := []float64{10.0, 20.0, 30.0}
 				expectedNames := []string{"a", "b", "c"}
 
@@ -327,24 +327,26 @@ func TestGroupByHourWithMultiKeySort(t *testing.T) {
 // TestSliceColumnsByIndices tests extracting rows by index list
 func TestSliceColumnsByIndices(t *testing.T) {
 	// Create sample data
-	columns := map[string]interface{}{
-		"time":          []int64{100, 200, 300, 400, 500, 600},
-		"tag_sensor_id": []string{"A", "A", "B", "B", "C", "C"},
-		"value":         []float64{1.1, 2.2, 3.3, 4.4, 5.5, 6.6},
-		"tag_location":  []string{"room1", "room2", "room1", "room2", "room1", "room2"},
+	columns := map[string]ColumnData{
+		"time":          {Data: []int64{100, 200, 300, 400, 500, 600}},
+		"tag_sensor_id": {Data: []string{"A", "A", "B", "B", "C", "C"}},
+		"value":         {Data: []float64{1.1, 2.2, 3.3, 4.4, 5.5, 6.6}},
+		"tag_location":  {Data: []string{"room1", "room2", "room1", "room2", "room1", "room2"}},
 	}
 
 	// Extract indices [0, 2, 4] (first occurrence of each sensor)
 	indices := []int{0, 2, 4}
-	result := sliceColumnsByIndices(columns, indices)
+	entry := &bufferEntry{columns: columns}
+	resultEntry := sliceEntryByIndices(entry, indices)
+	result := resultEntry.columns
 
 	// Verify all columns were sliced
 	if len(result) != len(columns) {
-		t.Fatalf("sliceColumnsByIndices() got %d columns, want %d", len(result), len(columns))
+		t.Fatalf("sliceEntryByIndices() got %d columns, want %d", len(result), len(columns))
 	}
 
 	// Verify time column
-	resultTime := result["time"].([]int64)
+	resultTime := result["time"].Data.([]int64)
 	expectedTime := []int64{100, 300, 500}
 	if len(resultTime) != len(expectedTime) {
 		t.Errorf("time column length = %d, want %d", len(resultTime), len(expectedTime))
@@ -356,7 +358,7 @@ func TestSliceColumnsByIndices(t *testing.T) {
 	}
 
 	// Verify sensor_id column
-	resultSensors := result["tag_sensor_id"].([]string)
+	resultSensors := result["tag_sensor_id"].Data.([]string)
 	expectedSensors := []string{"A", "B", "C"}
 	if len(resultSensors) != len(expectedSensors) {
 		t.Errorf("sensor_id column length = %d, want %d", len(resultSensors), len(expectedSensors))
@@ -368,7 +370,7 @@ func TestSliceColumnsByIndices(t *testing.T) {
 	}
 
 	// Verify value column
-	resultValues := result["value"].([]float64)
+	resultValues := result["value"].Data.([]float64)
 	expectedValues := []float64{1.1, 3.3, 5.5}
 	if len(resultValues) != len(expectedValues) {
 		t.Errorf("value column length = %d, want %d", len(resultValues), len(expectedValues))
@@ -380,7 +382,7 @@ func TestSliceColumnsByIndices(t *testing.T) {
 	}
 
 	// Verify location column
-	resultLocations := result["tag_location"].([]string)
+	resultLocations := result["tag_location"].Data.([]string)
 	expectedLocations := []string{"room1", "room1", "room1"}
 	if len(resultLocations) != len(expectedLocations) {
 		t.Errorf("location column length = %d, want %d", len(resultLocations), len(expectedLocations))
@@ -395,11 +397,11 @@ func TestSliceColumnsByIndices(t *testing.T) {
 // TestSortedOutputVerification verifies that sorting maintains data integrity
 func TestSortedOutputVerification(t *testing.T) {
 	// Create unsorted data
-	columns := map[string]interface{}{
-		"time":   []int64{3000, 1000, 2000, 5000, 4000},
-		"value":  []float64{30.0, 10.0, 20.0, 50.0, 40.0},
-		"host":   []string{"c", "a", "b", "e", "d"},
-		"active": []bool{false, true, false, true, false},
+	columns := map[string]ColumnData{
+		"time":   {Data: []int64{3000, 1000, 2000, 5000, 4000}},
+		"value":  {Data: []float64{30.0, 10.0, 20.0, 50.0, 40.0}},
+		"host":   {Data: []string{"c", "a", "b", "e", "d"}},
+		"active": {Data: []bool{false, true, false, true, false}},
 	}
 
 	// Sort
@@ -409,7 +411,7 @@ func TestSortedOutputVerification(t *testing.T) {
 	}
 
 	// Verify times are sorted
-	times := sorted["time"].([]int64)
+	times := sorted["time"].Data.([]int64)
 	for i := 1; i < len(times); i++ {
 		if times[i] < times[i-1] {
 			t.Errorf("sortColumnsByTime() times not sorted at index %d: %v < %v", i, times[i], times[i-1])
@@ -417,9 +419,9 @@ func TestSortedOutputVerification(t *testing.T) {
 	}
 
 	// Verify all columns were permuted correctly
-	values := sorted["value"].([]float64)
-	hosts := sorted["host"].([]string)
-	active := sorted["active"].([]bool)
+	values := sorted["value"].Data.([]float64)
+	hosts := sorted["host"].Data.([]string)
+	active := sorted["active"].Data.([]bool)
 
 	expectedTimes := []int64{1000, 2000, 3000, 4000, 5000}
 	expectedValues := []float64{10.0, 20.0, 30.0, 40.0, 50.0}
@@ -444,9 +446,9 @@ func TestSortedOutputVerification(t *testing.T) {
 
 // TestSortPreservesAlreadySortedData verifies no unnecessary work for sorted data
 func TestSortPreservesAlreadySortedData(t *testing.T) {
-	columns := map[string]interface{}{
-		"time":  []int64{1000, 2000, 3000, 4000},
-		"value": []float64{10.0, 20.0, 30.0, 40.0},
+	columns := map[string]ColumnData{
+		"time":  {Data: []int64{1000, 2000, 3000, 4000}},
+		"value": {Data: []float64{10.0, 20.0, 30.0, 40.0}},
 	}
 
 	sorted, err := sortColumnsByTime(columns)
@@ -454,8 +456,8 @@ func TestSortPreservesAlreadySortedData(t *testing.T) {
 		t.Fatalf("sortColumnsByTime() failed: %v", err)
 	}
 
-	times := sorted["time"].([]int64)
-	values := sorted["value"].([]float64)
+	times := sorted["time"].Data.([]int64)
+	values := sorted["value"].Data.([]float64)
 
 	// Verify data is unchanged
 	expectedTimes := []int64{1000, 2000, 3000, 4000}
@@ -489,10 +491,10 @@ func BenchmarkSortColumnsByTime(b *testing.B) {
 				names[i] = string(rune('a' + (i % 26)))
 			}
 
-			columns := map[string]interface{}{
-				"time":  times,
-				"value": values,
-				"name":  names,
+			columns := map[string]ColumnData{
+				"time":  {Data: times},
+				"value": {Data: values},
+				"name":  {Data: names},
 			}
 
 			b.ResetTimer()
@@ -507,7 +509,7 @@ func BenchmarkSortColumnsByTime(b *testing.B) {
 func TestSortColumnsByKeys(t *testing.T) {
 	tests := []struct {
 		name          string
-		columns       map[string]interface{}
+		columns       map[string]ColumnData
 		sortKeys      []string
 		wantOrder     []int // Expected row order after sort
 		wantError     bool
@@ -515,10 +517,10 @@ func TestSortColumnsByKeys(t *testing.T) {
 	}{
 		{
 			name: "sort by sensor_id then time",
-			columns: map[string]interface{}{
-				"tag_sensor_id": []string{"B", "A", "B", "A"},
-				"time":          []int64{2000, 1000, 1000, 2000},
-				"value":         []float64{20.0, 10.0, 30.0, 40.0},
+			columns: map[string]ColumnData{
+				"tag_sensor_id": {Data: []string{"B", "A", "B", "A"}},
+				"time":          {Data: []int64{2000, 1000, 1000, 2000}},
+				"value":         {Data: []float64{20.0, 10.0, 30.0, 40.0}},
 			},
 			sortKeys: []string{"tag_sensor_id", "time"},
 			// Expected order: A,1000,10.0 -> A,2000,40.0 -> B,1000,30.0 -> B,2000,20.0
@@ -526,57 +528,57 @@ func TestSortColumnsByKeys(t *testing.T) {
 		},
 		{
 			name: "sort by time only (single key)",
-			columns: map[string]interface{}{
-				"tag_sensor_id": []string{"B", "A", "C"},
-				"time":          []int64{3000, 1000, 2000},
-				"value":         []float64{3.0, 1.0, 2.0},
+			columns: map[string]ColumnData{
+				"tag_sensor_id": {Data: []string{"B", "A", "C"}},
+				"time":          {Data: []int64{3000, 1000, 2000}},
+				"value":         {Data: []float64{3.0, 1.0, 2.0}},
 			},
 			sortKeys:  []string{"time"},
 			wantOrder: []int{1, 2, 0}, // 1000, 2000, 3000
 		},
 		{
 			name: "sort by int64 column then time",
-			columns: map[string]interface{}{
-				"device_id": []int64{2, 1, 2, 1},
-				"time":      []int64{4000, 3000, 2000, 1000},
-				"value":     []float64{4.0, 3.0, 2.0, 1.0},
+			columns: map[string]ColumnData{
+				"device_id": {Data: []int64{2, 1, 2, 1}},
+				"time":      {Data: []int64{4000, 3000, 2000, 1000}},
+				"value":     {Data: []float64{4.0, 3.0, 2.0, 1.0}},
 			},
 			sortKeys:  []string{"device_id", "time"},
 			wantOrder: []int{3, 1, 2, 0}, // device_id=1,time=1000 -> 1,3000 -> 2,2000 -> 2,4000
 		},
 		{
 			name: "sort by float64 column",
-			columns: map[string]interface{}{
-				"priority": []float64{3.5, 1.2, 2.7},
-				"time":     []int64{1000, 2000, 3000},
+			columns: map[string]ColumnData{
+				"priority": {Data: []float64{3.5, 1.2, 2.7}},
+				"time":     {Data: []int64{1000, 2000, 3000}},
 			},
 			sortKeys:  []string{"priority", "time"},
 			wantOrder: []int{1, 2, 0}, // 1.2, 2.7, 3.5
 		},
 		{
 			name: "sort by bool column then time",
-			columns: map[string]interface{}{
-				"active": []bool{true, false, true, false},
-				"time":   []int64{4000, 3000, 2000, 1000},
+			columns: map[string]ColumnData{
+				"active": {Data: []bool{true, false, true, false}},
+				"time":   {Data: []int64{4000, 3000, 2000, 1000}},
 			},
 			sortKeys:  []string{"active", "time"},
 			wantOrder: []int{3, 1, 2, 0}, // false,1000 -> false,3000 -> true,2000 -> true,4000
 		},
 		{
 			name: "three-key sort",
-			columns: map[string]interface{}{
-				"region": []string{"US", "EU", "US", "EU"},
-				"host":   []string{"host1", "host1", "host2", "host2"},
-				"time":   []int64{2000, 1000, 4000, 3000},
+			columns: map[string]ColumnData{
+				"region": {Data: []string{"US", "EU", "US", "EU"}},
+				"host":   {Data: []string{"host1", "host1", "host2", "host2"}},
+				"time":   {Data: []int64{2000, 1000, 4000, 3000}},
 			},
 			sortKeys:  []string{"region", "host", "time"},
 			wantOrder: []int{1, 3, 0, 2}, // EU,host1,1000 -> EU,host2,3000 -> US,host1,2000 -> US,host2,4000
 		},
 		{
 			name: "missing sort key column",
-			columns: map[string]interface{}{
-				"time":  []int64{1000, 2000},
-				"value": []float64{1.0, 2.0},
+			columns: map[string]ColumnData{
+				"time":  {Data: []int64{1000, 2000}},
+				"value": {Data: []float64{1.0, 2.0}},
 			},
 			sortKeys:      []string{"nonexistent", "time"},
 			wantError:     true,
@@ -584,8 +586,8 @@ func TestSortColumnsByKeys(t *testing.T) {
 		},
 		{
 			name: "no sort keys provided",
-			columns: map[string]interface{}{
-				"time": []int64{1000, 2000},
+			columns: map[string]ColumnData{
+				"time": {Data: []int64{1000, 2000}},
 			},
 			sortKeys:      []string{},
 			wantError:     true,
@@ -593,9 +595,9 @@ func TestSortColumnsByKeys(t *testing.T) {
 		},
 		{
 			name: "empty data",
-			columns: map[string]interface{}{
-				"time":  []int64{},
-				"value": []float64{},
+			columns: map[string]ColumnData{
+				"time":  {Data: []int64{}},
+				"value": {Data: []float64{}},
 			},
 			sortKeys:  []string{"time"},
 			wantOrder: []int{}, // No change, empty
@@ -626,10 +628,10 @@ func TestSortColumnsByKeys(t *testing.T) {
 			if len(tt.wantOrder) > 0 {
 				// Check that data is in expected order
 				for colName, colData := range sorted {
-					switch col := colData.(type) {
+					switch col := colData.Data.(type) {
 					case []int64:
 						for i, expectedIdx := range tt.wantOrder {
-							originalCol := tt.columns[colName].([]int64)
+							originalCol := tt.columns[colName].Data.([]int64)
 							if col[i] != originalCol[expectedIdx] {
 								t.Errorf("sortColumnsByKeys() column %s[%d] = %v, want %v (original[%d])",
 									colName, i, col[i], originalCol[expectedIdx], expectedIdx)
@@ -637,7 +639,7 @@ func TestSortColumnsByKeys(t *testing.T) {
 						}
 					case []float64:
 						for i, expectedIdx := range tt.wantOrder {
-							originalCol := tt.columns[colName].([]float64)
+							originalCol := tt.columns[colName].Data.([]float64)
 							if col[i] != originalCol[expectedIdx] {
 								t.Errorf("sortColumnsByKeys() column %s[%d] = %v, want %v (original[%d])",
 									colName, i, col[i], originalCol[expectedIdx], expectedIdx)
@@ -645,7 +647,7 @@ func TestSortColumnsByKeys(t *testing.T) {
 						}
 					case []string:
 						for i, expectedIdx := range tt.wantOrder {
-							originalCol := tt.columns[colName].([]string)
+							originalCol := tt.columns[colName].Data.([]string)
 							if col[i] != originalCol[expectedIdx] {
 								t.Errorf("sortColumnsByKeys() column %s[%d] = %v, want %v (original[%d])",
 									colName, i, col[i], originalCol[expectedIdx], expectedIdx)
@@ -653,7 +655,7 @@ func TestSortColumnsByKeys(t *testing.T) {
 						}
 					case []bool:
 						for i, expectedIdx := range tt.wantOrder {
-							originalCol := tt.columns[colName].([]bool)
+							originalCol := tt.columns[colName].Data.([]bool)
 							if col[i] != originalCol[expectedIdx] {
 								t.Errorf("sortColumnsByKeys() column %s[%d] = %v, want %v (original[%d])",
 									colName, i, col[i], originalCol[expectedIdx], expectedIdx)
@@ -673,17 +675,17 @@ func BenchmarkSortColumnsByKeys(b *testing.B) {
 	for _, size := range sizes {
 		b.Run("size_"+string(rune(size)), func(b *testing.B) {
 			// Create test data
-			columns := map[string]interface{}{
-				"tag_sensor_id": make([]string, size),
-				"time":          make([]int64, size),
-				"value":         make([]float64, size),
+			columns := map[string]ColumnData{
+				"tag_sensor_id": {Data: make([]string, size)},
+				"time":          {Data: make([]int64, size)},
+				"value":         {Data: make([]float64, size)},
 			}
 
 			// Populate with semi-random data (deterministic for consistency)
 			for i := 0; i < size; i++ {
-				columns["tag_sensor_id"].([]string)[i] = "sensor_" + string(rune('A'+i%26))
-				columns["time"].([]int64)[i] = int64(size - i) // Reverse order
-				columns["value"].([]float64)[i] = float64(i) * 1.5
+				columns["tag_sensor_id"].Data.([]string)[i] = "sensor_" + string(rune('A'+i%26))
+				columns["time"].Data.([]int64)[i] = int64(size - i) // Reverse order
+				columns["value"].Data.([]float64)[i] = float64(i) * 1.5
 			}
 
 			sortKeys := []string{"tag_sensor_id", "time"}
