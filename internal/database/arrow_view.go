@@ -199,8 +199,8 @@ func (m *ArrowViewManager) refreshLoop() {
 
 // refreshView 增量刷新单个 measurement 的临时表。
 func (m *ArrowViewManager) refreshView(bufferKey string) {
-	newBatches, err := m.buffer.SinceRefresh(bufferKey)
-	if err != nil || len(newBatches) == 0 {
+	newEntries, err := m.buffer.SinceRefresh(bufferKey)
+	if err != nil || len(newEntries) == 0 {
 		return
 	}
 
@@ -210,14 +210,14 @@ func (m *ArrowViewManager) refreshView(bufferKey string) {
 	m.mu.Unlock()
 
 	schemaChanged := false
-	if exists && len(newBatches) > 0 {
-		schemaChanged = (newBatches[0].GetSchema() != "" && newBatches[0].GetSchema() != state.schema)
+	if exists && len(newEntries) > 0 {
+		schemaChanged = (newEntries[0].GetSchema() != "" && newEntries[0].GetSchema() != state.schema)
 	}
 
 	if !exists || schemaChanged {
-		m.createOrReplaceTable(bufferKey, newBatches)
+		m.createOrReplaceTable(bufferKey, newEntries)
 		m.buffer.MarkRefreshed(bufferKey)
-	} else if err := m.appendToTable(bufferKey, newBatches); err != nil {
+	} else if err := m.appendToTable(bufferKey, newEntries); err != nil {
 		// Append failed — old VIEW data is intact (table not dropped).
 		// Skip MarkRefreshed so the next refresh cycle retries these batches.
 		m.logger.Warn().Err(err).Str("buffer_key", bufferKey).Msg("Incremental VIEW append failed, will retry next cycle")
@@ -363,7 +363,7 @@ func (m *ArrowViewManager) appendEntryToTable(conn *sql.Conn, viewName string, e
 	return rowCount, nil
 }
 
-// buildCreateTableSQL 从 TypedColumnBatch 构建 CREATE TABLE 语句。
+// buildCreateTableSQL 从 Entry 构建 CREATE TABLE 语句。
 func (m *ArrowViewManager) buildCreateTableSQL(viewName string, entry *ingest.Entry) string {
 	colNames := make([]string, 0, len(entry.GetColumns()))
 	for name := range entry.GetColumns() {

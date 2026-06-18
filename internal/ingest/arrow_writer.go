@@ -2047,11 +2047,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		entry.refreshIndex = 0
 	}
 
-	// Infer Arrow schema eagerly on first entry creation
-	if entry.arrowSchema == nil && len(record.Columns) > 0 {
-		// Will infer after the first append since convertAndAppendToEntry produces typed data
-	}
-
 	// Single-pass: convert []interface{} -> typed slices + append to entry
 	numRecords, err := b.convertAndAppendToEntry(entry, record.Measurement, record.Columns)
 	if err != nil {
@@ -2650,6 +2645,7 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 				tagColumns:  tagCols,
 				schema:      entry.schema,
 				recordCount: recordCount,
+				arrowSchema: arrowSchema,
 			}
 			startTime := time.Now()
 			if err := b.flushPartitionedData(context.Background(), oldestKey, parts[0], parts[1], merged, "hard_limit", startTime); err != nil {
@@ -3006,7 +3002,7 @@ func prependFlushDataToEntry(entry *bufferEntry, columns map[string]ColumnData, 
 	}
 
 	entry.recordCount += flushedRows
-	entry.estimatedBytes += estimateBytesFromData(entry.columns, entry.recordCount)
+	entry.estimatedBytes += estimateBytesFromData(columns, flushedRows)
 }
 
 // sortColumnsByTime sorts all columns by the time column in-place
@@ -3156,7 +3152,7 @@ func compareMultiKeyCached(cachedCols []ColumnData, i, j int) bool {
 
 
 
-// sortEntryByKeys sorts a TypedColumnBatch by the given keys,
+// sortEntryByKeys sorts a bufferEntry by the given keys,
 // keeping validity bitmaps aligned with the reordered data.
 // Uses the permutation returned by sortColumnsByKeysWithPermutation to avoid
 // a second sort pass when validity bitmaps need reordering.
@@ -3175,7 +3171,7 @@ func sortEntryByKeys(batch *bufferEntry, sortKeys []string) *bufferEntry {
 	return result
 }
 
-// sliceEntryByIndices extracts rows from a TypedColumnBatch by index list,
+// sliceEntryByIndices extracts rows from a bufferEntry by index list,
 // keeping validity bitmaps aligned.
 func sliceEntryByIndices(batch *bufferEntry, indices []int) *bufferEntry {
 	sliced := make(map[string]ColumnData, len(batch.columns))
