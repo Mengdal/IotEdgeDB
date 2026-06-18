@@ -904,7 +904,7 @@ func (h *ImportHandler) handleTLEImport(c *fiber.Ctx) error {
 
 	// Write directly to the ArrowBuffer ingest pipeline (typed path)
 	totalRows := int64(numRecords)
-	if err := h.arrowBuffer.WriteTypedColumnarDirect(c.Context(), database, measurement, batch, numRecords); err != nil {
+	if err := h.arrowBuffer.WriteTypedColumnarDirect(c.Context(), database, measurement, batch); err != nil {
 		h.totalErrors.Add(1)
 		h.logger.Error().Err(err).
 			Str("database", database).

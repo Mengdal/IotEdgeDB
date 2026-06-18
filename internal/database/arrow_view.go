@@ -211,7 +211,7 @@ func (m *ArrowViewManager) refreshView(bufferKey string) {
 
 	schemaChanged := false
 	if exists && len(newBatches) > 0 {
-		schemaChanged = (newBatches[0].Signature != "" && newBatches[0].Signature != state.schema)
+		schemaChanged = (newBatches[0].GetSchema() != "" && newBatches[0].GetSchema() != state.schema)
 	}
 
 	if !exists || schemaChanged {
@@ -227,9 +227,9 @@ func (m *ArrowViewManager) refreshView(bufferKey string) {
 }
 
 // createOrReplaceTable 创建或重建临时表。
-func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ingest.TypedColumnBatch) {
+func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, entries []*ingest.Entry) {
 	viewName := ViewName(bufferKey)
-	if len(batches) == 0 {
+	if len(entries) == 0 {
 		return
 	}
 
@@ -244,21 +244,21 @@ func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ing
 	if _, err := conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+QuoteIdent(viewName)); err != nil {
 		m.logger.Warn().Err(err).Str("table", viewName).Msg("Failed to drop old VIEW table — CREATE may be skipped by IF NOT EXISTS")
 	}
-	createSQL := m.buildCreateTableSQL(viewName, batches[0])
+	createSQL := m.buildCreateTableSQL(viewName, entries[0])
 	if _, err := conn.ExecContext(context.Background(), createSQL); err != nil {
 		m.logger.Error().Err(err).Str("sql", createSQL).Msg("Failed to create VIEW table")
 		return
 	}
 
 	totalRows := 0
-	for _, batch := range batches {
-		n, _ := m.appendBatchToTable(conn, viewName, batch)
+	for _, entry := range entries {
+		n, _ := m.appendEntryToTable(conn, viewName, entry)
 		totalRows += n
 	}
 
 	m.mu.Lock()
 	m.views[bufferKey] = &arrowViewState{
-		schema:    batches[0].Signature,
+		schema:    entries[0].GetSchema(),
 		rowCount:  totalRows,
 		createdAt: time.Now(),
 	}
@@ -270,7 +270,7 @@ func (m *ArrowViewManager) createOrReplaceTable(bufferKey string, batches []*ing
 // Returns nil on success, or the DuckDB append error on failure.
 // On failure, the old VIEW table is NOT dropped — the caller (refreshView)
 // skips MarkRefreshed so the failed batches will be retried next cycle.
-func (m *ArrowViewManager) appendToTable(bufferKey string, batches []*ingest.TypedColumnBatch) error {
+func (m *ArrowViewManager) appendToTable(bufferKey string, entries []*ingest.Entry) error {
 	viewName := ViewName(bufferKey)
 	conn, err := m.db.DB().Conn(context.Background())
 	if err != nil {
@@ -279,8 +279,8 @@ func (m *ArrowViewManager) appendToTable(bufferKey string, batches []*ingest.Typ
 	defer conn.Close()
 
 	totalRows := 0
-	for _, batch := range batches {
-		n, err := m.appendBatchToTable(conn, viewName, batch)
+	for _, entry := range entries {
+		n, err := m.appendEntryToTable(conn, viewName, entry)
 		if err != nil {
 			return err
 		}
@@ -295,10 +295,10 @@ func (m *ArrowViewManager) appendToTable(bufferKey string, batches []*ingest.Typ
 	return nil
 }
 
-// appendBatchToTable 使用 DuckDB Appender API 批量列式写入单个 batch 到临时表。
-func (m *ArrowViewManager) appendBatchToTable(conn *sql.Conn, viewName string, batch *ingest.TypedColumnBatch) (int, error) {
-	colNames := make([]string, 0, len(batch.Data))
-	for name := range batch.Data {
+// appendEntryToTable 使用 DuckDB Appender API 批量列式写入单个 batch 到临时表。
+func (m *ArrowViewManager) appendEntryToTable(conn *sql.Conn, viewName string, entry *ingest.Entry) (int, error) {
+	colNames := make([]string, 0, len(entry.GetData()))
+	for name := range entry.GetData() {
 		colNames = append(colNames, name)
 	}
 	sort.Strings(colNames)
@@ -308,7 +308,7 @@ func (m *ArrowViewManager) appendBatchToTable(conn *sql.Conn, viewName string, b
 	}
 
 	rowCount := 0
-	for _, col := range batch.Data {
+	for _, col := range entry.GetData() {
 		switch v := col.(type) {
 		case []int64:
 			rowCount = len(v)
@@ -342,7 +342,7 @@ func (m *ArrowViewManager) appendBatchToTable(conn *sql.Conn, viewName string, b
 		for row := 0; row < rowCount; row++ {
 			values := make([]driver.Value, len(colNames))
 			for i, name := range colNames {
-				values[i] = columnValue(batch.Data[name], batch.Validity[name], row)
+				values[i] = columnValue(entry.GetData()[name], entry.GetValidity()[name], row)
 			}
 			if err := appender.AppendRow(values...); err != nil {
 				_ = appender.Close()
@@ -364,16 +364,16 @@ func (m *ArrowViewManager) appendBatchToTable(conn *sql.Conn, viewName string, b
 }
 
 // buildCreateTableSQL 从 TypedColumnBatch 构建 CREATE TABLE 语句。
-func (m *ArrowViewManager) buildCreateTableSQL(viewName string, batch *ingest.TypedColumnBatch) string {
-	colNames := make([]string, 0, len(batch.Data))
-	for name := range batch.Data {
+func (m *ArrowViewManager) buildCreateTableSQL(viewName string, entry *ingest.Entry) string {
+	colNames := make([]string, 0, len(entry.GetData()))
+	for name := range entry.GetData() {
 		colNames = append(colNames, name)
 	}
 	sort.Strings(colNames)
 
 	colDefs := make([]string, len(colNames))
 	for i, name := range colNames {
-		colDefs[i] = fmt.Sprintf(`"%s" %s`, name, duckTypeFor(batch.Data[name]))
+		colDefs[i] = fmt.Sprintf(`"%s" %s`, name, duckTypeFor(entry.GetData()[name]))
 	}
 	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (%s)", QuoteIdent(viewName), strings.Join(colDefs, ", "))
 }

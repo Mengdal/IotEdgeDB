@@ -502,15 +502,15 @@ func classifyOrbit(perigeeKm, apogeeKm, eccentricity float64) string {
 	return "HEO"
 }
 
-// TLERecordsToTypedColumnar converts parsed TLE records directly to a TypedColumnBatch,
+// TLERecordsToTypedColumnar converts parsed TLE records directly to a bufferEntry,
 // bypassing the []interface{} intermediary and convertColumnsToTyped entirely.
 // All typed slices are pre-allocated at exact size and filled in a single pass.
-// Returns the batch and the number of records.
-func TLERecordsToTypedColumnar(records []TLERecord) (*TypedColumnBatch, int) {
+// Returns the entry and the number of records.
+func TLERecordsToTypedColumnar(records []TLERecord) (*bufferEntry, int) {
 	n := len(records)
 	if n == 0 {
-		return &TypedColumnBatch{
-			Data: make(map[string]interface{}),
+		return &bufferEntry{
+			data: make(map[string]interface{}),
 		}, 0
 	}
 
@@ -561,8 +561,8 @@ func TLERecordsToTypedColumnar(records []TLERecord) (*TypedColumnBatch, int) {
 		perigeeKm[i] = tle.PerigeeKm
 	}
 
-	batch := &TypedColumnBatch{
-		Data: map[string]interface{}{
+	entry := &bufferEntry{
+		data: map[string]interface{}{
 			"time":                     timeCol,
 			"norad_id":                 noradID,
 			"object_name":              objectName,
@@ -584,8 +584,9 @@ func TLERecordsToTypedColumnar(records []TLERecord) (*TypedColumnBatch, int) {
 			"apogee_km":                apogeeKm,
 			"perigee_km":               perigeeKm,
 		},
+		recordCount: n,
 		// No validity bitmaps — TLE records never have null values
 	}
 
-	return batch, n
+	return entry, n
 }

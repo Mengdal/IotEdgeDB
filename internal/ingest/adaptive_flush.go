@@ -251,12 +251,14 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 		bufferKey:   c.bufferKey,
 		database:    database,
 		measurement: measurement,
-		data:        data,
-		validity:    validity,
-		tagColumns:  tagCols,
-		recordCount: recordCount,
+		entry: &bufferEntry{
+			data:        data,
+			validity:    validity,
+			tagColumns:  tagCols,
+			recordCount: recordCount,
+			arrowSchema: entry.arrowSchema,
+		},
 		trigger:     trigger,
-		arrowSchema: entry.arrowSchema,
 	}
 	outcome := e.buffer.tryEnqueueFlush(task, flushCancel, c.bufferKey, recordCount)
 
