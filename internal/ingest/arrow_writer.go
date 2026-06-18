@@ -586,9 +586,17 @@ func appendEntryToEntry(dst, src *bufferEntry) {
 // adding one case to each of these functions.
 // =============================================================================
 
+// ColumnData bundles a typed column slice with its null bitmap.
+// Data is the underlying typed slice ([]int64, []float64, etc.).
+// Validity is nil when all values are valid; when non-nil, len(Validity) == len(slice).
+type ColumnData struct {
+	Data     any
+	Validity []bool
+}
+
 // colLen returns the number of rows in a typed column slice.
-func colLen(col any) int {
-	switch v := col.(type) {
+func colLen(c ColumnData) int {
+	switch v := c.Data.(type) {
 	case []int64:
 		return len(v)
 	case []float64:
@@ -605,61 +613,118 @@ func colLen(col any) int {
 }
 
 // colMake allocates a new typed column slice of length n, matching the type of firstVal.
-func colMake(firstVal any, n int) any {
+func colMake(firstVal any, n int) ColumnData {
 	switch firstVal.(type) {
 	case int64:
-		return make([]int64, n)
+		return ColumnData{Data: make([]int64, n)}
 	case float64:
-		return make([]float64, n)
+		return ColumnData{Data: make([]float64, n)}
 	case string:
-		return make([]string, n)
+		return ColumnData{Data: make([]string, n)}
 	case bool:
-		return make([]bool, n)
+		return ColumnData{Data: make([]bool, n)}
 	case decimal128.Num:
-		return make([]decimal128.Num, n)
+		return ColumnData{Data: make([]decimal128.Num, n)}
 	default:
-		return nil
+		return ColumnData{}
 	}
 }
 
-// colAppend concatenates two typed column slices. dst and src must have the same element type.
-// Returns a new slice; the original slices are not modified.
-func colAppend(dst, src any) any {
-	switch v := src.(type) {
+// colAppend concatenates two ColumnData values. dst and src must have the same element type.
+// Validity bitmaps are merged: src.Validity is appended to dst.Validity.
+// When only one side has Validity, the other side is treated as all-valid (true).
+func colAppend(dst, src ColumnData) ColumnData {
+	switch v := src.Data.(type) {
 	case []int64:
-		if dst == nil {
-			return v
+		if dst.Data == nil {
+			return src
 		}
-		return append(dst.([]int64), v...)
+		return ColumnData{
+			Data:     append(dst.Data.([]int64), v...),
+			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
+		}
 	case []float64:
-		if dst == nil {
-			return v
+		if dst.Data == nil {
+			return src
 		}
-		return append(dst.([]float64), v...)
+		return ColumnData{
+			Data:     append(dst.Data.([]float64), v...),
+			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
+		}
 	case []string:
-		if dst == nil {
-			return v
+		if dst.Data == nil {
+			return src
 		}
-		return append(dst.([]string), v...)
+		return ColumnData{
+			Data:     append(dst.Data.([]string), v...),
+			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
+		}
 	case []bool:
-		if dst == nil {
-			return v
+		if dst.Data == nil {
+			return src
 		}
-		return append(dst.([]bool), v...)
+		return ColumnData{
+			Data:     append(dst.Data.([]bool), v...),
+			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
+		}
 	case []decimal128.Num:
-		if dst == nil {
-			return v
+		if dst.Data == nil {
+			return src
 		}
-		return append(dst.([]decimal128.Num), v...)
+		return ColumnData{
+			Data:     append(dst.Data.([]decimal128.Num), v...),
+			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
+		}
 	default:
 		return dst
 	}
 }
 
-// colSlice extracts rows by index list. Returns a new slice; source is unmodified.
-func colSlice(col any, indices []int) any {
-	n := len(indices)
+// colLenRaw returns len of a typed slice any, for internal use without ColumnData wrapper.
+func colLenRaw(col any) int {
 	switch v := col.(type) {
+	case []int64:
+		return len(v)
+	case []float64:
+		return len(v)
+	case []string:
+		return len(v)
+	case []bool:
+		return len(v)
+	case []decimal128.Num:
+		return len(v)
+	default:
+		return 0
+	}
+}
+
+// mergeValidity merges two validity bitmaps when appending columns.
+// dstLen is the number of pre-existing rows that dst covers.
+// srcLen is the number of rows in the source batch.
+func mergeValidity(dst, src []bool, dstLen, srcLen int) []bool {
+	if dst == nil && src == nil {
+		return nil
+	}
+	if dst == nil {
+		dst = make([]bool, dstLen)
+		for i := range dst {
+			dst[i] = true
+		}
+	}
+	if src == nil {
+		pad := make([]bool, srcLen)
+		for i := range pad {
+			pad[i] = true
+		}
+		return append(dst, pad...)
+	}
+	return append(dst, src...)
+}
+
+// colSlice extracts rows by index list. Returns a new slice; source is unmodified.
+func colSlice(c ColumnData, indices []int) ColumnData {
+	n := len(indices)
+	switch v := c.Data.(type) {
 	case []int64:
 		out := make([]int64, n)
 		vl := len(v)
@@ -668,7 +733,7 @@ func colSlice(col any, indices []int) any {
 				out[i] = v[idx]
 			}
 		}
-		return out
+		return ColumnData{Data: out, Validity: sliceValidity(c.Validity, indices)}
 	case []float64:
 		out := make([]float64, n)
 		vl := len(v)
@@ -677,7 +742,7 @@ func colSlice(col any, indices []int) any {
 				out[i] = v[idx]
 			}
 		}
-		return out
+		return ColumnData{Data: out, Validity: sliceValidity(c.Validity, indices)}
 	case []string:
 		out := make([]string, n)
 		vl := len(v)
@@ -686,7 +751,7 @@ func colSlice(col any, indices []int) any {
 				out[i] = v[idx]
 			}
 		}
-		return out
+		return ColumnData{Data: out, Validity: sliceValidity(c.Validity, indices)}
 	case []bool:
 		out := make([]bool, n)
 		vl := len(v)
@@ -695,7 +760,7 @@ func colSlice(col any, indices []int) any {
 				out[i] = v[idx]
 			}
 		}
-		return out
+		return ColumnData{Data: out, Validity: sliceValidity(c.Validity, indices)}
 	case []decimal128.Num:
 		out := make([]decimal128.Num, n)
 		vl := len(v)
@@ -704,72 +769,107 @@ func colSlice(col any, indices []int) any {
 				out[i] = v[idx]
 			}
 		}
-		return out
+		return ColumnData{Data: out, Validity: sliceValidity(c.Validity, indices)}
 	default:
-		return col
+		return c
 	}
+}
+
+// sliceValidity creates a new validity bitmap by indexing an existing bitmap with indices.
+func sliceValidity(v []bool, indices []int) []bool {
+	if v == nil {
+		return nil
+	}
+	out := make([]bool, len(indices))
+	vl := len(v)
+	for i, idx := range indices {
+		if idx < vl {
+			out[i] = v[idx]
+		}
+	}
+	return out
 }
 
 // colSliceFrom returns the sub-slice of col from start index to end.
-func colSliceFrom(col any, start int) any {
-	switch v := col.(type) {
+func colSliceFrom(c ColumnData, start int) ColumnData {
+	switch v := c.Data.(type) {
 	case []int64:
-		return v[start:]
+		return ColumnData{Data: v[start:], Validity: sliceValidityFrom(c.Validity, start)}
 	case []float64:
-		return v[start:]
+		return ColumnData{Data: v[start:], Validity: sliceValidityFrom(c.Validity, start)}
 	case []string:
-		return v[start:]
+		return ColumnData{Data: v[start:], Validity: sliceValidityFrom(c.Validity, start)}
 	case []bool:
-		return v[start:]
+		return ColumnData{Data: v[start:], Validity: sliceValidityFrom(c.Validity, start)}
 	case []decimal128.Num:
-		return v[start:]
+		return ColumnData{Data: v[start:], Validity: sliceValidityFrom(c.Validity, start)}
 	default:
-		return col
+		return c
 	}
 }
 
+// sliceValidityFrom slices a validity bitmap from start to end.
+func sliceValidityFrom(v []bool, start int) []bool {
+	if v == nil {
+		return nil
+	}
+	return v[start:]
+}
+
 // colPermute reorders a column according to permutation indices. Allocates a new slice.
-func colPermute(col any, indices []int) any {
+func colPermute(c ColumnData, indices []int) ColumnData {
 	n := len(indices)
-	switch v := col.(type) {
+	switch v := c.Data.(type) {
 	case []int64:
 		out := make([]int64, n)
 		for i, idx := range indices {
 			out[i] = v[idx]
 		}
-		return out
+		return ColumnData{Data: out, Validity: permuteValidity(c.Validity, indices)}
 	case []float64:
 		out := make([]float64, n)
 		for i, idx := range indices {
 			out[i] = v[idx]
 		}
-		return out
+		return ColumnData{Data: out, Validity: permuteValidity(c.Validity, indices)}
 	case []string:
 		out := make([]string, n)
 		for i, idx := range indices {
 			out[i] = v[idx]
 		}
-		return out
+		return ColumnData{Data: out, Validity: permuteValidity(c.Validity, indices)}
 	case []bool:
 		out := make([]bool, n)
 		for i, idx := range indices {
 			out[i] = v[idx]
 		}
-		return out
+		return ColumnData{Data: out, Validity: permuteValidity(c.Validity, indices)}
 	case []decimal128.Num:
 		out := make([]decimal128.Num, n)
 		for i, idx := range indices {
 			out[i] = v[idx]
 		}
-		return out
+		return ColumnData{Data: out, Validity: permuteValidity(c.Validity, indices)}
 	default:
-		return col
+		return c
 	}
 }
 
+// permuteValidity creates a new validity bitmap by reindexing with permutation indices.
+func permuteValidity(v []bool, indices []int) []bool {
+	if v == nil {
+		return nil
+	}
+	out := make([]bool, len(indices))
+	for i, idx := range indices {
+		out[i] = v[idx]
+	}
+	return out
+}
+
 // colLess compares two rows within a single column. false < true for bool columns.
-func colLess(col any, i, j int) bool {
-	switch v := col.(type) {
+func colLess(c ColumnData, i, j int) bool {
+	switch v := c.Data.(type) {
 	case []int64:
 		return v[i] < v[j]
 	case []float64:
@@ -786,8 +886,8 @@ func colLess(col any, i, j int) bool {
 }
 
 // colEstBytesPerRow estimates bytes per row for a single column.
-func colEstBytesPerRow(col any) uint64 {
-	switch v := col.(type) {
+func colEstBytesPerRow(c ColumnData) uint64 {
+	switch v := c.Data.(type) {
 	case []int64:
 		return 8
 	case []float64:
@@ -812,10 +912,12 @@ func colEstBytesPerRow(col any) uint64 {
 	}
 }
 
-// colIthVal returns the i-th value from a typed column slice as an interface{}.
-// Used by WAL conversion to extract individual row values.
-func colIthVal(col any, i int) any {
-	switch v := col.(type) {
+// colIthVal returns the i-th value, or nil if the value is null.
+func colIthVal(c ColumnData, i int) any {
+	if c.Validity != nil && i < len(c.Validity) && !c.Validity[i] {
+		return nil
+	}
+	switch v := c.Data.(type) {
 	case []int64:
 		if i < len(v) {
 			return v[i]
@@ -842,8 +944,8 @@ func colIthVal(col any, i int) any {
 
 // colTypeTag returns a short type tag string for a typed column slice.
 // Used by getColumnSignature. Returns "" for unknown types.
-func colTypeTag(col any) string {
-	switch col.(type) {
+func colTypeTag(c ColumnData) string {
+	switch c.Data.(type) {
 	case []int64:
 		return "i64"
 	case []float64:
