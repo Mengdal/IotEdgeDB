@@ -603,6 +603,253 @@ func appendTypedBatchToEntry(entry *bufferEntry, batch *TypedColumnBatch, batchR
 	entry.estimatedBytes += uint64(batchRows) * estimateBytesPerRow(batch)
 }
 
+// =============================================================================
+// Column Dispatch Functions -- centralized type switch for all column operations.
+// Every function that operates on typed column slices routes through these
+// instead of writing inline type switches, so adding a 6th type only requires
+// adding one case to each of these functions.
+// =============================================================================
+
+// colLen returns the number of rows in a typed column slice.
+func colLen(col any) int {
+	switch v := col.(type) {
+	case []int64:
+		return len(v)
+	case []float64:
+		return len(v)
+	case []string:
+		return len(v)
+	case []bool:
+		return len(v)
+	case []decimal128.Num:
+		return len(v)
+	default:
+		return 0
+	}
+}
+
+// colMake allocates a new typed column slice of length n, matching the type of firstVal.
+func colMake(firstVal any, n int) any {
+	switch firstVal.(type) {
+	case int64:
+		return make([]int64, n)
+	case float64:
+		return make([]float64, n)
+	case string:
+		return make([]string, n)
+	case bool:
+		return make([]bool, n)
+	case decimal128.Num:
+		return make([]decimal128.Num, n)
+	default:
+		return nil
+	}
+}
+
+// colAppend concatenates two typed column slices. dst and src must have the same element type.
+// Returns a new slice; the original slices are not modified.
+func colAppend(dst, src any) any {
+	switch v := src.(type) {
+	case []int64:
+		return append(dst.([]int64), v...)
+	case []float64:
+		return append(dst.([]float64), v...)
+	case []string:
+		return append(dst.([]string), v...)
+	case []bool:
+		return append(dst.([]bool), v...)
+	case []decimal128.Num:
+		return append(dst.([]decimal128.Num), v...)
+	default:
+		return dst
+	}
+}
+
+// colSlice extracts rows by index list. Returns a new slice; source is unmodified.
+func colSlice(col any, indices []int) any {
+	n := len(indices)
+	switch v := col.(type) {
+	case []int64:
+		out := make([]int64, n)
+		vl := len(v)
+		for i, idx := range indices {
+			if idx < vl {
+				out[i] = v[idx]
+			}
+		}
+		return out
+	case []float64:
+		out := make([]float64, n)
+		vl := len(v)
+		for i, idx := range indices {
+			if idx < vl {
+				out[i] = v[idx]
+			}
+		}
+		return out
+	case []string:
+		out := make([]string, n)
+		vl := len(v)
+		for i, idx := range indices {
+			if idx < vl {
+				out[i] = v[idx]
+			}
+		}
+		return out
+	case []bool:
+		out := make([]bool, n)
+		vl := len(v)
+		for i, idx := range indices {
+			if idx < vl {
+				out[i] = v[idx]
+			}
+		}
+		return out
+	case []decimal128.Num:
+		out := make([]decimal128.Num, n)
+		vl := len(v)
+		for i, idx := range indices {
+			if idx < vl {
+				out[i] = v[idx]
+			}
+		}
+		return out
+	default:
+		return col
+	}
+}
+
+// colPermute reorders a column according to permutation indices. Allocates a new slice.
+func colPermute(col any, indices []int) any {
+	n := len(indices)
+	switch v := col.(type) {
+	case []int64:
+		out := make([]int64, n)
+		for i, idx := range indices {
+			out[i] = v[idx]
+		}
+		return out
+	case []float64:
+		out := make([]float64, n)
+		for i, idx := range indices {
+			out[i] = v[idx]
+		}
+		return out
+	case []string:
+		out := make([]string, n)
+		for i, idx := range indices {
+			out[i] = v[idx]
+		}
+		return out
+	case []bool:
+		out := make([]bool, n)
+		for i, idx := range indices {
+			out[i] = v[idx]
+		}
+		return out
+	case []decimal128.Num:
+		out := make([]decimal128.Num, n)
+		for i, idx := range indices {
+			out[i] = v[idx]
+		}
+		return out
+	default:
+		return col
+	}
+}
+
+// colLess compares two rows within a single column. false < true for bool columns.
+func colLess(col any, i, j int) bool {
+	switch v := col.(type) {
+	case []int64:
+		return v[i] < v[j]
+	case []float64:
+		return v[i] < v[j]
+	case []string:
+		return v[i] < v[j]
+	case []bool:
+		return !v[i] && v[j]
+	case []decimal128.Num:
+		return v[i].Less(v[j])
+	default:
+		return false
+	}
+}
+
+// colEstBytesPerRow estimates bytes per row for a single column.
+func colEstBytesPerRow(col any) uint64 {
+	switch v := col.(type) {
+	case []int64:
+		return 8
+	case []float64:
+		return 8
+	case []bool:
+		return 1
+	case []string:
+		n := len(v)
+		if n == 0 {
+			return 32
+		}
+		if n > 100 {
+			n = 100
+		}
+		var sumLen int
+		for i := 0; i < n; i++ {
+			sumLen += len(v[i])
+		}
+		return uint64(sumLen / n)
+	default:
+		return 64
+	}
+}
+
+// colIthVal returns the i-th value from a typed column slice as an interface{}.
+// Used by WAL conversion to extract individual row values.
+func colIthVal(col any, i int) any {
+	switch v := col.(type) {
+	case []int64:
+		if i < len(v) {
+			return v[i]
+		}
+	case []float64:
+		if i < len(v) {
+			return v[i]
+		}
+	case []string:
+		if i < len(v) {
+			return v[i]
+		}
+	case []bool:
+		if i < len(v) {
+			return v[i]
+		}
+	case []decimal128.Num:
+		if i < len(v) {
+			return v[i]
+		}
+	}
+	return nil
+}
+
+// colTypeTag returns a short type tag string for a typed column slice.
+// Used by getColumnSignature. Returns "" for unknown types.
+func colTypeTag(col any) string {
+	switch col.(type) {
+	case []int64:
+		return "i64"
+	case []float64:
+		return "f64"
+	case []string:
+		return "str"
+	case []bool:
+		return "bool"
+	case []decimal128.Num:
+		return "dec"
+	default:
+		return "unk"
+	}
+}
+
 type bufferShard struct {
 	mu      sync.RWMutex
 	buffers map[string]*bufferEntry // bufferKey → merged buffer state
