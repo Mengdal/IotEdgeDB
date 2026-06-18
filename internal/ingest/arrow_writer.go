@@ -571,93 +571,58 @@ func colLen(c ColumnData) int {
 		return 0
 	}
 }
-
-// colMake allocates a new typed column slice of length n, matching the type of firstVal.
-func colMake(firstVal any, n int) ColumnData {
-	switch firstVal.(type) {
-	case int64:
-		return ColumnData{Data: make([]int64, n)}
-	case float64:
-		return ColumnData{Data: make([]float64, n)}
-	case string:
-		return ColumnData{Data: make([]string, n)}
-	case bool:
-		return ColumnData{Data: make([]bool, n)}
-	case decimal128.Num:
-		return ColumnData{Data: make([]decimal128.Num, n)}
-	default:
-		return ColumnData{}
-	}
-}
-
 // colAppend concatenates two ColumnData values. dst and src must have the same element type.
 // Validity bitmaps are merged: src.Validity is appended to dst.Validity.
 // When only one side has Validity, the other side is treated as all-valid (true).
 func colAppend(dst, src ColumnData) ColumnData {
+	if dst.Data == nil {
+		return src
+	}
 	switch v := src.Data.(type) {
-	case []int64:
-		if dst.Data == nil {
-			return src
+	case []int64: {
+		dstData := dst.Data.([]int64)
+		var mergedValidity []bool
+		if dst.Validity != nil || src.Validity != nil {
+			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
 		}
-		return ColumnData{
-			Data:     append(dst.Data.([]int64), v...),
-			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
+		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
+	}
+	case []float64: {
+		dstData := dst.Data.([]float64)
+		var mergedValidity []bool
+		if dst.Validity != nil || src.Validity != nil {
+			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
 		}
-	case []float64:
-		if dst.Data == nil {
-			return src
+		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
+	}
+	case []string: {
+		dstData := dst.Data.([]string)
+		var mergedValidity []bool
+		if dst.Validity != nil || src.Validity != nil {
+			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
 		}
-		return ColumnData{
-			Data:     append(dst.Data.([]float64), v...),
-			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
+		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
+	}
+	case []bool: {
+		dstData := dst.Data.([]bool)
+		var mergedValidity []bool
+		if dst.Validity != nil || src.Validity != nil {
+			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
 		}
-	case []string:
-		if dst.Data == nil {
-			return src
+		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
+	}
+	case []decimal128.Num: {
+		dstData := dst.Data.([]decimal128.Num)
+		var mergedValidity []bool
+		if dst.Validity != nil || src.Validity != nil {
+			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
 		}
-		return ColumnData{
-			Data:     append(dst.Data.([]string), v...),
-			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
-		}
-	case []bool:
-		if dst.Data == nil {
-			return src
-		}
-		return ColumnData{
-			Data:     append(dst.Data.([]bool), v...),
-			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
-		}
-	case []decimal128.Num:
-		if dst.Data == nil {
-			return src
-		}
-		return ColumnData{
-			Data:     append(dst.Data.([]decimal128.Num), v...),
-			Validity: mergeValidity(dst.Validity, src.Validity, colLenRaw(dst.Data), len(v)),
-		}
+		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
+	}
 	default:
 		return dst
 	}
 }
-
-// colLenRaw returns len of a typed slice any, for internal use without ColumnData wrapper.
-func colLenRaw(col any) int {
-	switch v := col.(type) {
-	case []int64:
-		return len(v)
-	case []float64:
-		return len(v)
-	case []string:
-		return len(v)
-	case []bool:
-		return len(v)
-	case []decimal128.Num:
-		return len(v)
-	default:
-		return 0
-	}
-}
-
 // mergeValidity merges two validity bitmaps when appending columns.
 // dstLen is the number of pre-existing rows that dst covers.
 // srcLen is the number of rows in the source batch.
@@ -1845,6 +1810,9 @@ func computeColumnSignature(columns map[string][]interface{}) string {
 // conversion and append happen in one loop, eliminating the intermediate
 // TypedColumnBatch allocation that existed in convertColumnsToTyped+appendEntryToEntry.
 func (b *ArrowBuffer) convertAndAppendToEntry(entry *bufferEntry, measurement string, columns map[string][]interface{}) (int, error) {
+	if entry.columns == nil {
+		entry.columns = make(map[string]ColumnData)
+	}
 	decimalCols := b.getDecimalColumns(measurement)
 	var numRecords int
 
