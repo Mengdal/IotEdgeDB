@@ -325,19 +325,21 @@ func TestTLERecordsToTypedColumnar(t *testing.T) {
 	}
 
 	// Should have 20 columns (1 time + 5 tags + 14 fields)
-	if len(batch.data) != 20 {
-		t.Errorf("expected 20 columns, got %d", len(batch.data))
+	if len(batch.columns) != 20 {
+		t.Errorf("expected 20 columns, got %d", len(batch.columns))
 	}
 
-	// No validity bitmaps (TLE never has nulls)
-	if len(batch.validity) != 0 {
-		t.Errorf("expected no validity bitmaps, got %d", len(batch.validity))
+	for _, cd := range batch.columns {
+		if cd.Validity != nil {
+			t.Errorf("expected no validity bitmaps, got non-nil")
+			break
+		}
 	}
 
 	// Check time column is []int64
-	timeCol, ok := batch.data["time"].([]int64)
+	timeCol, ok := batch.columns["time"].Data.([]int64)
 	if !ok {
-		t.Fatalf("time column is %T, want []int64", batch.data["time"])
+		t.Fatalf("time column is %T, want []int64", batch.columns["time"].Data)
 	}
 	if len(timeCol) != 1 {
 		t.Fatalf("time column has %d rows, want 1", len(timeCol))
@@ -347,25 +349,25 @@ func TestTLERecordsToTypedColumnar(t *testing.T) {
 	}
 
 	// Check string tags are []string
-	noradCol, ok := batch.data["norad_id"].([]string)
+	noradCol, ok := batch.columns["norad_id"].Data.([]string)
 	if !ok {
-		t.Fatalf("norad_id is %T, want []string", batch.data["norad_id"])
+		t.Fatalf("norad_id is %T, want []string", batch.columns["norad_id"].Data)
 	}
 	if noradCol[0] != "25544" {
 		t.Errorf("norad_id[0] = %q, want %q", noradCol[0], "25544")
 	}
 
-	nameCol, ok := batch.data["object_name"].([]string)
+	nameCol, ok := batch.columns["object_name"].Data.([]string)
 	if !ok {
-		t.Fatalf("object_name is %T, want []string", batch.data["object_name"])
+		t.Fatalf("object_name is %T, want []string", batch.columns["object_name"].Data)
 	}
 	if nameCol[0] != "ISS (ZARYA)" {
 		t.Errorf("object_name[0] = %q, want %q", nameCol[0], "ISS (ZARYA)")
 	}
 
-	orbitCol, ok := batch.data["orbit_type"].([]string)
+	orbitCol, ok := batch.columns["orbit_type"].Data.([]string)
 	if !ok {
-		t.Fatalf("orbit_type is %T, want []string", batch.data["orbit_type"])
+		t.Fatalf("orbit_type is %T, want []string", batch.columns["orbit_type"].Data)
 	}
 	if orbitCol[0] != "LEO" {
 		t.Errorf("orbit_type[0] = %q, want %q", orbitCol[0], "LEO")
@@ -380,15 +382,15 @@ func TestTLERecordsToTypedColumnar(t *testing.T) {
 		"period_min", "apogee_km", "perigee_km",
 	}
 	for _, col := range expectedCols {
-		if _, ok := batch.data[col]; !ok {
+		if _, ok := batch.columns[col]; !ok {
 			t.Errorf("missing column %q", col)
 		}
 	}
 
 	// Check a float field is []float64
-	incCol, ok := batch.data["inclination_deg"].([]float64)
+	incCol, ok := batch.columns["inclination_deg"].Data.([]float64)
 	if !ok {
-		t.Fatalf("inclination_deg is %T, want []float64", batch.data["inclination_deg"])
+		t.Fatalf("inclination_deg is %T, want []float64", batch.columns["inclination_deg"].Data)
 	}
 	if math.Abs(incCol[0]-51.6400) > 0.001 {
 		t.Errorf("inclination_deg = %f, want 51.6400", incCol[0])
@@ -420,21 +422,21 @@ NOAA 19
 	}
 
 	// Should have 20 columns
-	if len(batch.data) != 20 {
-		t.Fatalf("expected 20 columns, got %d", len(batch.data))
+	if len(batch.columns) != 20 {
+		t.Fatalf("expected 20 columns, got %d", len(batch.columns))
 	}
 
 	// Should have 2 rows per column (check time as []int64)
-	timeCol, ok := batch.data["time"].([]int64)
+	timeCol, ok := batch.columns["time"].Data.([]int64)
 	if !ok {
-		t.Fatalf("time is %T, want []int64", batch.data["time"])
+		t.Fatalf("time is %T, want []int64", batch.columns["time"].Data)
 	}
 	if len(timeCol) != 2 {
 		t.Errorf("time column has %d rows, want 2", len(timeCol))
 	}
 
 	// Verify both satellites are present (check norad_id as []string)
-	noradCol := batch.data["norad_id"].([]string)
+	noradCol := batch.columns["norad_id"].Data.([]string)
 	if noradCol[0] != "25544" {
 		t.Errorf("norad_id[0] = %q, want %q", noradCol[0], "25544")
 	}
@@ -442,7 +444,7 @@ NOAA 19
 		t.Errorf("norad_id[1] = %q, want %q", noradCol[1], "33591")
 	}
 
-	nameCol := batch.data["object_name"].([]string)
+	nameCol := batch.columns["object_name"].Data.([]string)
 	if nameCol[0] != "ISS (ZARYA)" {
 		t.Errorf("object_name[0] = %q, want %q", nameCol[0], "ISS (ZARYA)")
 	}
@@ -456,7 +458,7 @@ NOAA 19
 		"inclination_deg", "period_min", "perigee_km", "apogee_km",
 	}
 	for _, col := range expectedCols {
-		if _, ok := batch.data[col]; !ok {
+		if _, ok := batch.columns[col]; !ok {
 			t.Errorf("missing column %q", col)
 		}
 	}
