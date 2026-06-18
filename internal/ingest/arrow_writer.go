@@ -2011,6 +2011,11 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		return fmt.Errorf("failed to convert and append columns: %w", err)
 	}
 
+	// Propagate tag column names for Parquet metadata (enables auto-dedup in compaction)
+	if len(entry.tagColumns) == 0 && len(record.TagColumns) > 0 {
+		entry.tagColumns = record.TagColumns
+	}
+
 	// Infer Arrow schema on first data arrival
 	if entry.arrowSchema == nil && len(entry.data) > 0 {
 		tagCols := record.TagColumns
