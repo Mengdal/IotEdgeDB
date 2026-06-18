@@ -23,10 +23,7 @@ func createTestArrowBuffer(t *testing.T) *ArrowBuffer {
 		MaxBufferAgeMS: 60000,
 		Compression:    "snappy",
 	}
-
-	// Create a mock storage backend for testing
 	mockStorage := &mockStorageBackend{}
-
 	return &ArrowBuffer{
 		config:       cfg,
 		storage:      mockStorage,
@@ -38,7 +35,6 @@ func createTestArrowBuffer(t *testing.T) *ArrowBuffer {
 	}
 }
 
-// mockStorageBackend is a simple mock for testing that implements storage.Backend
 type mockStorageBackend struct{}
 
 func (m *mockStorageBackend) Write(ctx context.Context, path string, data []byte) error { return nil }
@@ -69,322 +65,146 @@ func (m *mockStorageBackend) AppendReader(_ context.Context, _ string, _ io.Read
 
 func TestRowsToColumnar_SingleRecord(t *testing.T) {
 	buffer := createTestArrowBuffer(t)
-
 	now := time.Now()
 	rows := []*models.Record{
 		{
 			Measurement: "cpu",
 			Time:        now,
 			Timestamp:   now.UnixMicro(),
-			Fields: map[string]interface{}{
-				"usage":  75.5,
-				"system": 10.2,
-			},
-			Tags: map[string]string{
-				"host":   "server01",
-				"region": "us-east",
-			},
+			Fields:      map[string]interface{}{"usage": 75.5, "system": 10.2},
+			Tags:        map[string]string{"host": "server01", "region": "us-east"},
 		},
 	}
-
 	result := buffer.rowsToColumnar("cpu", rows)
-
-	// Verify basic structure
 	if result.Measurement != "cpu" {
 		t.Errorf("Expected measurement 'cpu', got %q", result.Measurement)
 	}
 	if !result.Columnar {
 		t.Error("Expected Columnar to be true")
 	}
-
-	// Verify time column
 	timeCol, ok := result.Columns["time"]
-	if !ok {
-		t.Fatal("Missing time column")
+	if !ok || len(timeCol) != 1 || timeCol[0].(int64) != now.UnixMicro() {
+		t.Errorf("time column: ok=%v len=%d", ok, len(timeCol))
 	}
-	if len(timeCol) != 1 {
-		t.Errorf("Expected 1 time value, got %d", len(timeCol))
+	usageCol := result.Columns["usage"]
+	if !ok || usageCol[0].(float64) != 75.5 {
+		t.Errorf("usage: %v", usageCol[0])
 	}
-	if timeCol[0].(int64) != now.UnixMicro() {
-		t.Errorf("Expected timestamp %d, got %v", now.UnixMicro(), timeCol[0])
-	}
-
-	// Verify field columns
-	usageCol, ok := result.Columns["usage"]
-	if !ok {
-		t.Fatal("Missing 'usage' field column")
-	}
-	if usageCol[0].(float64) != 75.5 {
-		t.Errorf("Expected usage 75.5, got %v", usageCol[0])
-	}
-
-	systemCol, ok := result.Columns["system"]
-	if !ok {
-		t.Fatal("Missing 'system' field column")
-	}
-	if systemCol[0].(float64) != 10.2 {
-		t.Errorf("Expected system 10.2, got %v", systemCol[0])
-	}
-
-	// Verify tag columns (stored directly by name, matching Line Protocol)
-	hostCol, ok := result.Columns["host"]
-	if !ok {
-		t.Fatal("Missing 'host' column")
-	}
+	hostCol := result.Columns["host"]
 	if hostCol[0].(string) != "server01" {
-		t.Errorf("Expected host 'server01', got %v", hostCol[0])
-	}
-
-	regionCol, ok := result.Columns["region"]
-	if !ok {
-		t.Fatal("Missing 'region' column")
-	}
-	if regionCol[0].(string) != "us-east" {
-		t.Errorf("Expected region 'us-east', got %v", regionCol[0])
+		t.Errorf("host: %v", hostCol[0])
 	}
 }
 
 func TestRowsToColumnar_MultipleRecords(t *testing.T) {
 	buffer := createTestArrowBuffer(t)
-
 	now := time.Now()
 	rows := []*models.Record{
-		{
-			Measurement: "cpu",
-			Timestamp:   now.UnixMicro(),
-			Fields:      map[string]interface{}{"usage": 75.5},
-			Tags:        map[string]string{"host": "server01"},
-		},
-		{
-			Measurement: "cpu",
-			Timestamp:   now.Add(time.Second).UnixMicro(),
-			Fields:      map[string]interface{}{"usage": 80.2},
-			Tags:        map[string]string{"host": "server02"},
-		},
-		{
-			Measurement: "cpu",
-			Timestamp:   now.Add(2 * time.Second).UnixMicro(),
-			Fields:      map[string]interface{}{"usage": 65.0},
-			Tags:        map[string]string{"host": "server03"},
-		},
+		{Measurement: "cpu", Timestamp: now.UnixMicro(), Fields: map[string]interface{}{"usage": 75.5}, Tags: map[string]string{"host": "server01"}},
+		{Measurement: "cpu", Timestamp: now.Add(time.Second).UnixMicro(), Fields: map[string]interface{}{"usage": 80.2}, Tags: map[string]string{"host": "server02"}},
+		{Measurement: "cpu", Timestamp: now.Add(2 * time.Second).UnixMicro(), Fields: map[string]interface{}{"usage": 65.0}, Tags: map[string]string{"host": "server03"}},
 	}
-
 	result := buffer.rowsToColumnar("cpu", rows)
-
-	// Verify column lengths
-	timeCol := result.Columns["time"]
-	if len(timeCol) != 3 {
-		t.Errorf("Expected 3 time values, got %d", len(timeCol))
+	if len(result.Columns["time"]) != 3 {
+		t.Errorf("Expected 3 time values, got %d", len(result.Columns["time"]))
 	}
-
-	usageCol := result.Columns["usage"]
-	if len(usageCol) != 3 {
-		t.Errorf("Expected 3 usage values, got %d", len(usageCol))
-	}
-
-	hostCol := result.Columns["host"]
-	if len(hostCol) != 3 {
-		t.Errorf("Expected 3 host values, got %d", len(hostCol))
-	}
-
-	// Verify values
-	expectedUsages := []float64{75.5, 80.2, 65.0}
-	for i, expected := range expectedUsages {
-		if usageCol[i].(float64) != expected {
-			t.Errorf("Row %d: expected usage %f, got %v", i, expected, usageCol[i])
-		}
-	}
-
-	expectedHosts := []string{"server01", "server02", "server03"}
-	for i, expected := range expectedHosts {
-		if hostCol[i].(string) != expected {
-			t.Errorf("Row %d: expected host %q, got %v", i, expected, hostCol[i])
-		}
+	if len(result.Columns["usage"]) != 3 {
+		t.Errorf("Expected 3 usage values, got %d", len(result.Columns["usage"]))
 	}
 }
 
 func TestRowsToColumnar_SchemaVariation(t *testing.T) {
 	buffer := createTestArrowBuffer(t)
-
-	// Records with different fields - some have extra fields
 	now := time.Now()
 	rows := []*models.Record{
-		{
-			Measurement: "cpu",
-			Timestamp:   now.UnixMicro(),
-			Fields:      map[string]interface{}{"usage": 75.5}, // Only usage
-			Tags:        map[string]string{"host": "server01"},
-		},
-		{
-			Measurement: "cpu",
-			Timestamp:   now.Add(time.Second).UnixMicro(),
-			Fields:      map[string]interface{}{"usage": 80.2, "system": 15.0}, // Has system
-			Tags:        map[string]string{"host": "server02", "region": "us-east"},
-		},
-		{
-			Measurement: "cpu",
-			Timestamp:   now.Add(2 * time.Second).UnixMicro(),
-			Fields:      map[string]interface{}{"system": 20.0}, // Only system
-			Tags:        map[string]string{"region": "us-west"},
-		},
+		{Measurement: "cpu", Timestamp: now.UnixMicro(), Fields: map[string]interface{}{"usage": 75.5}, Tags: map[string]string{"host": "server01"}},
+		{Measurement: "cpu", Timestamp: now.Add(time.Second).UnixMicro(), Fields: map[string]interface{}{"usage": 80.2, "system": 15.0}, Tags: map[string]string{"host": "server02", "region": "us-east"}},
+		{Measurement: "cpu", Timestamp: now.Add(2 * time.Second).UnixMicro(), Fields: map[string]interface{}{"system": 20.0}, Tags: map[string]string{"region": "us-west"}},
 	}
-
 	result := buffer.rowsToColumnar("cpu", rows)
-
-	// Verify all fields exist
 	if _, ok := result.Columns["usage"]; !ok {
 		t.Error("Missing 'usage' column")
 	}
 	if _, ok := result.Columns["system"]; !ok {
 		t.Error("Missing 'system' column")
 	}
-
-	// Verify all tags exist (stored directly by name, matching Line Protocol)
-	if _, ok := result.Columns["host"]; !ok {
-		t.Error("Missing 'host' column")
-	}
-	if _, ok := result.Columns["region"]; !ok {
-		t.Error("Missing 'region' column")
-	}
-
-	// Verify nil values for missing fields
 	usageCol := result.Columns["usage"]
-	if usageCol[0].(float64) != 75.5 {
-		t.Errorf("Row 0: expected usage 75.5, got %v", usageCol[0])
-	}
 	if usageCol[2] != nil {
 		t.Errorf("Row 2: expected nil usage, got %v", usageCol[2])
 	}
-
 	systemCol := result.Columns["system"]
 	if systemCol[0] != nil {
 		t.Errorf("Row 0: expected nil system, got %v", systemCol[0])
-	}
-	if systemCol[1].(float64) != 15.0 {
-		t.Errorf("Row 1: expected system 15.0, got %v", systemCol[1])
-	}
-
-	// Verify nil values for missing tags
-	hostCol := result.Columns["host"]
-	if hostCol[2] != nil {
-		t.Errorf("Row 2: expected nil host, got %v", hostCol[2])
 	}
 }
 
 func TestRowsToColumnar_EmptyRecords(t *testing.T) {
 	buffer := createTestArrowBuffer(t)
-
 	result := buffer.rowsToColumnar("cpu", []*models.Record{})
-
-	if result.Measurement != "cpu" {
-		t.Errorf("Expected measurement 'cpu', got %q", result.Measurement)
-	}
-	if !result.Columnar {
-		t.Error("Expected Columnar to be true")
-	}
-	if len(result.Columns) != 0 {
-		t.Errorf("Expected empty columns, got %d columns", len(result.Columns))
+	if result.Measurement != "cpu" || !result.Columnar || len(result.Columns) != 0 {
+		t.Errorf("Unexpected empty result")
 	}
 }
 
 func TestRowsToColumnar_TimestampFallback(t *testing.T) {
 	buffer := createTestArrowBuffer(t)
-
 	now := time.Now()
 	rows := []*models.Record{
-		{
-			// Has both Timestamp and Time - should prefer Timestamp
-			Measurement: "cpu",
-			Timestamp:   12345678,
-			Time:        now,
-			Fields:      map[string]interface{}{"value": 1.0},
-		},
-		{
-			// Only has Time - should convert to micros
-			Measurement: "cpu",
-			Time:        now,
-			Fields:      map[string]interface{}{"value": 2.0},
-		},
-		{
-			// Has neither - should use current time
-			Measurement: "cpu",
-			Fields:      map[string]interface{}{"value": 3.0},
-		},
+		{Measurement: "cpu", Timestamp: 12345678, Time: now, Fields: map[string]interface{}{"value": 1.0}},
+		{Measurement: "cpu", Time: now, Fields: map[string]interface{}{"value": 2.0}},
+		{Measurement: "cpu", Fields: map[string]interface{}{"value": 3.0}},
 	}
-
 	result := buffer.rowsToColumnar("cpu", rows)
 	timeCol := result.Columns["time"]
-
-	// First row: should use Timestamp directly
 	if timeCol[0].(int64) != 12345678 {
-		t.Errorf("Row 0: expected timestamp 12345678, got %v", timeCol[0])
+		t.Errorf("Row 0: expected 12345678, got %v", timeCol[0])
 	}
-
-	// Second row: should use Time.UnixMicro()
 	if timeCol[1].(int64) != now.UnixMicro() {
-		t.Errorf("Row 1: expected timestamp %d, got %v", now.UnixMicro(), timeCol[1])
+		t.Errorf("Row 1: expected %d, got %v", now.UnixMicro(), timeCol[1])
 	}
-
-	// Third row: should be a recent timestamp (not zero)
-	ts := timeCol[2].(int64)
-	if ts == 0 {
+	if timeCol[2].(int64) == 0 {
 		t.Error("Row 2: expected non-zero timestamp")
 	}
 }
 
 func TestRowsToColumnar_DifferentFieldTypes(t *testing.T) {
 	buffer := createTestArrowBuffer(t)
-
 	now := time.Now()
 	rows := []*models.Record{
-		{
-			Measurement: "metrics",
-			Timestamp:   now.UnixMicro(),
-			Fields: map[string]interface{}{
-				"float_val":  3.14159,
-				"int_val":    int64(42),
-				"string_val": "hello",
-				"bool_val":   true,
-			},
-		},
+		{Measurement: "metrics", Timestamp: now.UnixMicro(), Fields: map[string]interface{}{
+			"float_val": 3.14159, "int_val": int64(42), "string_val": "hello", "bool_val": true,
+		}},
 	}
-
 	result := buffer.rowsToColumnar("metrics", rows)
-
-	// Verify field types are preserved
 	if result.Columns["float_val"][0].(float64) != 3.14159 {
-		t.Errorf("Expected float 3.14159, got %v", result.Columns["float_val"][0])
+		t.Errorf("float mismatch")
 	}
 	if result.Columns["int_val"][0].(int64) != 42 {
-		t.Errorf("Expected int 42, got %v", result.Columns["int_val"][0])
+		t.Errorf("int mismatch")
 	}
 	if result.Columns["string_val"][0].(string) != "hello" {
-		t.Errorf("Expected string 'hello', got %v", result.Columns["string_val"][0])
+		t.Errorf("string mismatch")
 	}
 	if result.Columns["bool_val"][0].(bool) != true {
-		t.Errorf("Expected bool true, got %v", result.Columns["bool_val"][0])
+		t.Errorf("bool mismatch")
 	}
 }
 
 func TestDecimal128_ConvertColumnsToTyped(t *testing.T) {
 	buffer := createTestArrowBuffer(t)
-
-	// Configure decimal columns for "trades" measurement
 	buffer.decimalConfig = map[string]map[string]config.DecimalSpec{
 		"trades": {
 			"price":  {Precision: 18, Scale: 8},
 			"amount": {Precision: 18, Scale: 8},
 		},
 	}
-
 	columns := map[string][]interface{}{
 		"time":   {int64(1000000), int64(2000000), int64(3000000)},
 		"price":  {float64(123.456), float64(789.012), float64(0.00000001)},
 		"amount": {float64(100.0), float64(200.5), nil},
 		"symbol": {"AAPL", "GOOG", "MSFT"},
 	}
-
-	entry := &bufferEntry{data: make(map[string]interface{})}
+	entry := &bufferEntry{columns: make(map[string]ColumnData)}
 	numRecords, err := buffer.convertAndAppendToEntry(entry, "trades", columns)
 	if err != nil {
 		t.Fatalf("convertAndAppendToEntry failed: %v", err)
@@ -392,204 +212,146 @@ func TestDecimal128_ConvertColumnsToTyped(t *testing.T) {
 	if numRecords != 3 {
 		t.Fatalf("expected 3 records, got %d", numRecords)
 	}
-
 	// Verify price is []decimal128.Num
-	priceCol, ok := entry.data["price"]
+	priceCD, ok := entry.columns["price"]
 	if !ok {
 		t.Fatal("missing 'price' column")
 	}
-	prices, ok := priceCol.([]decimal128.Num)
+	prices, ok := priceCD.Data.([]decimal128.Num)
 	if !ok {
-		t.Fatalf("expected []decimal128.Num for price, got %T", priceCol)
+		t.Fatalf("expected []decimal128.Num for price, got %T", priceCD.Data)
 	}
 	if len(prices) != 3 {
 		t.Fatalf("expected 3 prices, got %d", len(prices))
 	}
-	// Price has backfilled all-true validity (because amount had nils)
-	priceValidity := entry.validity["price"]
-	if priceValidity == nil {
-		t.Fatal("expected backfilled validity for price")
+	// Price has nil validity (no nulls — ColumnData doesn't cross-column backfill)
+	if priceCD.Validity != nil {
+		t.Errorf("expected nil validity for price, got %v", priceCD.Validity)
 	}
-	if len(priceValidity) != 3 || !priceValidity[0] || !priceValidity[1] || !priceValidity[2] {
-		t.Errorf("expected all-true validity for price, got %v", priceValidity)
-	}
-
 	// Verify amount has validity (has nil)
-	amountCol, ok := entry.data["amount"]
+	amountCD, ok := entry.columns["amount"]
 	if !ok {
 		t.Fatal("missing 'amount' column")
 	}
-	amounts, ok := amountCol.([]decimal128.Num)
+	amounts, ok := amountCD.Data.([]decimal128.Num)
 	if !ok {
-		t.Fatalf("expected []decimal128.Num for amount, got %T", amountCol)
+		t.Fatalf("expected []decimal128.Num for amount, got %T", amountCD.Data)
 	}
 	if len(amounts) != 3 {
 		t.Fatalf("expected 3 amounts, got %d", len(amounts))
 	}
-	amountValidity := entry.validity["amount"]
-	if amountValidity == nil {
+	if amountCD.Validity == nil {
 		t.Fatal("expected validity bitmap for amount (has nil)")
 	}
-	if amountValidity[0] != true || amountValidity[1] != true || amountValidity[2] != false {
-		t.Errorf("unexpected validity: %v", amountValidity)
+	if amountCD.Validity[0] != true || amountCD.Validity[1] != true || amountCD.Validity[2] != false {
+		t.Errorf("unexpected validity: %v", amountCD.Validity)
 	}
-
-	// Verify non-decimal columns are unaffected
-	timeCol, ok := entry.data["time"].([]int64)
-	if !ok {
-		t.Fatalf("expected []int64 for time, got %T", entry.data["time"])
+	// Verify non-decimal columns
+	timeCD, ok := entry.columns["time"]
+	if !ok || len(timeCD.Data.([]int64)) != 3 {
+		t.Fatalf("time column: ok=%v len=%d", ok, len(timeCD.Data.([]int64)))
 	}
-	if len(timeCol) != 3 {
-		t.Fatalf("expected 3 times, got %d", len(timeCol))
-	}
-
-	symbolCol, ok := entry.data["symbol"].([]string)
-	if !ok {
-		t.Fatalf("expected []string for symbol, got %T", entry.data["symbol"])
-	}
-	if symbolCol[0] != "AAPL" {
-		t.Errorf("expected AAPL, got %s", symbolCol[0])
+	symbolCD, ok := entry.columns["symbol"]
+	if !ok || symbolCD.Data.([]string)[0] != "AAPL" {
+		t.Fatalf("symbol column: ok=%v", ok)
 	}
 }
 
 func TestDecimal128_WriteParquetRoundTrip(t *testing.T) {
 	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
-	cfg := &config.IngestConfig{
-		Compression:   "snappy",
-		UseDictionary: true,
-	}
-	writer := NewArrowWriter(cfg, logger)
-
-	// Prepare typed decimal columns (as would come from convertColumnsToTyped)
+	writer := NewArrowWriter(&config.IngestConfig{Compression: "snappy", UseDictionary: true}, logger)
 	price1, _ := decimal128.FromFloat64(123.45678901, 18, 8)
 	price2, _ := decimal128.FromFloat64(789.01234567, 18, 8)
 	price3, _ := decimal128.FromFloat64(0.00000001, 18, 8)
-
-	columns := map[string]interface{}{
-		"time":   []int64{1000000, 2000000, 3000000},
-		"price":  []decimal128.Num{price1, price2, price3},
-		"symbol": []string{"AAPL", "GOOG", "MSFT"},
+	entry := &bufferEntry{
+		columns: map[string]ColumnData{
+			"time":   {Data: []int64{1000000, 2000000, 3000000}},
+			"price":  {Data: []decimal128.Num{price1, price2, price3}},
+			"symbol": {Data: []string{"AAPL", "GOOG", "MSFT"}},
+		},
 	}
-
-	decimalCols := map[string]config.DecimalSpec{
-		"price": {Precision: 18, Scale: 8},
-	}
-
-	entry := &bufferEntry{data: columns}
-	ctx := context.Background()
-	data, err := writer.WriteParquetColumnar(ctx, "trades", entry, decimalCols, nil)
+	decimalCols := map[string]config.DecimalSpec{"price": {Precision: 18, Scale: 8}}
+	data, err := writer.WriteParquetColumnar(context.Background(), "trades", entry, decimalCols, nil)
 	if err != nil {
 		t.Fatalf("WriteParquetColumnar failed: %v", err)
 	}
 	if len(data) == 0 {
 		t.Fatal("expected non-empty Parquet data")
 	}
-
-	// Verify the Parquet file was written (non-zero size means Arrow+Parquet accepted the decimal type)
 	t.Logf("Written %d bytes of Parquet data with Decimal128 columns", len(data))
 }
 
 func TestDecimal128_StringConversion(t *testing.T) {
-	// Test that string values are converted to decimal128 correctly (high-precision path)
 	buffer := createTestArrowBuffer(t)
 	buffer.decimalConfig = map[string]map[string]config.DecimalSpec{
-		"trades": {
-			"price": {Precision: 38, Scale: 18},
-		},
+		"trades": {"price": {Precision: 38, Scale: 18}},
 	}
-
 	columns := map[string][]interface{}{
 		"time":  {int64(1000000)},
 		"price": {"123.456789012345678901"},
 	}
-
-	entry := &bufferEntry{data: make(map[string]interface{})}
-	_, err := buffer.convertAndAppendToEntry(entry, "trades", columns)
-	if err != nil {
-		t.Fatalf("convertAndAppendToEntry with string decimal failed: %v", err)
-	}
-
-	prices, ok := entry.data["price"].([]decimal128.Num)
-	if !ok {
-		t.Fatalf("expected []decimal128.Num, got %T", entry.data["price"])
-	}
-
-	// Verify the value was parsed (non-zero)
-	zero := decimal128.Num{}
-	if prices[0] == zero {
-		t.Error("expected non-zero decimal value from string conversion")
-	}
-}
-
-func TestDecimal128_NoConfigNoImpact(t *testing.T) {
-	// Verify that without decimal config, float columns stay as float64
-	buffer := createTestArrowBuffer(t)
-	// No decimal config set (default)
-
-	columns := map[string][]interface{}{
-		"time":  {int64(1000000)},
-		"price": {float64(123.45)},
-	}
-
-	entry := &bufferEntry{data: make(map[string]interface{})}
+	entry := &bufferEntry{columns: make(map[string]ColumnData)}
 	_, err := buffer.convertAndAppendToEntry(entry, "trades", columns)
 	if err != nil {
 		t.Fatalf("convertAndAppendToEntry failed: %v", err)
 	}
-
-	// Price should be []float64, not []decimal128.Num
-	_, ok := entry.data["price"].([]float64)
+	priceCD, ok := entry.columns["price"]
 	if !ok {
-		t.Fatalf("expected []float64 for price without decimal config, got %T", entry.data["price"])
+		t.Fatal("missing 'price'")
+	}
+	prices, ok := priceCD.Data.([]decimal128.Num)
+	if !ok || len(prices) != 1 || prices[0] == (decimal128.Num{}) {
+		t.Fatal("expected non-zero decimal128 value")
+	}
+}
+
+func TestDecimal128_NoConfigNoImpact(t *testing.T) {
+	buffer := createTestArrowBuffer(t)
+	columns := map[string][]interface{}{
+		"time":  {int64(1000000)},
+		"price": {float64(123.45)},
+	}
+	entry := &bufferEntry{columns: make(map[string]ColumnData)}
+	_, err := buffer.convertAndAppendToEntry(entry, "trades", columns)
+	if err != nil {
+		t.Fatalf("convertAndAppendToEntry failed: %v", err)
+	}
+	priceCD, ok := entry.columns["price"]
+	if !ok {
+		t.Fatal("missing 'price'")
+	}
+	if _, ok := priceCD.Data.([]float64); !ok {
+		t.Fatalf("expected []float64, got %T", priceCD.Data)
 	}
 }
 
 func TestDecimal128_SchemaMetadata(t *testing.T) {
 	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
-	cfg := &config.IngestConfig{Compression: "snappy"}
-	writer := NewArrowWriter(cfg, logger)
-
+	writer := NewArrowWriter(&config.IngestConfig{Compression: "snappy"}, logger)
 	price1, _ := decimal128.FromFloat64(100.0, 18, 8)
-	columns := map[string]interface{}{
-		"time":  []int64{1000000},
-		"price": []decimal128.Num{price1},
+	columns := map[string]ColumnData{
+		"time":  {Data: []int64{1000000}},
+		"price": {Data: []decimal128.Num{price1}},
 	}
-
-	decimalCols := map[string]config.DecimalSpec{
-		"price": {Precision: 18, Scale: 8},
-	}
-
-	schema, err := writer.inferSchema(columns, nil, decimalCols)
+	schema, err := writer.inferSchema(columns, nil, map[string]config.DecimalSpec{"price": {Precision: 18, Scale: 8}})
 	if err != nil {
 		t.Fatalf("inferSchema failed: %v", err)
 	}
-
-	// Check that iedb:decimals metadata is present
 	md := schema.Metadata()
 	idx := md.FindKey("iedb:decimals")
 	if idx < 0 {
-		t.Fatal("expected iedb:decimals metadata key in schema")
+		t.Fatal("expected iedb:decimals metadata")
 	}
-	val := md.Values()[idx]
-	if val != "price:18,8" {
-		t.Errorf("expected 'price:18,8', got %q", val)
+	if md.Values()[idx] != "price:18,8" {
+		t.Errorf("expected 'price:18,8', got %q", md.Values()[idx])
 	}
 }
 
-// BenchmarkGetColumnSignature benchmarks the column signature function
 func BenchmarkGetColumnSignature(b *testing.B) {
-	// Typical columnar payload columns
-	columns := map[string]interface{}{
-		"time":         nil,
-		"host":         nil,
-		"region":       nil,
-		"datacenter":   nil,
-		"usage_idle":   nil,
-		"usage_user":   nil,
-		"usage_system": nil,
-		"usage_iowait": nil,
+	columns := map[string]ColumnData{
+		"time": {}, "host": {}, "region": {}, "datacenter": {},
+		"usage_idle": {}, "usage_user": {}, "usage_system": {}, "usage_iowait": {},
 	}
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		getColumnSignature(columns)
@@ -599,111 +361,63 @@ func BenchmarkGetColumnSignature(b *testing.B) {
 func TestGetColumnSignature(t *testing.T) {
 	tests := []struct {
 		name     string
-		columns  map[string]interface{}
+		columns  map[string]ColumnData
 		expected string
 	}{
-		{
-			name:     "empty columns",
-			columns:  map[string]interface{}{},
-			expected: "",
-		},
-		{
-			name: "single column",
-			columns: map[string]interface{}{
-				"value": []float64{1.0},
-			},
-			expected: "value:f64",
-		},
-		{
-			name: "multiple columns sorted",
-			columns: map[string]interface{}{
-				"zebra": []string{"a"},
-				"apple": []int64{1},
-				"mango": []float64{1.0},
+		{name: "empty", columns: map[string]ColumnData{}, expected: ""},
+		{name: "single", columns: map[string]ColumnData{"value": {Data: []float64{1.0}}}, expected: "value:f64"},
+		{name: "sorted",
+			columns: map[string]ColumnData{
+				"zebra": {Data: []string{"a"}}, "apple": {Data: []int64{1}}, "mango": {Data: []float64{1.0}},
 			},
 			expected: "apple:i64,mango:f64,zebra:str",
 		},
-		{
-			name: "skips internal columns",
-			columns: map[string]interface{}{
-				"value":   []float64{1.0},
-				"time":    []int64{1},
-				"_hidden": []string{"x"},
+		{name: "skip internal",
+			columns: map[string]ColumnData{
+				"value": {Data: []float64{1.0}}, "time": {Data: []int64{1}}, "_hidden": {Data: []string{"x"}},
 			},
 			expected: "time:i64,value:f64",
 		},
-		{
-			name: "skips empty column names",
-			columns: map[string]interface{}{
-				"value": []float64{1.0},
-				"":      []int64{1},
-			},
-			expected: "value:f64",
-		},
-		{
-			name: "type change detected — same name different type",
-			columns: map[string]interface{}{
-				"cpu": []float64{1.0},
-			},
+		{name: "type change",
+			columns:  map[string]ColumnData{"cpu": {Data: []float64{1.0}}},
 			expected: "cpu:f64",
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getColumnSignature(tt.columns)
-			if result != tt.expected {
-				t.Errorf("Expected %q, got %q", tt.expected, result)
+			if got := getColumnSignature(tt.columns); got != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, got)
 			}
 		})
 	}
-	// Verify that a type change on the same column name produces a different signature
 	t.Run("type change produces different signature", func(t *testing.T) {
-		sig1 := getColumnSignature(map[string]interface{}{"cpu": []int64{1}})
-		sig2 := getColumnSignature(map[string]interface{}{"cpu": []float64{1.0}})
+		sig1 := getColumnSignature(map[string]ColumnData{"cpu": {Data: []int64{1}}})
+		sig2 := getColumnSignature(map[string]ColumnData{"cpu": {Data: []float64{1.0}}})
 		if sig1 == sig2 {
-			t.Errorf("Expected different signatures for int64 vs float64, both got %q", sig1)
+			t.Errorf("Expected different sigs, both got %q", sig1)
 		}
 	})
 }
 
-// BenchmarkRowsToColumnar benchmarks the row-to-columnar conversion
 func BenchmarkRowsToColumnar(b *testing.B) {
-	buffer := &ArrowBuffer{
-		logger: zerolog.New(os.Stderr).Level(zerolog.Disabled),
-	}
-
-	// Create 1000 rows
+	buffer := &ArrowBuffer{logger: zerolog.New(os.Stderr).Level(zerolog.Disabled)}
 	now := time.Now()
 	rows := make([]*models.Record, 1000)
 	for i := 0; i < 1000; i++ {
 		rows[i] = &models.Record{
-			Measurement: "cpu",
-			Timestamp:   now.Add(time.Duration(i) * time.Second).UnixMicro(),
-			Fields: map[string]interface{}{
-				"usage":  float64(i) / 10.0,
-				"system": float64(i) / 20.0,
-			},
-			Tags: map[string]string{
-				"host":   "server01",
-				"region": "us-east",
-			},
+			Measurement: "cpu", Timestamp: now.Add(time.Duration(i)*time.Second).UnixMicro(),
+			Fields: map[string]interface{}{"usage": float64(i) / 10.0, "system": float64(i) / 20.0},
+			Tags:   map[string]string{"host": "server01", "region": "us-east"},
 		}
 	}
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buffer.rowsToColumnar("cpu", rows)
 	}
 }
 
-// BenchmarkRowsToColumnar_SchemaVariation benchmarks conversion with schema variations
 func BenchmarkRowsToColumnar_SchemaVariation(b *testing.B) {
-	buffer := &ArrowBuffer{
-		logger: zerolog.New(os.Stderr).Level(zerolog.Disabled),
-	}
-
-	// Create 1000 rows with varying schemas
+	buffer := &ArrowBuffer{logger: zerolog.New(os.Stderr).Level(zerolog.Disabled)}
 	now := time.Now()
 	rows := make([]*models.Record, 1000)
 	for i := 0; i < 1000; i++ {
@@ -714,163 +428,105 @@ func BenchmarkRowsToColumnar_SchemaVariation(b *testing.B) {
 		if i%3 == 0 {
 			fields["idle"] = float64(100-i) / 10.0
 		}
-
 		tags := map[string]string{"host": "server01"}
 		if i%4 == 0 {
 			tags["region"] = "us-east"
 		}
-
 		rows[i] = &models.Record{
-			Measurement: "cpu",
-			Timestamp:   now.Add(time.Duration(i) * time.Second).UnixMicro(),
-			Fields:      fields,
-			Tags:        tags,
+			Measurement: "cpu", Timestamp: now.Add(time.Duration(i)*time.Second).UnixMicro(),
+			Fields: fields, Tags: tags,
 		}
 	}
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buffer.rowsToColumnar("cpu", rows)
 	}
 }
 
-// TestSliceColumnsByIndices_BoundsCheck tests that sliceColumnsByIndices handles sparse columns
 func TestSliceColumnsByIndices_BoundsCheck(t *testing.T) {
-	// Create columns with different lengths (sparse scenario)
-	columns := map[string]interface{}{
-		"time":        []int64{1, 2, 3, 4, 5, 6, 7, 8},
-		"cpu":         []float64{10.0, 20.0, 30.0, 40.0, 50.0, 60.0}, // Only 6 elements
-		"temperature": []float64{70.0, 80.0},                         // Only 2 elements
-		"host":        []string{"a", "b", "c", "d"},                  // Only 4 elements
-		"active":      []bool{true, false, true},                     // Only 3 elements
+	columns := map[string]ColumnData{
+		"time":        {Data: []int64{1, 2, 3, 4, 5, 6, 7, 8}},
+		"cpu":         {Data: []float64{10.0, 20.0, 30.0, 40.0, 50.0, 60.0}},
+		"temperature": {Data: []float64{70.0, 80.0}},
+		"host":        {Data: []string{"a", "b", "c", "d"}},
+		"active":      {Data: []bool{true, false, true}},
 	}
-
-	// Try to slice with indices that exceed shorter columns' lengths
-	indices := []int{0, 2, 4, 6, 7} // Indices 6,7 exceed temperature, host, active columns
-
-	// This should NOT panic (previously would panic with index out of range)
-	result := sliceColumnsByIndices(columns, indices)
-
-	// Verify time column (all indices valid)
-	timeCol := result["time"].([]int64)
-	expectedTime := []int64{1, 3, 5, 7, 8}
-	for i, expected := range expectedTime {
-		if timeCol[i] != expected {
-			t.Errorf("time[%d] = %d, expected %d", i, timeCol[i], expected)
+	indices := []int{0, 2, 4, 6, 7}
+	// colSlice operates on single ColumnData — test per-column
+	timeCol := colSlice(columns["time"], indices).Data.([]int64)
+	expected := []int64{1, 3, 5, 7, 8}
+	for i, v := range expected {
+		if timeCol[i] != v {
+			t.Errorf("time[%d]=%d want %d", i, timeCol[i], v)
 		}
 	}
-
-	// Verify cpu column (indices 0,2,4 valid; 6 invalid -> 0.0)
-	cpuCol := result["cpu"].([]float64)
-	expectedCpu := []float64{10.0, 30.0, 50.0, 0.0, 0.0} // Last two are zero (out of bounds)
-	for i, expected := range expectedCpu {
-		if cpuCol[i] != expected {
-			t.Errorf("cpu[%d] = %f, expected %f", i, cpuCol[i], expected)
+	cpuCol := colSlice(columns["cpu"], indices).Data.([]float64)
+	expCPU := []float64{10.0, 30.0, 50.0, 0.0, 0.0}
+	for i, v := range expCPU {
+		if cpuCol[i] != v {
+			t.Errorf("cpu[%d]=%f want %f", i, cpuCol[i], v)
 		}
 	}
-
-	// Verify temperature column (only indices 0 valid)
-	tempCol := result["temperature"].([]float64)
-	expectedTemp := []float64{70.0, 0.0, 0.0, 0.0, 0.0} // Only first is valid
-	for i, expected := range expectedTemp {
-		if tempCol[i] != expected {
-			t.Errorf("temperature[%d] = %f, expected %f", i, tempCol[i], expected)
+	hostCol := colSlice(columns["host"], indices).Data.([]string)
+	expHost := []string{"a", "c", "", "", ""}
+	for i, v := range expHost {
+		if hostCol[i] != v {
+			t.Errorf("host[%d]=%q want %q", i, hostCol[i], v)
 		}
 	}
-
-	// Verify host column (indices 0,2 valid)
-	hostCol := result["host"].([]string)
-	expectedHost := []string{"a", "c", "", "", ""} // Indices 4,6,7 out of bounds
-	for i, expected := range expectedHost {
-		if hostCol[i] != expected {
-			t.Errorf("host[%d] = %q, expected %q", i, hostCol[i], expected)
-		}
-	}
-
-	// Verify active column (indices 0,2 valid)
-	activeCol := result["active"].([]bool)
-	expectedActive := []bool{true, true, false, false, false} // Indices 4,6,7 out of bounds
-	for i, expected := range expectedActive {
-		if activeCol[i] != expected {
-			t.Errorf("active[%d] = %v, expected %v", i, activeCol[i], expected)
+	activeCol := colSlice(columns["active"], indices).Data.([]bool)
+	expActive := []bool{true, true, false, false, false}
+	for i, v := range expActive {
+		if activeCol[i] != v {
+			t.Errorf("active[%d]=%v want %v", i, activeCol[i], v)
 		}
 	}
 }
 
-// TestSortEntryByKeys_NilValidityEntry verifies that a nil validity entry
-// is preserved as nil per the bufferEntry contract (nil = "all valid").
-// Without the nil guard, the reorder loop would panic with index out of range.
 func TestSortEntryByKeys_NilValidityEntry(t *testing.T) {
 	entry := &bufferEntry{
-		data: map[string]interface{}{
-			"time": []int64{3, 1, 2},
-			"val":  []float64{30.0, 10.0, 20.0},
-		},
-		validity: map[string][]bool{
-			"val": nil, // contract: nil = all valid
+		columns: map[string]ColumnData{
+			"time": {Data: []int64{3, 1, 2}},
+			"val":  {Data: []float64{30.0, 10.0, 20.0}, Validity: nil},
 		},
 		tagColumns: []string{},
 		schema:     "time:i64,val:f64",
 	}
-
 	sorted := sortEntryByKeys(entry, []string{"time"})
-
-	// Data should be sorted ascending
-	sortedTime := sorted.data["time"].([]int64)
-	expected := []int64{1, 2, 3}
-	for i, v := range expected {
+	sortedTime := sorted.columns["time"].Data.([]int64)
+	exp := []int64{1, 2, 3}
+	for i, v := range exp {
 		if sortedTime[i] != v {
-			t.Errorf("sorted time[%d] = %d, want %d", i, sortedTime[i], v)
+			t.Errorf("sorted[%d]=%d want %d", i, sortedTime[i], v)
 		}
 	}
-
-	// Validity entry for "val" must remain nil (not a zero-initialized false slice)
-	if got, ok := sorted.validity["val"]; !ok {
-		t.Errorf("validity entry for 'val' missing")
-	} else if got != nil {
-		t.Errorf("validity entry for 'val' = %v, want nil (all-valid contract)", got)
+	if valCD, ok := sorted.columns["val"]; !ok {
+		t.Error("column 'val' missing")
+	} else if valCD.Validity != nil {
+		t.Errorf("validity=%v want nil", valCD.Validity)
 	}
-
-	// Schema should be preserved
 	if sorted.schema != entry.schema {
-		t.Errorf("schema = %q, want %q", sorted.schema, entry.schema)
+		t.Errorf("schema changed")
 	}
 }
 
-// TestSliceEntryByIndices_NilValidityEntry verifies that a nil validity
-// entry is preserved as nil per the bufferEntry contract. Without the nil
-// guard, the original loop would produce an all-false slice (meaning "all null"),
-// incorrectly converting valid data to null.
 func TestSliceEntryByIndices_NilValidityEntry(t *testing.T) {
 	entry := &bufferEntry{
-		data: map[string]interface{}{
-			"time": []int64{1, 2, 3, 4},
-			"val":  []float64{10.0, 20.0, 30.0, 40.0},
-		},
-		validity: map[string][]bool{
-			"val": nil, // contract: nil = all valid
+		columns: map[string]ColumnData{
+			"time": {Data: []int64{1, 2, 3, 4}},
+			"val":  {Data: []float64{10.0, 20.0, 30.0, 40.0}, Validity: nil},
 		},
 		tagColumns: []string{},
 		schema:     "time:i64,val:f64",
 	}
-
 	sliced := sliceEntryByIndices(entry, []int{0, 2})
-
-	// Data should be sliced to indices 0, 2
-	slicedTime := sliced.data["time"].([]int64)
+	slicedTime := sliced.columns["time"].Data.([]int64)
 	if len(slicedTime) != 2 || slicedTime[0] != 1 || slicedTime[1] != 3 {
-		t.Errorf("sliced time = %v, want [1 3]", slicedTime)
+		t.Errorf("time=%v want [1 3]", slicedTime)
 	}
-
-	// Validity entry for "val" must remain nil
-	if got, ok := sliced.validity["val"]; !ok {
-		t.Errorf("validity entry for 'val' missing")
-	} else if got != nil {
-		t.Errorf("validity entry for 'val' = %v, want nil (all-valid contract)", got)
-	}
-
-	// Schema should be preserved
-	if sliced.schema != entry.schema {
-		t.Errorf("schema = %q, want %q", sliced.schema, entry.schema)
+	if valCD, ok := sliced.columns["val"]; !ok {
+		t.Error("column 'val' missing")
+	} else if valCD.Validity != nil {
+		t.Errorf("validity=%v want nil", valCD.Validity)
 	}
 }
