@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -21,8 +22,14 @@ import (
 	"iedb/internal/ingest"
 )
 
+// ShardQueryExecutor is the interface for cluster-aware query execution.
+// When set on the Server, DoGet delegates shard-aware queries to this executor.
+// Returns (nil, nil) when all shards are local — the caller should execute locally.
+type ShardQueryExecutor interface {
+	ExecuteFlight(ctx context.Context, ticket QueryTicket) (array.RecordReader, error)
+}
+
 // Server implements the Arrow Flight protocol for IotEdgeDB.
-// It embed BaseFlightServer for default handlers and overrides the methods needed.
 // The Flight server runs on a separate port from the HTTP API, in the same process.
 type Server struct {
 	db      *database.DuckDB
@@ -30,6 +37,8 @@ type Server struct {
 	authMgr *auth.AuthManager
 	rbacMgr *auth.RBACManager
 	logger  zerolog.Logger
+
+	shardExecutor ShardQueryExecutor // optional cluster scatter-gather
 
 	mu       sync.RWMutex
 	grpcSrv  *grpc.Server
@@ -90,6 +99,13 @@ func (s *Server) Stop() {
 	s.logger.Info().Msg("Stopping Flight server...")
 	s.grpcSrv.GracefulStop()
 	s.logger.Info().Msg("Flight server stopped")
+}
+
+// SetShardExecutor configures a cluster scatter-gather executor.
+// When set, DoGet delegates multi-shard queries to this executor.
+// When nil (default), all queries execute locally.
+func (s *Server) SetShardExecutor(exec ShardQueryExecutor) {
+	s.shardExecutor = exec
 }
 
 // Close implements shutdown.Shutdownable.

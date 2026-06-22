@@ -2,6 +2,7 @@ package flight
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"time"
 
@@ -89,16 +90,35 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 
 	s.logger.Debug().Str("sql", qt.SQL).Msg("DoGet request")
 
-	// 2. Execute query
-	reader, conn, err := s.db.ArrowQueryContext(stream.Context(), qt.SQL)
-	if err != nil {
-		s.logger.Error().Err(err).Str("sql", qt.SQL).Dur("elapsed", time.Since(startTime)).Msg("DoGet query failed")
-		return status.Errorf(codes.Internal, "query failed: %v", err)
+	// 2. Try cluster scatter-gather if configured
+	var reader array.RecordReader
+	var conn *sql.Conn
+	if s.shardExecutor != nil {
+		shardReader, shardErr := s.shardExecutor.ExecuteFlight(stream.Context(), *qt)
+		if shardErr != nil {
+			s.logger.Warn().Err(shardErr).Str("sql", qt.SQL).Msg("shard query failed, falling back to local")
+			// Fall through to local execution on shard error
+		} else if shardReader != nil {
+			// Remote shards returned data — stream it
+			return s.streamResults(stream, shardReader, qt.SQL, startTime)
+		}
+		// nil, nil means all shards are local — fall through to local query
+	}
+
+	// 3. Execute locally via DuckDB
+	reader, conn, localErr := s.db.ArrowQueryContext(stream.Context(), qt.SQL)
+	if localErr != nil {
+		s.logger.Error().Err(localErr).Str("sql", qt.SQL).Dur("elapsed", time.Since(startTime)).Msg("DoGet query failed")
+		return status.Errorf(codes.Internal, "query failed: %v", localErr)
 	}
 	defer reader.Release()
 	defer conn.Close() //nolint:errcheck
 
-	// 3. Stream results with decimal normalization
+	return s.streamResults(stream, reader, qt.SQL, startTime)
+}
+
+// streamResults writes a RecordReader to a Flight DoGet stream with decimal normalization.
+func (s *Server) streamResults(stream flight.FlightService_DoGetServer, reader array.RecordReader, sql string, startTime time.Time) error {
 	wr := flight.NewRecordWriter(stream)
 	defer wr.Close()
 
@@ -134,13 +154,13 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 	}
 
 	if err := reader.Err(); err != nil {
-		s.logger.Error().Err(err).Str("sql", qt.SQL).Int64("rows", rowCount).Msg("DoGet reader error")
+		s.logger.Error().Err(err).Str("sql", sql).Int64("rows", rowCount).Msg("DoGet reader error")
 		return status.Errorf(codes.Internal, "record reader error: %v", err)
 	}
 
 	duration := time.Since(startTime)
 	s.logger.Info().
-		Str("sql", qt.SQL).
+		Str("sql", sql).
 		Int64("rows", rowCount).
 		Dur("duration", duration).
 		Msg("DoGet complete")

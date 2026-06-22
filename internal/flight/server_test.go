@@ -1339,6 +1339,70 @@ func TestFlightSQL_ExternalClient_Verification(t *testing.T) {
 	t.Logf("Flight SQL external client verification: all endpoints respond correctly")
 }
 
+// TestDoGet_ShardExecutor_Delegation verifies that when SetShardExecutor is called,
+// DoGet delegates to it (returns remote results or falls back to local query).
+func TestDoGet_ShardExecutor_Delegation(t *testing.T) {
+	env := setupFlightTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Mock shard executor that reports all shards are local (nil, nil)
+	mockExec := &mockShardExecutor{allLocal: true}
+	env.flightSrv.SetShardExecutor(mockExec)
+
+	// Query should fall through to local DuckDB execution
+	desc := &flight.FlightDescriptor{
+		Type: flight.DescriptorCMD,
+		Cmd:  []byte(`{"sql":"SELECT 1 AS value"}`),
+	}
+	info, err := env.client.GetFlightInfo(ctx, desc)
+	if err != nil {
+		t.Fatalf("GetFlightInfo: %v", err)
+	}
+	stream, err := env.client.DoGet(ctx, info.Endpoint[0].Ticket)
+	if err != nil {
+		t.Fatalf("DoGet: %v", err)
+	}
+	reader, _ := flight.NewRecordReader(stream)
+	defer reader.Release()
+	if !reader.Next() {
+		t.Fatal("expected at least one record batch")
+	}
+
+	// Verify the executor was consulted
+	if !mockExec.consulted {
+		t.Fatal("shard executor was not consulted")
+	}
+	t.Logf("Shard executor delegation: executor consulted=%v, allLocal=%v", mockExec.consulted, mockExec.allLocal)
+
+	// Now set executor to nil and verify DoGet still works directly
+	env.flightSrv.SetShardExecutor(nil)
+	stream2, err := env.client.DoGet(ctx, info.Endpoint[0].Ticket)
+	if err != nil {
+		t.Fatalf("DoGet without executor: %v", err)
+	}
+	reader2, _ := flight.NewRecordReader(stream2)
+	defer reader2.Release()
+	if !reader2.Next() {
+		t.Fatal("expected record without shard executor")
+	}
+	t.Log("DoGet works with and without shard executor")
+}
+
+// mockShardExecutor implements ShardQueryExecutor for testing.
+type mockShardExecutor struct {
+	consulted bool
+	allLocal  bool
+}
+
+func (m *mockShardExecutor) ExecuteFlight(ctx context.Context, ticket QueryTicket) (array.RecordReader, error) {
+	m.consulted = true
+	if m.allLocal {
+		return nil, nil // all shards local → caller executes locally
+	}
+	return nil, fmt.Errorf("mock: no remote shards available")
+}
+
 
 // makeParityRecordBatch creates a RecordBatch with deterministic timestamps.
 func makeParityRecordBatch(t testing.TB, numRows int, baseTime time.Time) arrow.Record {
