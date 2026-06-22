@@ -32,10 +32,21 @@ func extractBearer(ctx context.Context) (string, error) {
 }
 
 // verifyToken extracts and validates a Bearer token, returning TokenInfo.
+// When authMgr is nil (auth not configured), the token check is bypassed.
 func (s *Server) verifyToken(ctx context.Context) (*auth.TokenInfo, error) {
 	token, err := extractBearer(ctx)
 	if err != nil {
+		// If auth is not configured, bypass token verification entirely.
+		// This check comes after extraction so that even in no-auth mode,
+		// a Bearer token in metadata doesn't cause unexpected behavior.
+		if s.authMgr == nil {
+			return &auth.TokenInfo{}, nil
+		}
 		return nil, err
+	}
+
+	if s.authMgr == nil {
+		return &auth.TokenInfo{}, nil
 	}
 
 	info := s.authMgr.VerifyToken(token)
@@ -47,9 +58,13 @@ func (s *Server) verifyToken(ctx context.Context) (*auth.TokenInfo, error) {
 }
 
 // checkPermission verifies a token has the required permission.
-// Falls back to token-level permission check in OSS mode (no RBAC).
+// When authMgr is nil, all permissions are granted.
 func (s *Server) checkPermission(info *auth.TokenInfo, database, measurement, permission string) error {
-	// First, check token-level permissions (OSS mode)
+	if s.authMgr == nil {
+		return nil // no auth configured, allow all
+	}
+
+	// Check token-level permissions (OSS mode)
 	if s.authMgr.HasPermission(info, permission) || s.authMgr.HasPermission(info, "admin") {
 		return nil
 	}

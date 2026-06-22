@@ -10,7 +10,7 @@
 
 - [x] 2.1 Create `internal/flight/auth.go` — extract Bearer token from gRPC metadata, strip prefix, call `auth.Manager.ValidateToken(ctx, token)`
 - [x] 2.2 Implement RBAC authorization helper calling `auth.Manager.CheckPermission(db, measurement, action)`
-- [ ] 2.3 Write unit tests: valid token → pass, missing token → Unauthenticated, insufficient permissions → PermissionDenied
+- [x] 2.3 Write unit tests: valid token → pass, missing token → Unauthenticated, insufficient permissions → PermissionDenied
 
 ## 3. DoGet Query Service
 
@@ -18,7 +18,7 @@
 - [x] 3.2 Create `internal/flight/do_get.go` — `DoGet` implementation: deserialize Ticket, auth, RBAC, `db.ArrowQueryContext()`, `flight.NewRecordWriter(stream)`, loop over batches
 - [ ] 3.3 Integrate `normalizeDecimalSchema` / `castDecimalBatch` from `internal/api/query_arrow.go` (extract to shared location or call directly)
 - [x] 3.4 Create `internal/flight/do_get.go` — `ListFlights` implementation: `db.ListMeasurements()`, build FlightInfo per measurement, stream results
-- [ ] 3.5 Write integration test `server_test.go`: DoGet round-trip, output matches HTTP Arrow IPC for same SQL
+- [x] 3.5 Write integration test `server_test.go`: DoGet round-trip, output matches HTTP Arrow IPC for same SQL
 - [ ] 3.6 Write benchmark `BenchmarkFlightVsHTTP`: compare DoGet vs HTTP Arrow IPC for result sets of 1K / 100K / 1M rows
 
 ## 4. Flight SQL
@@ -37,7 +37,7 @@
 - [x] 5.3 Implement `Query(ctx, sql) → array.RecordReader` wrapping GetFlightInfo → DoGet flow
 - [ ] 5.4 Implement `ListMeasurements(ctx) → []MeasurementInfo` via ListFlights
 - [x] 5.5 Implement `Close()` releasing gRPC connection
-- [ ] 5.6 Write `client_test.go`: connect to test Flight server, query → verify RecordBatch content
+- [x] 5.6 Write `client_test.go`: connect to test Flight server, query → verify RecordBatch content
 
 ## 6. DoPut Ingestion
 

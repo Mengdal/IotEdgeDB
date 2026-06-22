@@ -9,7 +9,6 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/flight"
-	"github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
@@ -32,10 +31,9 @@ type Server struct {
 	rbacMgr *auth.RBACManager
 	logger  zerolog.Logger
 
-	mu        sync.RWMutex
-	grpcSrv   *grpc.Server
-	flightSQL flight.FlightServer // Flight SQL wrapper
-	listener  net.Listener
+	mu       sync.RWMutex
+	grpcSrv  *grpc.Server
+	listener net.Listener
 }
 
 // NewServer creates a new Flight Server.
@@ -71,10 +69,8 @@ func NewServer(
 	)
 
 	flight.RegisterFlightServiceServer(s.grpcSrv, s)
-	// Register Flight SQL: wraps our Server in a flightsql.Server implementation
-	sqlSrv := &flightSQLServer{srv: s}
-	s.flightSQL = flightsql.NewFlightServer(sqlSrv)
-	flight.RegisterFlightServiceServer(s.grpcSrv, s.flightSQL)
+	// Flight SQL methods are not registered yet in v1 — they return Unimplemented
+	// via BaseFlightServer's default handlers.
 	return s
 }
 
