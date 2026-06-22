@@ -29,12 +29,12 @@ def connect(host: str, port: int, token: str | None) -> flight.FlightClient:
     location = f"grpc://{host}:{port}"
 
     if token:
-        # Authenticated connection
         client = flight.FlightClient(location)
-        # The token is sent via gRPC metadata in each call
-        # PyArrow Flight doesn't auto-attach tokens — we use a custom header
+        # Attach Bearer token via gRPC metadata in call options
+        client._options = flight.FlightCallOptions(
+            headers=[(b"authorization", f"Bearer {token}".encode())],
+        )
         print(f"Connecting to {location} with token ...")
-        # Note: token attachment is done per-call via options
     else:
         client = flight.FlightClient(location)
         print(f"Connecting to {location} (no auth) ...")

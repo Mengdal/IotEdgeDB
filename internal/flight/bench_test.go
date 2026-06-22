@@ -24,7 +24,7 @@ var benchResultRows int64
 // setupFlightBench creates a test environment suitable for benchmarks.
 func setupFlightBench(b *testing.B) *integrationTestEnv {
 	b.Helper()
-	return setupFlightTest(&testing.T{})
+	return setupFlightTest(b) // b implements testing.TB; Cleanup works correctly
 }
 
 // startHTTPArrowServer starts a minimal HTTP server that exposes Arrow IPC streaming

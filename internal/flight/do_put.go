@@ -17,7 +17,7 @@ func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 	ctx := stream.Context()
 
 	// 1. Authenticate
-	_, err := s.verifyToken(ctx)
+	tokenInfo, err := s.verifyToken(ctx)
 	if err != nil {
 		metrics.Get().RecordFlightDoPutError()
 		return err
@@ -40,7 +40,13 @@ func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 		return status.Errorf(codes.InvalidArgument, "database and measurement are required")
 	}
 
-	// 3. Check ingest buffer is available
+	// 3. RBAC write permission check
+	if err := s.checkPermission(tokenInfo, desc.Database, desc.Measurement, "write"); err != nil {
+		metrics.Get().RecordFlightDoPutError()
+		return err
+	}
+
+	// 4. Check ingest buffer is available
 	if s.ingest == nil {
 		metrics.Get().RecordFlightDoPutError()
 		return status.Error(codes.Unavailable, "ingest buffer not configured")

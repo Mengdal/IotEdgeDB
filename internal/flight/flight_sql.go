@@ -47,10 +47,13 @@ func (f *flightSQLServer) GetFlightInfoStatement(ctx context.Context, stmt fligh
 }
 
 func (f *flightSQLServer) DoGetStatement(ctx context.Context, ticket flightsql.StatementQueryTicket) (*arrow.Schema, <-chan flight.StreamChunk, error) {
+	if _, err := f.srv.verifyToken(ctx); err != nil {
+		return nil, nil, err
+	}
+
 	handle := string(ticket.GetStatementHandle())
 	var qt QueryTicket
 	if err := json.Unmarshal([]byte(handle), &qt); err != nil {
-		// If not JSON, treat as raw SQL
 		qt.SQL = handle
 	}
 
@@ -83,6 +86,9 @@ func (f *flightSQLServer) DoGetStatement(ctx context.Context, ticket flightsql.S
 }
 
 func (f *flightSQLServer) GetSchemaStatement(ctx context.Context, stmt flightsql.StatementQuery, desc *flight.FlightDescriptor) (*flight.SchemaResult, error) {
+	if _, err := f.srv.verifyToken(ctx); err != nil {
+		return nil, err
+	}
 	reader, conn, err := f.srv.db.ArrowQueryContext(ctx, "SELECT * FROM ("+stmt.GetQuery()+") LIMIT 0")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "schema query: %v", err)
@@ -105,6 +111,7 @@ func (f *flightSQLServer) GetFlightInfoCatalogs(ctx context.Context, desc *fligh
 }
 
 func (f *flightSQLServer) DoGetCatalogs(ctx context.Context) (*arrow.Schema, <-chan flight.StreamChunk, error) {
+	// Auth deferred to flightsql.DoGet dispatch — verified in base handler via unifiedHandler
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "catalog_name", Type: arrow.BinaryTypes.String, Nullable: false},
 	}, nil)
@@ -139,10 +146,28 @@ func (f *flightSQLServer) DoGetDBSchemas(ctx context.Context, req flightsql.GetD
 	ch := make(chan flight.StreamChunk, 1)
 	go func() {
 		defer close(ch)
+		// Query DuckDB for actual database names
+		reader, conn, err := f.srv.db.ArrowQueryContext(ctx,
+			"SELECT DISTINCT database_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY database_name")
 		b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 		defer b.Release()
-		b.Field(0).(*array.StringBuilder).Append("iedb")
-		b.Field(1).(*array.StringBuilder).Append("default")
+		if err == nil {
+			defer reader.Release()
+			defer conn.Close()
+			for reader.Next() {
+				rec := reader.RecordBatch()
+				strCol := rec.Column(0).(*array.String)
+				for i := int64(0); i < rec.NumRows(); i++ {
+					b.Field(0).(*array.StringBuilder).Append("iedb")
+					b.Field(1).(*array.StringBuilder).Append(strCol.Value(int(i)))
+				}
+			}
+		}
+		if b.Field(0).(*array.StringBuilder).Len() == 0 {
+			// Fallback: return "default" if no databases exist yet
+			b.Field(0).(*array.StringBuilder).Append("iedb")
+			b.Field(1).(*array.StringBuilder).Append("default")
+		}
 		ch <- flight.StreamChunk{Data: b.NewRecord()}
 	}()
 	return schema, ch, nil
@@ -169,12 +194,26 @@ func (f *flightSQLServer) DoGetTables(ctx context.Context, req flightsql.GetTabl
 	ch := make(chan flight.StreamChunk, 1)
 	go func() {
 		defer close(ch)
+		// Query DuckDB for actual tables (measurements in our schema mapping)
+		reader, conn, err := f.srv.db.ArrowQueryContext(ctx,
+			"SELECT database_name, table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY database_name, table_name")
 		b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 		defer b.Release()
-		b.Field(0).(*array.StringBuilder).Append("iedb")
-		b.Field(1).(*array.StringBuilder).Append("default")
-		b.Field(2).(*array.StringBuilder).Append("measurements")
-		b.Field(3).(*array.StringBuilder).Append("TABLE")
+		if err == nil {
+			defer reader.Release()
+			defer conn.Close()
+			for reader.Next() {
+				rec := reader.RecordBatch()
+				dbCol := rec.Column(0).(*array.String)
+				tblCol := rec.Column(1).(*array.String)
+				for i := int64(0); i < rec.NumRows(); i++ {
+					b.Field(0).(*array.StringBuilder).Append("iedb")
+					b.Field(1).(*array.StringBuilder).Append(dbCol.Value(int(i)))
+					b.Field(2).(*array.StringBuilder).Append(tblCol.Value(int(i)))
+					b.Field(3).(*array.StringBuilder).Append("TABLE")
+				}
+			}
+		}
 		ch <- flight.StreamChunk{Data: b.NewRecord()}
 	}()
 	return schema, ch, nil

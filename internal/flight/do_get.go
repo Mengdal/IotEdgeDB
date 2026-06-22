@@ -81,7 +81,10 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 		return status.Error(codes.InvalidArgument, "ticket contains empty sql")
 	}
 
-	// RBAC: check read permission if database/measurement specified in ticket
+	// RBAC: read permission checked when database/measurement are specified in ticket.
+	// Tickets without explicit database/measurement are allowed through — the SQL
+	// executes with the token's general read permission. Per-measurement RBAC
+	// requires the client to include database+measurement in the FlightDescriptor.
 	if qt.Database != "" && qt.Measurement != "" {
 		if err := s.checkPermission(tokenInfo, qt.Database, qt.Measurement, "read"); err != nil {
 			return err

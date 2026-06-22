@@ -1669,6 +1669,13 @@ func arrowRecordToEntry(record arrow.Record) *bufferEntry {
 // arrowArrayToColumnData converts a single arrow.Array to ColumnData.
 // Numeric types (int64, float64) reference the arrow backing store directly
 // (zero-copy). String and boolean types are copied.
+//
+// IMPORTANT (zero-copy contract): Int64/Float64 ColumnData.Data holds a reference
+// to the Arrow array's backing memory. The caller MUST ensure the source
+// arrow.Record/arrow.Array is NOT released until the buffer entry has been
+// flushed to storage (i.e., the ColumnData is no longer referenced).
+// For Flight DoPut, this is guaranteed because the flush happens synchronously
+// within WriteArrowRecord's call to writeTypedColumnarInternal.
 func arrowArrayToColumnData(arr arrow.Array) ColumnData {
 	switch arr := arr.(type) {
 	case *array.Int64:
