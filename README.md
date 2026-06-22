@@ -130,8 +130,8 @@ docker run -d \
 
 ## 特性
 
-- **数据写入**：MessagePack列式（最快）、InfluxDB Line Protocol
-- **查询**：DuckDB SQL引擎，JSON和Apache Arrow IPC响应
+- **数据写入**：MessagePack列式（最快）、InfluxDB Line Protocol、Arrow Flight
+- **查询**：DuckDB SQL引擎，JSON、Arrow IPC、Arrow Flight（gRPC零拷贝流式）
 - **存储**：本地文件系统、S3、MinIO
 - **认证**：基于令牌的认证，内存缓存
 - **持久性**：可选预写日志（WAL）
@@ -139,6 +139,102 @@ docker run -d \
 - **数据管理**：保留策略、连续查询、符合GDPR的删除
 - **可观测性**：Prometheus指标、结构化日志、优雅关闭
 - **可靠性**：断路器、指数退避重试
+
+---
+
+## Arrow Flight
+
+IotEdgeDB 内置 Apache Arrow Flight 服务器——基于 gRPC 的高性能 Arrow 数据传输协议。Flight 提供零拷贝 Arrow RecordBatch 流式传输，比 HTTP JSON 快 2-50×，比 HTTP Arrow IPC 快 7-27%。
+
+### 启用 Flight
+
+```toml
+[flight]
+enabled = true
+addr = ":9090"
+```
+
+### Flight vs HTTP 性能对比 (Apple M5)
+
+| 查询规模 | Flight DoGet | HTTP Arrow IPC | Flight 优势 |
+|----------|-------------|----------------|------------|
+| `SELECT 1` | 77 µs | 106 µs | **27% faster** |
+| 1K 行 | 146 µs | 179 µs | **19% faster** |
+| 100K 行 | 4.2 ms | 4.5 ms | **7% faster** |
+
+### Flight 写入 (DoPut)
+
+Arrow RecordBatch 直写缓冲区，跳过 MsgPack 解码：
+
+| 批次大小 | 写入吞吐 |
+|----------|---------|
+| 1K 行 | **94M 行/秒** (10.6 µs) |
+| 10K 行 | 106M 行/秒 (94 µs) |
+
+### Python 客户端示例
+
+```bash
+pip install pyarrow
+python examples/flight_client.py --host localhost --port 9090
+```
+
+```python
+import pyarrow.flight as flight
+import json
+
+client = flight.FlightClient("grpc://localhost:9090")
+
+# 查询
+desc = flight.FlightDescriptor.for_command(json.dumps({"sql": "SELECT 1 AS val"}))
+info = client.get_flight_info(desc)
+reader = client.do_get(info.endpoints[0].ticket)
+table = reader.read_all()
+print(table)
+
+# 写入
+schema = pa.schema([("value", pa.int64()), ("time", pa.timestamp("us"))])
+data = pa.record_batch([[1, 2, 3], [now, now, now]], schema=schema)
+desc = flight.FlightDescriptor.for_command(
+    json.dumps({"database": "mydb", "measurement": "cpu"}))
+writer, reader = client.do_put(desc, schema)
+writer.write(data)
+writer.close()
+```
+
+### Go 客户端示例
+
+```go
+import "iedb/internal/flight"
+
+client, _ := flight.NewClient("localhost:9090")
+defer client.Close()
+
+reader, _ := client.Query(ctx, "SELECT * FROM cpu_usage LIMIT 100")
+defer reader.Release()
+for reader.Next() {
+    batch := reader.RecordBatch()
+    // 处理 Arrow RecordBatch
+}
+```
+
+### Flight SQL
+
+支持 BI 工具直接连接（DBeaver, Tableau, Metabase）：
+
+```
+catalog: iedb
+  └── schema: <database>
+      └── table: <measurement>
+```
+
+### 集群 Scatter-Gather
+
+集群模式下，Flight 替代 HTTP JSON 进行跨分片查询，实现零拷贝 RecordBatch 合并：
+
+```
+2 节点 × 250 行: 444 µs
+4 节点 × 250 行: 536 µs
+```
 
 ---
 
@@ -161,6 +257,13 @@ max_buffer_size = 50000
 
 [auth]
 enabled = true
+
+[flight]
+enabled = true             # 启用 Arrow Flight gRPC 服务器
+addr = ":9090"             # Flight 监听地址
+tls = false                # TLS（默认关闭）
+max_recv_msg_size = 67108864   # 最大接收消息 64MB
+max_send_msg_size = 67108864   # 最大发送消息 64MB
 ```
 
 环境变量使用 `IEDB_` 前缀:
@@ -188,6 +291,7 @@ iedb/
 │   ├── compaction/       # Tiered hourly/daily Parquet file merging
 │   ├── config/           # TOML configuration with env var overrides
 │   ├── database/         # DuckDB connection pool
+│   ├── flight/           # Arrow Flight gRPC server (DoGet/DoPut/Flight SQL)
 │   ├── governance/       # Per-token query quotas and rate limiting
 │   ├── ingest/           # MessagePack, Line Protocol, TLE, Arrow writer
 │   ├── license/          # License validation and feature gating
