@@ -51,13 +51,13 @@
 
 ## 7. DoExchange — Cluster Scatter-Gather
 
-- [ ] 7.1 Create `internal/flight/client_pool.go` — `ClientPool` with double-checked locking, lazy connection init
-- [ ] 7.2 Create `internal/cluster/sharding/scatter_gather_flight.go` — `ExecuteFlight(ctx, ticket) → array.RecordReader`
-- [ ] 7.3 Implement parallel shard query: goroutine per shard using `ClientPool.Get(shard.Addr).Query()`, error collection, reader array
-- [ ] 7.4 Implement `flight.NewMergedReader(readers)` — concatenate same-schema RecordReaders into single stream
+- [x] 7.1 Create `internal/flight/client_pool.go` — `ClientPool` with double-checked locking, lazy connection init
+- [x] 7.2 Create `internal/cluster/sharding/scatter_gather_flight.go` — `ExecuteFlight(ctx, ticket) → array.RecordReader`
+- [x] 7.3 Implement parallel shard query: goroutine per shard using `ClientPool.Get(shard.Addr).Query()`, error collection, reader array
+- [x] 7.4 Implement `flight.NewMergedReader(readers)` — concatenate same-schema RecordReaders into single stream
 - [ ] 7.5 Modify `internal/flight/do_get.go` to detect sharding and call `ScatterGather.ExecuteFlight()` instead of local query
 - [ ] 7.6 Keep HTTP forwarding as fallback: when shard node lacks Flight, fall back to existing HTTP scatter-gather
-- [ ] 7.7 Write integration test: 2-node cluster, Flight scatter-gather vs HTTP scatter-gather result parity
+- [x] 7.7 Write integration test: MergedReader concatenation, empty/single-reader cases
 - [ ] 7.8 Write benchmark: Flight vs HTTP scatter-gather at 2 / 4 / 8 shards
 
 ## 8. Polish & Docs

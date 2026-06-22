@@ -651,3 +651,83 @@ func (s *testPutStream) Recv() (*flight.FlightData, error) {
 }
 func (s *testPutStream) Send(result *flight.PutResult) error { return nil }
 
+// --- MergedReader tests ---
+
+func TestMergedReader_ConcatenatesReaders(t *testing.T) {
+	env := setupFlightTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create two readers via queries
+	reader1, err := queryReader(ctx, env, "SELECT unnest(generate_series(1, 3)) AS n")
+	if err != nil {
+		t.Fatalf("reader1: %v", err)
+	}
+
+	reader2, err := queryReader(ctx, env, "SELECT unnest(generate_series(4, 6)) AS n")
+	if err != nil {
+		reader1.Release()
+		t.Fatalf("reader2: %v", err)
+	}
+
+	merged, err := NewMergedReader([]array.RecordReader{reader1, reader2})
+	if err != nil {
+		t.Fatalf("NewMergedReader: %v", err)
+	}
+	defer merged.Release()
+
+	totalRows := int64(0)
+	for merged.Next() {
+		totalRows += merged.RecordBatch().NumRows()
+	}
+
+	if totalRows != 6 {
+		t.Fatalf("expected 6 total rows, got %d", totalRows)
+	}
+	t.Logf("MergedReader returned %d rows from 2 readers", totalRows)
+}
+
+func TestMergedReader_EmptyReaders(t *testing.T) {
+	_, err := NewMergedReader(nil)
+	if err == nil {
+		t.Fatal("expected error for nil readers")
+	}
+	_, err = NewMergedReader([]array.RecordReader{})
+	if err == nil {
+		t.Fatal("expected error for empty readers")
+	}
+	t.Logf("Empty reader errors: %v", err)
+}
+
+func TestMergedReader_SingleReader(t *testing.T) {
+	env := setupFlightTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	reader, err := queryReader(ctx, env, "SELECT 1 AS val")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+
+	merged, err := NewMergedReader([]array.RecordReader{reader})
+	if err != nil {
+		t.Fatalf("NewMergedReader: %v", err)
+	}
+	defer merged.Release()
+
+	if !merged.Next() {
+		t.Fatal("expected one record batch")
+	}
+	if merged.RecordBatch().NumRows() != 1 {
+		t.Fatal("expected 1 row")
+	}
+}
+
+// queryReader executes a Flight query and returns the RecordReader.
+func queryReader(ctx context.Context, env *integrationTestEnv, sql string) (array.RecordReader, error) {
+	// Use our Client wrapper to query
+	client := &Client{client: env.client}
+	return client.Query(ctx, sql)
+}
+
+
