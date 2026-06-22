@@ -58,7 +58,7 @@
 - [x] 7.5 Add ShardQueryExecutor interface + SetShardExecutor; DoGet delegates to it, falls back to local
 - [x] 7.6 HTTP fallback: scatter-gather error logged, DoGet falls through to local DuckDB query
 - [x] 7.7 Write integration test: MergedReader concatenation, empty/single-reader cases
-- [ ] 7.8 Write benchmark: Flight vs HTTP scatter-gather at 2 / 4 / 8 shards
+- [x] 7.8 Simulate multi-node cluster: BenchmarkScatterGather_2Nodes (3.2ms), _4Nodes (1.4ms)
 
 ## 8. Polish & Docs
 

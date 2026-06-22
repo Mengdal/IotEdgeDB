@@ -9,11 +9,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"google.golang.org/grpc"
 )
 
 // benchResultRows prevents compiler from optimizing away results in benchmarks.
@@ -418,6 +420,152 @@ func BenchmarkFlight_vs_HTTP_SelectLiteral(b *testing.B) {
 			resp.Body.Close()
 		}
 	})
+}
+
+// --- Multi-node cluster scatter-gather simulation ---
+
+// startFlightNode starts a Flight server on a real TCP port and returns the address.
+func startFlightNode(b *testing.B, env *integrationTestEnv) string {
+	b.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatalf("listen: %v", err)
+	}
+	addr := lis.Addr().String()
+
+	grpcSrv := grpc.NewServer(
+		grpc.MaxRecvMsgSize(64*1024*1024),
+		grpc.MaxSendMsgSize(64*1024*1024),
+	)
+	handler := newUnifiedHandler(env.flightSrv)
+	flight.RegisterFlightServiceServer(grpcSrv, handler)
+	go grpcSrv.Serve(lis)
+
+	b.Cleanup(func() { grpcSrv.GracefulStop() })
+	return addr
+}
+
+// remoteNodeExecutor implements ShardQueryExecutor by querying remote Flight servers.
+type remoteNodeExecutor struct {
+	pool    *ClientPool
+	addrs   []string // Flight addresses of remote shard nodes
+}
+
+func (e *remoteNodeExecutor) ExecuteFlight(ctx context.Context, ticket QueryTicket) (array.RecordReader, error) {
+	if len(e.addrs) == 0 {
+		return nil, nil
+	}
+
+	// Parallel query to all remote nodes
+	readers := make([]array.RecordReader, len(e.addrs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var firstErr error
+
+	for i, addr := range e.addrs {
+		wg.Add(1)
+		go func(idx int, a string) {
+			defer wg.Done()
+			client, err := e.pool.Get(a)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil { firstErr = err }
+				mu.Unlock()
+				return
+			}
+			reader, err := client.Query(ctx, ticket.SQL)
+			mu.Lock()
+			if err != nil {
+				if firstErr == nil { firstErr = err }
+			} else {
+				readers[idx] = reader
+			}
+			mu.Unlock()
+		}(i, addr)
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	// Filter nil readers (failed nodes)
+	valid := make([]array.RecordReader, 0, len(readers))
+	for _, r := range readers {
+		if r != nil { valid = append(valid, r) }
+	}
+	if len(valid) == 0 { return nil, nil }
+
+	return NewMergedReader(valid)
+}
+
+// BenchmarkScatterGather_2Nodes measures parallel query to 2 remote Flight nodes.
+func BenchmarkScatterGather_2Nodes(b *testing.B) {
+	remote1 := setupFlightBench(b)
+	addr1 := startFlightNode(b, remote1)
+	remote2 := setupFlightBench(b)
+	addr2 := startFlightNode(b, remote2)
+
+	pool := NewClientPool(WithMaxRecvMsgSize(64 * 1024 * 1024))
+	defer pool.Close()
+
+	exec := &remoteNodeExecutor{pool: pool, addrs: []string{addr1, addr2}}
+	ticket := QueryTicket{SQL: "SELECT unnest(generate_series(1, 250)) AS n"}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader, err := exec.ExecuteFlight(context.Background(), ticket)
+		if err != nil {
+			b.Fatalf("Execute: %v", err)
+		}
+		if reader == nil {
+			b.Fatal("expected remote reader")
+		}
+		n := int64(0)
+		for reader.Next() {
+			n += reader.RecordBatch().NumRows()
+		}
+		reader.Release()
+		if n != 500 {
+			b.Fatalf("expected 500 rows (2×250), got %d", n)
+		}
+		benchResultRows = n
+	}
+}
+
+// BenchmarkScatterGather_4Nodes measures parallel query to 4 remote Flight nodes.
+func BenchmarkScatterGather_4Nodes(b *testing.B) {
+	addrs := make([]string, 4)
+	for i := 0; i < 4; i++ {
+		node := setupFlightBench(b)
+		addrs[i] = startFlightNode(b, node)
+	}
+
+	pool := NewClientPool(WithMaxRecvMsgSize(64 * 1024 * 1024))
+	defer pool.Close()
+
+	exec := &remoteNodeExecutor{pool: pool, addrs: addrs}
+	ticket := QueryTicket{SQL: "SELECT unnest(generate_series(1, 250)) AS n"}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader, err := exec.ExecuteFlight(context.Background(), ticket)
+		if err != nil {
+			b.Fatalf("Execute: %v", err)
+		}
+		if reader == nil {
+			b.Fatal("expected remote reader")
+		}
+		n := int64(0)
+		for reader.Next() {
+			n += reader.RecordBatch().NumRows()
+		}
+		reader.Release()
+		if n != 1000 {
+			b.Fatalf("expected 1000 rows (4×250), got %d", n)
+		}
+		benchResultRows = n
+	}
 }
 
 // BenchmarkMergedReader_4x1K measures merging 4 readers each with 250 rows.
