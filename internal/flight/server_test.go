@@ -67,6 +67,7 @@ type integrationTestEnv struct {
 	buf       *ingest.ArrowBuffer
 	storage   *testStorage
 	flightSrv *Server
+	handler   flight.FlightServer // unified handler (base + Flight SQL)
 	grpcSrv   *grpc.Server
 	client    flight.Client
 }
@@ -105,7 +106,6 @@ func setupFlightTest(t testing.TB) *integrationTestEnv {
 		ingest: buf,
 		logger: logger,
 	}
-	flightSrv.BaseFlightServer = flight.BaseFlightServer{}
 
 	// 4. Create gRPC server with pipe listener
 	lis := newPipeListener()
@@ -113,8 +113,9 @@ func setupFlightTest(t testing.TB) *integrationTestEnv {
 		grpc.MaxRecvMsgSize(64*1024*1024),
 		grpc.MaxSendMsgSize(64*1024*1024),
 	)
-	// Register base Flight server
-	flight.RegisterFlightServiceServer(grpcSrv, flightSrv)
+	// Register unified handler (base Flight + Flight SQL)
+	handler := newUnifiedHandler(flightSrv)
+	flight.RegisterFlightServiceServer(grpcSrv, handler)
 
 	go grpcSrv.Serve(lis)
 
@@ -137,6 +138,7 @@ func setupFlightTest(t testing.TB) *integrationTestEnv {
 		buf:       buf,
 		storage:   storage,
 		flightSrv: flightSrv,
+		handler:   handler,
 		grpcSrv:   grpcSrv,
 		client:    client,
 	}
@@ -607,7 +609,7 @@ func TestDoPut_InvalidDescriptor(t *testing.T) {
 			},
 		}},
 	}
-	err := env.flightSrv.DoPut(putStream)
+	err := env.handler.DoPut(putStream)
 	if err == nil {
 		t.Fatal("expected error for invalid descriptor JSON")
 	}
@@ -627,7 +629,7 @@ func TestDoPut_MissingDatabase(t *testing.T) {
 			},
 		}},
 	}
-	err := env.flightSrv.DoPut(putStream)
+	err := env.handler.DoPut(putStream)
 	if err == nil {
 		t.Fatal("expected error for missing database")
 	}

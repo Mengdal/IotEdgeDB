@@ -1,6 +1,7 @@
 package flight
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
@@ -20,11 +22,9 @@ import (
 )
 
 // Server implements the Arrow Flight protocol for IotEdgeDB.
-// It embeds BaseFlightServer and only overrides the methods needed.
+// It embed BaseFlightServer for default handlers and overrides the methods needed.
 // The Flight server runs on a separate port from the HTTP API, in the same process.
 type Server struct {
-	flight.BaseFlightServer
-
 	db      *database.DuckDB
 	ingest  *ingest.ArrowBuffer
 	authMgr *auth.AuthManager
@@ -37,7 +37,6 @@ type Server struct {
 }
 
 // NewServer creates a new Flight Server.
-// The ingest buffer is optional (nil until DoPut is implemented in Step 1.2).
 func NewServer(
 	db *database.DuckDB,
 	ingestBuf *ingest.ArrowBuffer,
@@ -53,10 +52,9 @@ func NewServer(
 		logger:  logger.With().Str("component", "flight-server").Logger(),
 	}
 
-	// gRPC server with 64MB message limits, keepalive enforcement
 	s.grpcSrv = grpc.NewServer(
-		grpc.MaxRecvMsgSize(64*1024*1024), // 64MB
-		grpc.MaxSendMsgSize(64*1024*1024), // 64MB
+		grpc.MaxRecvMsgSize(64*1024*1024),
+		grpc.MaxSendMsgSize(64*1024*1024),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle: 5 * time.Minute,
 			Time:              2 * time.Minute,
@@ -68,9 +66,11 @@ func NewServer(
 		}),
 	)
 
-	flight.RegisterFlightServiceServer(s.grpcSrv, s)
-	// Flight SQL methods are not registered yet in v1 — they return Unimplemented
-	// via BaseFlightServer's default handlers.
+	// Register a unified handler that routes:
+	//   - JSON descriptors  → our base Server (DoGet, GetFlightInfo, ListFlights)
+	//   - Protobuf descriptors → Flight SQL (catalogs, schemas, tables, SqlInfo, statements)
+	handler := newUnifiedHandler(s)
+	flight.RegisterFlightServiceServer(s.grpcSrv, handler)
 	return s
 }
 
@@ -81,7 +81,6 @@ func (s *Server) Start(addr string) error {
 	if err != nil {
 		return fmt.Errorf("flight server listen on %s: %w", addr, err)
 	}
-
 	s.logger.Info().Str("addr", addr).Msg("Flight server starting")
 	return s.grpcSrv.Serve(s.listener)
 }
@@ -93,11 +92,56 @@ func (s *Server) Stop() {
 	s.logger.Info().Msg("Flight server stopped")
 }
 
-// Close implements shutdown.Shutdownable so the Flight server can be
-// registered with the shutdown coordinator.
+// Close implements shutdown.Shutdownable.
 func (s *Server) Close() error {
 	s.Stop()
 	return nil
+}
+
+// unifiedHandler implements flight.FlightServer. It routes:
+// - JSON descriptors → base handlers on our Server
+// - Protobuf-encoded descriptors → Flight SQL via flightsql wrapper
+// All unimplemented methods fall back to BaseFlightServer defaults.
+type unifiedHandler struct {
+	flight.BaseFlightServer
+	base    *Server
+	sqlWrap flight.FlightServer // flightsql.NewFlightServer result
+}
+
+func newUnifiedHandler(s *Server) flight.FlightServer {
+	sqlSrv := &flightSQLServer{srv: s}
+	return &unifiedHandler{
+		BaseFlightServer: flight.BaseFlightServer{},
+		base:             s,
+		sqlWrap:          flightsql.NewFlightServer(sqlSrv),
+	}
+}
+
+// isJSONDescriptor returns true if the Cmd bytes look like JSON (starts with '{').
+func isJSONDescriptor(cmd []byte) bool {
+	return len(cmd) > 0 && cmd[0] == '{'
+}
+
+func (h *unifiedHandler) GetFlightInfo(ctx context.Context, desc *flight.FlightDescriptor) (*flight.FlightInfo, error) {
+	if isJSONDescriptor(desc.Cmd) {
+		return h.base.GetFlightInfo(ctx, desc)
+	}
+	return h.sqlWrap.GetFlightInfo(ctx, desc)
+}
+
+func (h *unifiedHandler) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
+	if isJSONDescriptor(ticket.Ticket) {
+		return h.base.DoGet(ticket, stream)
+	}
+	return h.sqlWrap.DoGet(ticket, stream)
+}
+
+func (h *unifiedHandler) ListFlights(req *flight.Criteria, stream flight.FlightService_ListFlightsServer) error {
+	return h.base.ListFlights(req, stream)
+}
+
+func (h *unifiedHandler) DoPut(stream flight.FlightService_DoPutServer) error {
+	return h.base.DoPut(stream)
 }
 
 // SerializeSchema serializes an Arrow schema to wire format via Flight.

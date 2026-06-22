@@ -3,7 +3,9 @@ package flight
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/flight"
@@ -117,7 +119,10 @@ func (c *Client) ListMeasurements(ctx context.Context) ([]MeasurementInfo, error
 	for {
 		info, err := stream.Recv()
 		if err != nil {
-			break // end of stream
+			if errors.Is(err, io.EOF) {
+				break // normal end of stream
+			}
+			return results, fmt.Errorf("list flights recv: %w", err)
 		}
 		// Parse the FlightInfo for measurement metadata
 		mi := MeasurementInfo{}

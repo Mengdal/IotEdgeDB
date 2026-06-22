@@ -69,9 +69,13 @@ func (f *flightSQLServer) DoGetStatement(ctx context.Context, ticket flightsql.S
 			close(ch)
 		}()
 		for reader.Next() {
-			rec := reader.Record()
+			rec := reader.RecordBatch()
 			rec.Retain()
-			ch <- flight.StreamChunk{Data: rec}
+			select {
+			case ch <- flight.StreamChunk{Data: rec}:
+			case <-ctx.Done():
+				return // client disconnected
+			}
 		}
 	}()
 
