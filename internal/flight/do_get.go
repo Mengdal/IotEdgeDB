@@ -3,9 +3,9 @@ package flight
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow/flight"
-	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -46,6 +46,8 @@ func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescripto
 		return nil, status.Errorf(codes.Internal, "ticket serialization: %v", err)
 	}
 
+	s.logger.Debug().Str("sql", fd.SQL).Msg("GetFlightInfo OK")
+
 	return &flight.FlightInfo{
 		FlightDescriptor: desc,
 		Schema:           SerializeSchema(schema),
@@ -59,6 +61,8 @@ func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescripto
 
 // DoGet executes a query and streams results as Arrow RecordBatches.
 func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
+	startTime := time.Now()
+
 	// 1. Authenticate
 	_, err := s.verifyToken(stream.Context())
 	if err != nil {
@@ -75,10 +79,12 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 		return status.Error(codes.InvalidArgument, "ticket contains empty sql")
 	}
 
+	s.logger.Debug().Str("sql", qt.SQL).Msg("DoGet request")
+
 	// 3. Execute query via DuckDB Arrow API
 	reader, conn, err := s.db.ArrowQueryContext(stream.Context(), qt.SQL)
 	if err != nil {
-		s.logger.Error().Err(err).Str("sql", qt.SQL).Msg("DoGet query failed")
+		s.logger.Error().Err(err).Str("sql", qt.SQL).Dur("elapsed", time.Since(startTime)).Msg("DoGet query failed")
 		return status.Errorf(codes.Internal, "query failed: %v", err)
 	}
 	defer reader.Release()
@@ -88,26 +94,32 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 	wr := flight.NewRecordWriter(stream)
 	defer wr.Close()
 
+	var rowCount int64
 	for reader.Next() {
-		record := reader.Record()
+		record := reader.RecordBatch()
+		rowCount += record.NumRows()
 		if err := wr.Write(record); err != nil {
 			return status.Errorf(codes.Internal, "write record batch: %v", err)
 		}
 	}
 
 	if err := reader.Err(); err != nil {
+		s.logger.Error().Err(err).Str("sql", qt.SQL).Int64("rows", rowCount).Msg("DoGet reader error")
 		return status.Errorf(codes.Internal, "record reader error: %v", err)
 	}
+
+	s.logger.Info().
+		Str("sql", qt.SQL).
+		Int64("rows", rowCount).
+		Dur("duration", time.Since(startTime)).
+		Msg("DoGet complete")
 
 	return nil
 }
 
 // ListFlights lists all available measurements as FlightInfo entries.
 func (s *Server) ListFlights(req *flight.Criteria, stream flight.FlightService_ListFlightsServer) error {
-	// ListFlights is informational — return all measurements with basic schema info.
-	// In v1, this returns minimal FlightInfo; full schema requires GetFlightInfo per measurement.
 	_ = req
 	_ = stream
-	_ = zerolog.Logger{} // unused for now
 	return nil
 }

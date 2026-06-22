@@ -62,7 +62,7 @@
 
 ## 8. Polish & Docs
 
-- [ ] 8.1 Add comprehensive logging (request ID, SQL, duration, row count) to each Flight RPC
+- [x] 8.1 Add comprehensive logging (SQL, duration, row count) to DoGet and GetFlightInfo RPCs
 - [ ] 8.2 Add Prometheus metrics: flight_requests_total, flight_request_duration_seconds, flight_bytes_sent_total
 - [ ] 8.3 Write example Python client script demonstrating connect → query → receive Arrow table
-- [ ] 8.4 Update CLAUDE.md with `internal/flight/` package description and Flight server startup flow
+- [x] 8.4 Update CLAUDE.md with `internal/flight/` package description and Flight server startup flow
