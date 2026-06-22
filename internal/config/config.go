@@ -39,6 +39,7 @@ type Config struct {
 	Governance      GovernanceConfig
 	QueryManagement QueryManagementConfig
 	Reconciliation  ReconciliationConfig
+	Flight          FlightConfig
 
 	// ConfigFilePath is the absolute path to the config file used at startup.
 	// Empty if no config file was found (defaults-only mode), which disables SIGHUP hot reload.
@@ -413,6 +414,17 @@ type ClusterConfig struct {
 	TLSCAFile    string // Optional: CA certificate for verifying peer certificates
 }
 
+// FlightConfig holds configuration for the Apache Arrow Flight server.
+// Flight provides zero-copy Arrow data transport over gRPC for queries,
+// ingestion, and intra-cluster communication.
+type FlightConfig struct {
+	Enabled       bool   // Enable Flight server (default: false)
+	Addr          string // Listen address for Flight gRPC server (default: ":9090")
+	TLS           bool   // Enable TLS for Flight connections (default: false)
+	MaxRecvMsgSize int  // Maximum gRPC receive message size in bytes (default: 67108864 = 64MB)
+	MaxSendMsgSize int  // Maximum gRPC send message size in bytes (default: 67108864 = 64MB)
+}
+
 // Load loads configuration from environment and config file
 func Load() (*Config, error) {
 	v := viper.New()
@@ -719,6 +731,13 @@ func Load() (*Config, error) {
 			Enabled:     v.GetBool("query_management.enabled"),
 			HistorySize: v.GetInt("query_management.history_size"),
 		},
+		Flight: FlightConfig{
+			Enabled:        v.GetBool("flight.enabled"),
+			Addr:           v.GetString("flight.addr"),
+			TLS:            v.GetBool("flight.tls"),
+			MaxRecvMsgSize: v.GetInt("flight.max_recv_msg_size"),
+			MaxSendMsgSize: v.GetInt("flight.max_send_msg_size"),
+		},
 		ConfigFilePath: configFilePath,
 	}
 
@@ -1012,6 +1031,13 @@ func setDefaults(v *viper.Viper) {
 	// Backup defaults
 	v.SetDefault("backup.enabled", true)
 	v.SetDefault("backup.local_path", "./data/backups")
+
+	// Flight defaults
+	v.SetDefault("flight.enabled", false)
+	v.SetDefault("flight.addr", ":9090")
+	v.SetDefault("flight.tls", false)
+	v.SetDefault("flight.max_recv_msg_size", 67108864) // 64MB
+	v.SetDefault("flight.max_send_msg_size", 67108864) // 64MB
 }
 
 func getDefaultThreadCount() int {

@@ -22,6 +22,7 @@ import (
 	"iedb/internal/cluster"
 	"iedb/internal/compaction"
 	"iedb/internal/config"
+	flightPkg "iedb/internal/flight"
 	"iedb/internal/database"
 	"iedb/internal/governance"
 	"iedb/internal/ingest"
@@ -1720,6 +1721,18 @@ func main() {
 	// Start server
 	if err := server.Start(); err != nil {
 		log.Fatal().Err(err).Msg("Failed to start HTTP server")
+	}
+
+	// Start Arrow Flight server if enabled
+	if cfg.Flight.Enabled {
+		flightServer := flightPkg.NewServer(db, arrowBuffer, authManager, rbacManager, logger.Get("flight"))
+		go func() {
+			if err := flightServer.Start(cfg.Flight.Addr); err != nil {
+				log.Fatal().Err(err).Msg("Failed to start Flight server")
+			}
+		}()
+		shutdownCoordinator.Register("flight", flightServer, shutdown.PriorityHTTPServer)
+		log.Info().Str("addr", cfg.Flight.Addr).Msg("Flight server started")
 	}
 
 	protocol := "HTTP"
