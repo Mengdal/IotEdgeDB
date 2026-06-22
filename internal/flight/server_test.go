@@ -1022,7 +1022,185 @@ func TestHTTPvsFlight_Parity_ByteLevel(t *testing.T) {
 	}
 
 	buf.Close()
-	t.Logf("Byte-level parity: Flight and HTTP paths produce 100%% identical results across %d rows × 4 cols", numRows)
+	t.Logf("Byte-level parity (on-disk): Flight and HTTP paths produce 100%% identical results across %d rows × 4 cols", numRows)
+}
+
+// TestHTTPvsFlight_Parity_InMemory verifies that Flight and HTTP MsgPack ingest
+// paths produce identical query results from in-memory buffer data, without
+// flushing to Parquet. Uses ArrowViewManager to register buffer entries as
+// DuckDB temporary views.
+func TestHTTPvsFlight_Parity_InMemory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in-memory parity test in short mode")
+	}
+
+	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+
+	// Create DuckDB
+	db, err := database.New(&database.Config{
+		MaxConnections: 2, MemoryLimit: "512MB", ThreadCount: 2, TimeZone: "UTC",
+	}, logger)
+	if err != nil {
+		t.Fatalf("New DuckDB: %v", err)
+	}
+	defer db.Close()
+
+	// Create in-memory ArrowBuffer (no real storage needed)
+	storage := &testStorage{}
+	buf := ingest.NewArrowBuffer(&config.IngestConfig{
+		MaxBufferSize:  100000, // large — no async flush
+		MaxBufferAgeMS: 60000,
+		Compression:    "none",
+		ShardCount:     4,
+		FlushWorkers:   2,
+		FlushQueueSize: 16,
+	}, storage, logger)
+
+	// Set up ArrowViewManager so buffer data is queryable via DuckDB views
+	viewMgr := database.NewArrowViewManager(db, buf, logger)
+	buf.SetNotifier(viewMgr)
+	defer viewMgr.Close()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	numRows := 50
+
+	// --- Build identical data in two formats ---
+
+	// Arrow RecordBatch (Flight path)
+	flightRecord := makeParityRecordBatch(t, numRows, now)
+	defer flightRecord.Release()
+
+	// Columnar map (HTTP MsgPack path)
+	nowUs := now.UnixMicro()
+	columnarInts := make([]interface{}, numRows)
+	columnarFloats := make([]interface{}, numRows)
+	columnarStrs := make([]interface{}, numRows)
+	columnarBools := make([]interface{}, numRows)
+	columnarTimes := make([]interface{}, numRows)
+	for i := 0; i < numRows; i++ {
+		columnarInts[i] = int64(i + 1)
+		columnarFloats[i] = float64(i) * 1.5
+		columnarStrs[i] = fmt.Sprintf("row_%d", i)
+		columnarBools[i] = (i%2 == 0)
+		columnarTimes[i] = nowUs + int64(i)*1_000_000
+	}
+
+	// --- Path 1: Flight (via WriteArrowRecord) ---
+	if err := buf.WriteArrowRecord(ctx, "test", "flight_mem", flightRecord); err != nil {
+		t.Fatalf("Flight WriteArrowRecord: %v", err)
+	}
+
+	// --- Path 2: HTTP MsgPack (via WriteColumnarRecord) ---
+	colRecord := &models.ColumnarRecord{
+		Measurement: "http_mem",
+		Columns: map[string][]interface{}{
+			"int_val":   columnarInts,
+			"float_val": columnarFloats,
+			"str_val":   columnarStrs,
+			"bool_val":  columnarBools,
+			"time":      columnarTimes,
+		},
+		Columnar: true,
+	}
+	if err := buf.WriteColumnarRecord(ctx, "test", colRecord); err != nil {
+		t.Fatalf("HTTP WriteColumnarRecord: %v", err)
+	}
+
+	// Wait for VIEW manager to register buffer data as DuckDB views
+	waitForView(t, viewMgr, "test", "flight_mem", 3*time.Second)
+	waitForView(t, viewMgr, "test", "http_mem", 3*time.Second)
+
+	// --- Query both paths via DuckDB VIEW ---
+	flightViewNames := viewMgr.MeasurementViewNames("test", "flight_mem")
+	httpViewNames := viewMgr.MeasurementViewNames("test", "http_mem")
+	if len(flightViewNames) == 0 {
+		t.Fatal("Flight path: no VIEW registered")
+	}
+	if len(httpViewNames) == 0 {
+		t.Fatal("HTTP path: no VIEW registered")
+	}
+
+	flightSQL := fmt.Sprintf("SELECT int_val, float_val, bool_val FROM %s ORDER BY int_val", flightViewNames[0])
+	httpSQL := fmt.Sprintf("SELECT int_val, float_val, bool_val FROM %s ORDER BY int_val", httpViewNames[0])
+
+	t.Logf("Flight VIEW: %s", flightViewNames[0])
+	t.Logf("HTTP VIEW:   %s", httpViewNames[0])
+
+	// Query Flight path
+	fReader, fConn, err := db.ArrowQueryContext(ctx, flightSQL)
+	if err != nil {
+		t.Fatalf("Flight query: %v", err)
+	}
+	defer fReader.Release()
+	defer fConn.Close()
+
+	// Query HTTP path
+	hReader, hConn, err := db.ArrowQueryContext(ctx, httpSQL)
+	if err != nil {
+		t.Fatalf("HTTP query: %v", err)
+	}
+	defer hReader.Release()
+	defer hConn.Close()
+
+	// Collect and compare
+	fRows := collectRows(t, fReader)
+	hRows := collectRows(t, hReader)
+
+	if len(fRows) != numRows {
+		t.Fatalf("Flight path: expected %d rows, got %d", numRows, len(fRows))
+	}
+	if len(hRows) != numRows {
+		t.Fatalf("HTTP path: expected %d rows, got %d", numRows, len(hRows))
+	}
+
+	for i := 0; i < len(fRows); i++ {
+		fr, hr := fRows[i], hRows[i]
+		if fr.intVal != hr.intVal || fr.floatVal != hr.floatVal || fr.boolVal != hr.boolVal {
+			t.Fatalf("row %d mismatch: Flight=(%d, %f, %v) HTTP=(%d, %f, %v)",
+				i, fr.intVal, fr.floatVal, fr.boolVal, hr.intVal, hr.floatVal, hr.boolVal)
+		}
+	}
+
+	buf.Close()
+	t.Logf("In-memory parity: Flight and HTTP paths produce 100%% identical results across %d rows × 3 cols", numRows)
+}
+
+// parityRow holds extracted column values for comparison.
+type parityRow struct {
+	intVal   int64
+	floatVal float64
+	boolVal  bool
+}
+
+// collectRows reads all rows from a RecordReader into a slice.
+func collectRows(t *testing.T, reader array.RecordReader) []parityRow {
+	t.Helper()
+	var rows []parityRow
+	for reader.Next() {
+		rec := reader.RecordBatch()
+		for row := int64(0); row < rec.NumRows(); row++ {
+			rows = append(rows, parityRow{
+				intVal:   rec.Column(0).(*array.Int64).Value(int(row)),
+				floatVal: rec.Column(1).(*array.Float64).Value(int(row)),
+				boolVal:  rec.Column(2).(*array.Boolean).Value(int(row)),
+			})
+		}
+	}
+	return rows
+}
+
+// waitForView polls until the VIEW manager has registered data for a measurement.
+func waitForView(t *testing.T, mgr *database.ArrowViewManager, database, measurement string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if mgr.HasMeasurementData(database, measurement) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for VIEW data: %s/%s", database, measurement)
 }
 
 // makeParityRecordBatch creates a RecordBatch with deterministic timestamps.
