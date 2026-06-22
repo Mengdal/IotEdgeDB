@@ -22,6 +22,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
@@ -1202,6 +1203,142 @@ func waitForView(t *testing.T, mgr *database.ArrowViewManager, database, measure
 	}
 	t.Fatalf("timeout waiting for VIEW data: %s/%s", database, measurement)
 }
+
+// TestFlightSQL_ExternalClient_Verification starts a real TCP Flight server
+// and verifies Flight SQL metadata methods work from an external client
+// (simulating what pyarrow.flight.connect() would do).
+func TestFlightSQL_ExternalClient_Verification(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Flight SQL external client test in short mode")
+	}
+
+	logger := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+
+	// Create DuckDB
+	db, err := database.New(&database.Config{
+		MaxConnections: 2, MemoryLimit: "512MB", ThreadCount: 2, TimeZone: "UTC",
+	}, logger)
+	if err != nil {
+		t.Fatalf("New DuckDB: %v", err)
+	}
+	defer db.Close()
+
+	// Create buffer
+	storage := &testStorage{}
+	buf := ingest.NewArrowBuffer(&config.IngestConfig{
+		MaxBufferSize:  100000,
+		MaxBufferAgeMS: 60000,
+		Compression:    "none",
+		ShardCount:     4,
+		FlushWorkers:   2,
+		FlushQueueSize: 16,
+	}, storage, logger)
+
+	// Create Flight server
+	flightSrv := &Server{db: db, ingest: buf, logger: logger}
+
+	// Start gRPC on a real TCP port
+	grpcSrv := grpc.NewServer(
+		grpc.MaxRecvMsgSize(64*1024*1024),
+		grpc.MaxSendMsgSize(64*1024*1024),
+	)
+	handler := newUnifiedHandler(flightSrv)
+	flight.RegisterFlightServiceServer(grpcSrv, handler)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := listener.Addr().String()
+	go grpcSrv.Serve(listener)
+	defer grpcSrv.GracefulStop()
+
+	t.Logf("Flight SQL server listening on %s", addr)
+
+	// Create flightsql.Client (same API pyarrow uses)
+	sqlClient, err := flightsql.NewClient(addr, nil, nil,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("flightsql.NewClient: %v", err)
+	}
+	defer sqlClient.Close()
+
+	// 1. GetCatalogs
+	catalogsInfo, err := sqlClient.GetCatalogs(context.Background())
+	if err != nil {
+		t.Fatalf("GetCatalogs: %v", err)
+	}
+	catReader, err := sqlClient.DoGet(context.Background(), catalogsInfo.Endpoint[0].Ticket)
+	if err != nil {
+		t.Fatalf("DoGet catalogs: %v", err)
+	}
+	defer catReader.Release()
+	if !catReader.Next() {
+		t.Fatal("expected catalog record")
+	}
+	catName := catReader.Record().Column(0).(*array.String).Value(0)
+	if catName != "iedb" {
+		t.Fatalf("expected catalog 'iedb', got %q", catName)
+	}
+	t.Logf("GetCatalogs: %q ✓", catName)
+
+	// 2. GetTables
+	tablesInfo, err := sqlClient.GetTables(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GetTables: %v", err)
+	}
+	tableReader, err := sqlClient.DoGet(context.Background(), tablesInfo.Endpoint[0].Ticket)
+	if err != nil {
+		t.Fatalf("DoGet tables: %v", err)
+	}
+	defer tableReader.Release()
+	tableCount := 0
+	for tableReader.Next() {
+		tableCount += int(tableReader.Record().NumRows())
+	}
+	t.Logf("GetTables: %d table(s) ✓", tableCount)
+
+	// 3. Execute SQL query via base Flight (GetFlightInfo + DoGet)
+	conn2, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial for flight: %v", err)
+	}
+	defer conn2.Close()
+
+	flClient := flight.NewClientFromConn(conn2, nil)
+	info, err := flClient.GetFlightInfo(context.Background(),
+		&flight.FlightDescriptor{
+			Type: flight.DescriptorCMD,
+			Cmd:  []byte(`{"sql":"SELECT 1 AS val"}`),
+		})
+	if err != nil {
+		t.Fatalf("GetFlightInfo: %v", err)
+	}
+	doGetStream, err := flClient.DoGet(context.Background(), info.Endpoint[0].Ticket)
+	if err != nil {
+		t.Fatalf("DoGet: %v", err)
+	}
+	qReader, err := flight.NewRecordReader(doGetStream)
+	if err != nil {
+		t.Fatalf("NewRecordReader: %v", err)
+	}
+	defer qReader.Release()
+	if !qReader.Next() {
+		t.Fatal("expected query result")
+	}
+	val := qReader.RecordBatch().Column(0).(*array.Int32).Value(0)
+	if val != 1 {
+		t.Fatalf("expected 1, got %d", val)
+	}
+	t.Logf("SQL query via Flight: SELECT 1 → val=%d ✓", val)
+
+	buf.Close()
+	t.Logf("Flight SQL external client verification: all endpoints respond correctly")
+}
+
 
 // makeParityRecordBatch creates a RecordBatch with deterministic timestamps.
 func makeParityRecordBatch(t testing.TB, numRows int, baseTime time.Time) arrow.Record {

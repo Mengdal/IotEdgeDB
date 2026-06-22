@@ -96,10 +96,11 @@ func (f *flightSQLServer) GetSchemaStatement(ctx context.Context, stmt flightsql
 // --- Catalogs ---
 
 func (f *flightSQLServer) GetFlightInfoCatalogs(ctx context.Context, desc *flight.FlightDescriptor) (*flight.FlightInfo, error) {
+	// Ticket must be the protobuf descriptor so flightsql.DoGet dispatches to DoGetCatalogs.
 	return &flight.FlightInfo{
 		FlightDescriptor: desc,
 		TotalRecords:     1,
-		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: []byte("catalogs")}}},
+		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: desc.Cmd}}},
 	}, nil
 }
 
@@ -125,7 +126,7 @@ func (f *flightSQLServer) GetFlightInfoSchemas(ctx context.Context, req flightsq
 	return &flight.FlightInfo{
 		FlightDescriptor: desc,
 		TotalRecords:     -1,
-		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: []byte("schemas")}}},
+		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: desc.Cmd}}},
 	}, nil
 }
 
@@ -153,7 +154,7 @@ func (f *flightSQLServer) GetFlightInfoTables(ctx context.Context, req flightsql
 	return &flight.FlightInfo{
 		FlightDescriptor: desc,
 		TotalRecords:     -1,
-		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: []byte("tables")}}},
+		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: desc.Cmd}}},
 	}, nil
 }
 
@@ -185,7 +186,7 @@ func (f *flightSQLServer) GetFlightInfoTableTypes(ctx context.Context, desc *fli
 	return &flight.FlightInfo{
 		FlightDescriptor: desc,
 		TotalRecords:     1,
-		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: []byte("table_types")}}},
+		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: desc.Cmd}}},
 	}, nil
 }
 
@@ -211,7 +212,7 @@ func (f *flightSQLServer) GetFlightInfoSqlInfo(ctx context.Context, req flightsq
 	return &flight.FlightInfo{
 		FlightDescriptor: desc,
 		TotalRecords:     -1,
-		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: []byte("sql_info")}}},
+		Endpoint:         []*flight.FlightEndpoint{{Ticket: &flight.Ticket{Ticket: desc.Cmd}}},
 	}, nil
 }
 

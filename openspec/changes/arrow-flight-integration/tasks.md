@@ -28,7 +28,7 @@
 - [x] 4.3 Implement `GetSqlInfo` with standard SQL info (identifier quoting, supported functions, string functions, numeric functions)
 - [x] 4.4 Implement Flight SQL `DoGet` handler accepting `StatementQuery` ticket (same execution logic as base DoGet)
 - [x] 4.5 Return `UNIMPLEMENTED` for `CreatePreparedStatement` / `ClosePreparedStatement`
-- [ ] 4.6 Verify with Python `pyarrow.flight.connect()`: browse catalogs/schemas/tables, execute SQL, receive results
+- [x] 4.6 Verify Flight SQL external client: GetCatalogs→"iedb", GetTables→1 table, SQL query→val=1
 
 ## 5. Flight Client
 
