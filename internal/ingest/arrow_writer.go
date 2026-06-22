@@ -1629,6 +1629,177 @@ func (b *ArrowBuffer) WriteTypedColumnarDirect(ctx context.Context, database, me
 	return b.writeTypedColumnarInternal(ctx, database, measurement, entry, false)
 }
 
+// WriteArrowRecord writes an arrow.Record directly to the ingest buffer.
+// This is the Flight DoPut fast path: zero-copy where possible (numeric columns
+// reference the arrow array backing store), copy where necessary (string/bool).
+// The record is converted to a bufferEntry and routed through the same WAL,
+// flush-trigger, and VIEW-refresh machinery as all other write paths.
+func (b *ArrowBuffer) WriteArrowRecord(ctx context.Context, database, measurement string, record arrow.Record) error {
+	entry := arrowRecordToEntry(record)
+	return b.writeTypedColumnarInternal(ctx, database, measurement, entry, false)
+}
+
+// arrowRecordToEntry converts an arrow.Record into a bufferEntry suitable
+// for writeTypedColumnarInternal. Numeric columns (int64, float64) are
+// extracted by reference to avoid copying the Arrow backing store.
+func arrowRecordToEntry(record arrow.Record) *bufferEntry {
+	entry := &bufferEntry{
+		columns:    make(map[string]ColumnData, int(record.NumCols())),
+		recordCount: int(record.NumRows()),
+	}
+
+	schema := record.Schema()
+	for i := 0; i < int(record.NumCols()); i++ {
+		col := record.Column(i)
+		colName := schema.Field(i).Name
+		cd := arrowArrayToColumnData(col)
+		if cd.Data != nil || cd.Validity != nil {
+			entry.columns[colName] = cd
+		}
+	}
+
+	// Compute column signature for buffer routing
+	if len(entry.columns) > 0 {
+		entry.schema = getColumnSignature(entry.columns)
+	}
+
+	return entry
+}
+
+// arrowArrayToColumnData converts a single arrow.Array to ColumnData.
+// Numeric types (int64, float64) reference the arrow backing store directly
+// (zero-copy). String and boolean types are copied.
+func arrowArrayToColumnData(arr arrow.Array) ColumnData {
+	switch arr := arr.(type) {
+	case *array.Int64:
+		vals := arr.Int64Values()
+		// arr.Int64Values() returns the backing []int64 — zero-copy
+		if len(vals) == 0 {
+			return ColumnData{}
+		}
+		cd := ColumnData{Data: vals}
+		if arr.NullN() > 0 {
+			cd.Validity = extractValidityArr(arr)
+		}
+		return cd
+
+	case *array.Float64:
+		vals := arr.Float64Values()
+		if len(vals) == 0 {
+			return ColumnData{}
+		}
+		cd := ColumnData{Data: vals}
+		if arr.NullN() > 0 {
+			cd.Validity = extractValidityArr(arr)
+		}
+		return cd
+
+	case *array.String:
+		n := arr.Len()
+		if n == 0 {
+			return ColumnData{}
+		}
+		vals := make([]string, n)
+		for j := 0; j < n; j++ {
+			if arr.IsNull(j) {
+				continue
+			}
+			vals[j] = arr.Value(j)
+		}
+		cd := ColumnData{Data: vals}
+		if arr.NullN() > 0 {
+			cd.Validity = extractValidityArr(arr)
+		}
+		return cd
+
+	case *array.Boolean:
+		n := arr.Len()
+		if n == 0 {
+			return ColumnData{}
+		}
+		vals := make([]bool, n)
+		for j := 0; j < n; j++ {
+			if arr.IsNull(j) {
+				continue
+			}
+			vals[j] = arr.Value(j)
+		}
+		cd := ColumnData{Data: vals}
+		if arr.NullN() > 0 {
+			cd.Validity = extractValidityArr(arr)
+		}
+		return cd
+
+	case *array.Timestamp:
+		n := arr.Len()
+		if n == 0 {
+			return ColumnData{}
+		}
+		vals := make([]int64, n)
+		for j := 0; j < n; j++ {
+			if arr.IsNull(j) {
+				continue
+			}
+			vals[j] = int64(arr.Value(j))
+		}
+		cd := ColumnData{Data: vals}
+		if arr.NullN() > 0 {
+			cd.Validity = extractValidityArr(arr)
+		}
+		return cd
+
+	case *array.Int32:
+		n := arr.Len()
+		if n == 0 {
+			return ColumnData{}
+		}
+		vals := make([]int64, n)
+		for j := 0; j < n; j++ {
+			if arr.IsNull(j) {
+				continue
+			}
+			vals[j] = int64(arr.Value(j))
+		}
+		cd := ColumnData{Data: vals}
+		if arr.NullN() > 0 {
+			cd.Validity = extractValidityArr(arr)
+		}
+		return cd
+
+	case *array.Float32:
+		n := arr.Len()
+		if n == 0 {
+			return ColumnData{}
+		}
+		vals := make([]float64, n)
+		for j := 0; j < n; j++ {
+			if arr.IsNull(j) {
+				continue
+			}
+			vals[j] = float64(arr.Value(j))
+		}
+		cd := ColumnData{Data: vals}
+		if arr.NullN() > 0 {
+			cd.Validity = extractValidityArr(arr)
+		}
+		return cd
+
+	default:
+		// Unknown type — skip
+		return ColumnData{}
+	}
+}
+
+// extractValidityArr builds a []bool null bitmap from an arrow.Array's nulls.
+func extractValidityArr(arr arrow.Array) []bool {
+	n := arr.Len()
+	valid := make([]bool, n)
+	for i := 0; i < n; i++ {
+		valid[i] = arr.IsValid(i)
+	}
+	return valid
+}
+
 // walDropLogIntervalNano is the minimum interval between successive
 // WAL-dropped Warn log emissions. Backpressure on a busy node can
 // produce hundreds of dropped entries per second; one Warn per drop
