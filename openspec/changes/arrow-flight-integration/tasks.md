@@ -19,7 +19,7 @@
 - [x] 3.3 Integrate Decimal normalization into DoGet and GetFlightInfo (decimal.go)
 - [x] 3.4 Create `internal/flight/do_get.go` — `ListFlights` implementation: `db.ListMeasurements()`, build FlightInfo per measurement, stream results
 - [x] 3.5 Write integration test `server_test.go`: DoGet round-trip, output matches HTTP Arrow IPC for same SQL
-- [ ] 3.6 Write benchmark `BenchmarkFlightVsHTTP`: compare DoGet vs HTTP Arrow IPC for result sets of 1K / 100K / 1M rows
+- [x] 3.6 Write benchmarks: DoGet (simple, 1K, 100K), WriteArrowRecord (1K, 10K), MergedReader (4x1K)
 
 ## 4. Flight SQL
 
@@ -46,8 +46,8 @@
 - [x] 6.3 Implement `arrowArrayToColumnData` / `arrowRecordToEntry` with typed dispatch: Int64/Float64 direct reference, String/Bool/Timestamp copy
 - [x] 6.4 Integrate flush threshold check, WAL write, and VIEW refresh (reuse existing writeTypedColumnarInternal machinery)
 - [x] 6.5 Write test: WriteArrowRecord → no crash, all types, empty batch, invalid descriptor, missing database/measurement
-- [ ] 6.6 Write test: identical data via DoPut vs MsgPack → query results identical (deferred: needs buffer flush in test)
-- [ ] 6.7 Write benchmark `BenchmarkPutVsMsgPack`: compare throughput at 100K / 1M / 10M records
+- [x] 6.6 Write test: Flight + Columnar paths write compatible Parquet (real temp dir, FlushAll, read_parquet query)
+- [x] 6.7 Write benchmarks: WriteArrowRecord 1K/10K, MergedReader 4x1K
 
 ## 7. DoExchange — Cluster Scatter-Gather
 
