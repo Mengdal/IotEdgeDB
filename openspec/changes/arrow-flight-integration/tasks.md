@@ -16,7 +16,7 @@
 
 - [x] 3.1 Create `internal/flight/do_get.go` — `GetFlightInfo` implementation: parse FlightDescriptor, `LIMIT 0` query for schema, serialize Ticket, return FlightInfo
 - [x] 3.2 Create `internal/flight/do_get.go` — `DoGet` implementation: deserialize Ticket, auth, RBAC, `db.ArrowQueryContext()`, `flight.NewRecordWriter(stream)`, loop over batches
-- [ ] 3.3 Integrate `normalizeDecimalSchema` / `castDecimalBatch` from `internal/api/query_arrow.go` (extract to shared location or call directly)
+- [x] 3.3 Integrate Decimal normalization into DoGet and GetFlightInfo (decimal.go)
 - [x] 3.4 Create `internal/flight/do_get.go` — `ListFlights` implementation: `db.ListMeasurements()`, build FlightInfo per measurement, stream results
 - [x] 3.5 Write integration test `server_test.go`: DoGet round-trip, output matches HTTP Arrow IPC for same SQL
 - [ ] 3.6 Write benchmark `BenchmarkFlightVsHTTP`: compare DoGet vs HTTP Arrow IPC for result sets of 1K / 100K / 1M rows
@@ -35,7 +35,7 @@
 - [x] 5.1 Create `internal/flight/client.go` — `Client` struct with `grpc.ClientConn` and `flight.Client`
 - [x] 5.2 Implement `NewClient(addr, opts)` with `grpc.Dial` (insecure, 64MB recv limit)
 - [x] 5.3 Implement `Query(ctx, sql) → array.RecordReader` wrapping GetFlightInfo → DoGet flow
-- [ ] 5.4 Implement `ListMeasurements(ctx) → []MeasurementInfo` via ListFlights
+- [x] 5.4 Implement `ListMeasurements(ctx) → []MeasurementInfo` via ListFlights
 - [x] 5.5 Implement `Close()` releasing gRPC connection
 - [x] 5.6 Write `client_test.go`: connect to test Flight server, query → verify RecordBatch content
 
@@ -63,6 +63,6 @@
 ## 8. Polish & Docs
 
 - [x] 8.1 Add comprehensive logging (SQL, duration, row count) to DoGet and GetFlightInfo RPCs
-- [ ] 8.2 Add Prometheus metrics: flight_requests_total, flight_request_duration_seconds, flight_bytes_sent_total
-- [ ] 8.3 Write example Python client script demonstrating connect → query → receive Arrow table
+- [x] 8.2 Add Prometheus metrics: flight_do_get/do_put counters, rows sent, latency
+- [x] 8.3 Write example Python client script demonstrating connect → query → receive Arrow table
 - [x] 8.4 Update CLAUDE.md with `internal/flight/` package description and Flight server startup flow

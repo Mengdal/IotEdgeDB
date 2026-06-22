@@ -105,6 +105,34 @@ func (c *Client) Query(ctx context.Context, sql string) (array.RecordReader, err
 	return reader, nil
 }
 
+// ListMeasurements returns available measurements via ListFlights.
+// Returns a simplified list of MeasurementInfo; full schema requires GetFlightInfo per measurement.
+func (c *Client) ListMeasurements(ctx context.Context) ([]MeasurementInfo, error) {
+	stream, err := c.client.ListFlights(ctx, &flight.Criteria{})
+	if err != nil {
+		return nil, fmt.Errorf("list flights: %w", err)
+	}
+
+	var results []MeasurementInfo
+	for {
+		info, err := stream.Recv()
+		if err != nil {
+			break // end of stream
+		}
+		// Parse the FlightInfo for measurement metadata
+		mi := MeasurementInfo{}
+		if info.FlightDescriptor != nil {
+			var fd FlightDescriptor
+			if json.Unmarshal(info.FlightDescriptor.Cmd, &fd) == nil {
+				mi.Database = fd.Database
+				mi.Measurement = fd.Measurement
+			}
+		}
+		results = append(results, mi)
+	}
+	return results, nil
+}
+
 // Close releases the underlying gRPC connection.
 func (c *Client) Close() error {
 	return c.conn.Close()

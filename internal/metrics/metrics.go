@@ -90,6 +90,18 @@ type Metrics struct {
 	// Auth metrics
 	authRequestsTotal atomic.Int64
 	authCacheHits     atomic.Int64
+
+	// Flight metrics
+	flightDoGetTotal   atomic.Int64
+	flightDoGetSuccess atomic.Int64
+	flightDoGetErrors  atomic.Int64
+	flightDoGetLatencySum atomic.Int64 // microseconds
+	flightDoGetLatencyCnt atomic.Int64
+	flightRowsSent     atomic.Int64
+
+	flightDoPutTotal   atomic.Int64
+	flightDoPutSuccess atomic.Int64
+	flightDoPutErrors  atomic.Int64
 	authCacheMisses   atomic.Int64
 	authFailuresTotal atomic.Int64
 
@@ -293,6 +305,20 @@ func (m *Metrics) IncCompactionManifestsRecovered(count int64) {
 // Auth Metrics
 func (m *Metrics) IncAuthRequests()  { m.authRequestsTotal.Add(1) }
 func (m *Metrics) IncAuthCacheHit()  { m.authCacheHits.Add(1) }
+
+// Flight DoGet metrics
+func (m *Metrics) RecordFlightDoGet(rows int64, latencyUs int64) {
+	m.flightDoGetTotal.Add(1)
+	m.flightDoGetSuccess.Add(1)
+	m.flightRowsSent.Add(rows)
+	m.flightDoGetLatencySum.Add(latencyUs)
+	m.flightDoGetLatencyCnt.Add(1)
+}
+func (m *Metrics) RecordFlightDoGetError() { m.flightDoGetTotal.Add(1); m.flightDoGetErrors.Add(1) }
+
+// Flight DoPut metrics
+func (m *Metrics) RecordFlightDoPut()  { m.flightDoPutTotal.Add(1); m.flightDoPutSuccess.Add(1) }
+func (m *Metrics) RecordFlightDoPutError() { m.flightDoPutTotal.Add(1); m.flightDoPutErrors.Add(1) }
 func (m *Metrics) IncAuthCacheMiss() { m.authCacheMisses.Add(1) }
 func (m *Metrics) IncAuthFailures()  { m.authFailuresTotal.Add(1) }
 
@@ -436,6 +462,13 @@ func (m *Metrics) Snapshot() map[string]interface{} {
 		// Auth
 		"auth_requests_total": m.authRequestsTotal.Load(),
 		"auth_cache_hits":     m.authCacheHits.Load(),
+		"flight_do_get_total":   m.flightDoGetTotal.Load(),
+		"flight_do_get_success": m.flightDoGetSuccess.Load(),
+		"flight_do_get_errors":  m.flightDoGetErrors.Load(),
+		"flight_rows_sent":      m.flightRowsSent.Load(),
+		"flight_do_put_total":   m.flightDoPutTotal.Load(),
+		"flight_do_put_success": m.flightDoPutSuccess.Load(),
+		"flight_do_put_errors":  m.flightDoPutErrors.Load(),
 		"auth_cache_misses":   m.authCacheMisses.Load(),
 		"auth_failures_total": m.authFailuresTotal.Load(),
 
@@ -686,6 +719,20 @@ func (m *Metrics) PrometheusFormat() string {
 	b = append(b, "# HELP iedb_auth_cache_hits_total Auth cache hits\n"...)
 	b = append(b, "# TYPE iedb_auth_cache_hits_total counter\n"...)
 	b = appendMetric(b, "iedb_auth_cache_hits_total", float64(m.authCacheHits.Load()))
+
+	// Flight metrics
+	b = append(b, "# HELP iedb_flight_do_get_total Total Flight DoGet requests\n"...)
+	b = append(b, "# TYPE iedb_flight_do_get_total counter\n"...)
+	b = appendMetric(b, "iedb_flight_do_get_total", float64(m.flightDoGetTotal.Load()))
+	b = append(b, "# HELP iedb_flight_do_get_errors_total Flight DoGet errors\n"...)
+	b = append(b, "# TYPE iedb_flight_do_get_errors_total counter\n"...)
+	b = appendMetric(b, "iedb_flight_do_get_errors_total", float64(m.flightDoGetErrors.Load()))
+	b = append(b, "# HELP iedb_flight_rows_sent_total Total rows sent via Flight\n"...)
+	b = append(b, "# TYPE iedb_flight_rows_sent_total counter\n"...)
+	b = appendMetric(b, "iedb_flight_rows_sent_total", float64(m.flightRowsSent.Load()))
+	b = append(b, "# HELP iedb_flight_do_put_total Total Flight DoPut requests\n"...)
+	b = append(b, "# TYPE iedb_flight_do_put_total counter\n"...)
+	b = appendMetric(b, "iedb_flight_do_put_total", float64(m.flightDoPutTotal.Load()))
 
 	b = append(b, "# HELP iedb_auth_cache_misses_total Auth cache misses\n"...)
 	b = append(b, "# TYPE iedb_auth_cache_misses_total counter\n"...)

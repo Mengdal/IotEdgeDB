@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"iedb/internal/metrics"
+
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -48,9 +50,15 @@ func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescripto
 
 	s.logger.Debug().Str("sql", fd.SQL).Msg("GetFlightInfo OK")
 
+	// Normalize decimal schema for the Flight descriptor
+	flightSchema := schema
+	if ci := normalizeDecimalSchema(schema); ci != nil {
+		flightSchema = ci.schema
+	}
+
 	return &flight.FlightInfo{
 		FlightDescriptor: desc,
-		Schema:           SerializeSchema(schema),
+		Schema:           SerializeSchema(flightSchema),
 		Endpoint: []*flight.FlightEndpoint{{
 			Ticket: &flight.Ticket{Ticket: ticketBytes},
 		}},
@@ -90,15 +98,35 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 	defer reader.Release()
 	defer conn.Close() //nolint:errcheck
 
-	// 4. Stream results
+	// 4. Stream results with decimal normalization
+	// DuckDB may return Decimal128 columns (e.g., from SUM/AVG). Convert them to
+	// int64 (scale=0) or float64 (scale>0) for better Flight client compatibility.
+	var castInfo *decimalCastInfo
 	wr := flight.NewRecordWriter(stream)
 	defer wr.Close()
 
 	var rowCount int64
 	for reader.Next() {
 		record := reader.RecordBatch()
-		rowCount += record.NumRows()
-		if err := wr.Write(record); err != nil {
+
+		// Lazily check schema for decimal columns on the first batch
+		if castInfo == nil {
+			castInfo = normalizeDecimalSchema(record.Schema())
+		}
+
+		// Cast decimal columns if needed
+		writeRecord := record
+		if castInfo != nil {
+			casted, err := castDecimalBatch(record, castInfo)
+			if err != nil {
+				return status.Errorf(codes.Internal, "decimal cast: %v", err)
+			}
+			writeRecord = casted
+			defer writeRecord.Release()
+		}
+
+		rowCount += writeRecord.NumRows()
+		if err := wr.Write(writeRecord); err != nil {
 			return status.Errorf(codes.Internal, "write record batch: %v", err)
 		}
 	}
@@ -108,12 +136,14 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 		return status.Errorf(codes.Internal, "record reader error: %v", err)
 	}
 
+	duration := time.Since(startTime)
 	s.logger.Info().
 		Str("sql", qt.SQL).
 		Int64("rows", rowCount).
-		Dur("duration", time.Since(startTime)).
+		Dur("duration", duration).
 		Msg("DoGet complete")
 
+	metrics.Get().RecordFlightDoGet(rowCount, duration.Microseconds())
 	return nil
 }
 
