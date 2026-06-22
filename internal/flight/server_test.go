@@ -261,7 +261,7 @@ func TestFlightServer_DoGet_ReturnsRecordBatch(t *testing.T) {
 		t.Fatal("expected at least one record batch")
 	}
 
-	record := reader.Record()
+	record := reader.RecordBatch()
 	if record.NumRows() != 1 {
 		t.Fatalf("expected 1 row, got %d", record.NumRows())
 	}
@@ -310,7 +310,7 @@ func TestFlightServer_DoGet_MultipleRows(t *testing.T) {
 
 	totalRows := int64(0)
 	for reader.Next() {
-		totalRows += reader.Record().NumRows()
+		totalRows += reader.RecordBatch().NumRows()
 	}
 
 	if totalRows != 10 {
@@ -413,7 +413,7 @@ func TestClient_Query_ReturnsRecordReader(t *testing.T) {
 	defer cancel()
 
 	// Use our custom Client wrapper
-	client := &Client{client: env.client}
+	client := NewClientFromFlightClient(env.client)
 
 	reader, err := client.Query(ctx, "SELECT 42 AS answer")
 	if err != nil {
@@ -425,7 +425,7 @@ func TestClient_Query_ReturnsRecordReader(t *testing.T) {
 		t.Fatal("expected at least one record batch")
 	}
 
-	record := reader.Record()
+	record := reader.RecordBatch()
 	if record.NumRows() != 1 {
 		t.Fatalf("expected 1 row, got %d", record.NumRows())
 	}
@@ -443,7 +443,7 @@ func TestClient_Query_MultipleBatches(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client := &Client{client: env.client}
+	client := NewClientFromFlightClient(env.client)
 
 	reader, err := client.Query(ctx, "SELECT unnest(generate_series(1, 100)) AS n")
 	if err != nil {
@@ -453,7 +453,7 @@ func TestClient_Query_MultipleBatches(t *testing.T) {
 
 	totalRows := int64(0)
 	for reader.Next() {
-		totalRows += reader.Record().NumRows()
+		totalRows += reader.RecordBatch().NumRows()
 	}
 
 	if totalRows != 100 {
@@ -467,7 +467,7 @@ func TestClient_Query_ErrorOnInvalidSQL(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client := &Client{client: env.client}
+	client := NewClientFromFlightClient(env.client)
 
 	_, err := client.Query(ctx, "BOGUS SQL STATEMENT")
 	if err == nil {
@@ -487,17 +487,15 @@ func TestClient_Close(t *testing.T) {
 	// Note: NewClient requires grpc.NewClient which won't work with pipe.
 	// The Client struct's Query method uses c.client (flight.Client)
 	// so testing via direct assignment covers the actual query path.
-	client := &Client{client: env.client}
+	client := NewClientFromFlightClient(env.client)
 
 	_, err := client.Query(ctx, "SELECT 1")
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 
-	// Close is safe — conn is nil, so it's a no-op in this test context.
-	if client.conn != nil {
-		_ = client.Close()
-	}
+	// Close is nil-safe — no-op when conn is nil
+	_ = client.Close()
 }
 
 // --- DoPut tests ---
@@ -534,38 +532,22 @@ func makeTestRecordBatch(t testing.TB, numRows int) arrow.Record {
 	return b.NewRecord()
 }
 
-func TestDoPut_WriteArrowRecordThenQuery(t *testing.T) {
+// TestWriteArrowRecord_Smoke verifies WriteArrowRecord handles a 10-row batch without crash.
+// Data goes to in-memory testStorage; end-to-end query verification is in TestWriteArrowRecord_ParityWithColumnar.
+func TestWriteArrowRecord_Smoke(t *testing.T) {
 	env := setupFlightTest(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// 1. Build a test RecordBatch
 	record := makeTestRecordBatch(t, 10)
 	defer record.Release()
 
-	// 2. Write via WriteArrowRecord (the core method DoPut calls)
 	err := env.buf.WriteArrowRecord(ctx, "test", "test_m", record)
 	if err != nil {
 		t.Fatalf("WriteArrowRecord: %v", err)
 	}
 
-	// 3. Verify the data is queryable
-	reader, conn, err := env.db.ArrowQueryContext(ctx, "SELECT int_val, float_val, str_val, bool_val FROM read_parquet('test/test_m/**/*.parquet', union_by_name=true) ORDER BY int_val")
-	if err != nil {
-		// Data may not have flushed yet — that's OK, test passes if no crash
-		t.Logf("query after write (data may not be flushed yet): %v", err)
-		return
-	}
-	defer reader.Release()
-	defer conn.Close()
-
-	if !reader.Next() {
-		t.Log("no RecordBatches yet — data may still be in buffer")
-		return
-	}
-
-	result := reader.Record()
-	t.Logf("WriteArrowRecord round-trip: wrote 10 rows, queried back %d rows", result.NumRows())
+	t.Logf("WriteArrowRecord smoke test: 10 rows written to buffer without crash")
 }
 
 func TestWriteArrowRecord_AllTypes(t *testing.T) {
@@ -730,7 +712,7 @@ func TestMergedReader_SingleReader(t *testing.T) {
 // queryReader executes a Flight query and returns the RecordReader.
 func queryReader(ctx context.Context, env *integrationTestEnv, sql string) (array.RecordReader, error) {
 	// Use our Client wrapper to query
-	client := &Client{client: env.client}
+	client := NewClientFromFlightClient(env.client)
 	return client.Query(ctx, sql)
 }
 

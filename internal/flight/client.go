@@ -140,8 +140,18 @@ func (c *Client) ListMeasurements(ctx context.Context) ([]MeasurementInfo, error
 
 // Close releases the underlying gRPC connection.
 func (c *Client) Close() error {
-	return c.conn.Close()
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
 }
+
+// NewClientFromFlightClient creates a Client from an existing flight.Client connection.
+// Used in tests where the gRPC connection is managed separately.
+func NewClientFromFlightClient(fc flight.Client) *Client {
+	return &Client{client: fc}
+}
+
 
 func mustMarshal(v interface{}) []byte {
 	data, err := json.Marshal(v)
