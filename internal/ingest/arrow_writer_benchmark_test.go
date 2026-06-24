@@ -26,7 +26,6 @@ func BenchmarkBufferEntry_SingleLookup(b *testing.B) {
 		recordCount:    5000,
 		estimatedBytes: 500000,
 		schema:         "time:i64,value:f64",
-		refreshIndex:   3,
 	}
 
 	b.ResetTimer()
@@ -351,7 +350,7 @@ func formatShardName(n int) string {
 }
 
 // ---------------------------------------------------------------------------
-// Benchmark: lock contention between write and read (SinceRefresh)
+// Benchmark: lock contention between write and read (SnapshotEntry)
 // ---------------------------------------------------------------------------
 
 func BenchmarkIngest_ConcurrentWriteAndRead(b *testing.B) {
@@ -382,7 +381,7 @@ func BenchmarkIngest_ConcurrentWriteAndRead(b *testing.B) {
 			if id%2 == 0 {
 				buf.WriteColumnarDirect(ctx, "db", "cpu", makeBenchRecords(50))
 			} else {
-				buf.SinceRefresh("db/cpu")
+				buf.SnapshotEntry("db/cpu")
 				buf.TotalBufferedBytes()
 			}
 			id++

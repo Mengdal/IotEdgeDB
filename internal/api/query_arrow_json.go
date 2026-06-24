@@ -68,7 +68,6 @@ func executeArrowJSONQuery(
 		sqlConn, err = h.db.DB().Conn(ctx)
 		if err == nil {
 			if profileMode {
-				// Profile mode with views: register views, enable profiling, then query.
 				reader, viewRelease, arrowProfile, err = arrowQueryWithViewsProfiled(ctx, sqlConn, convertedSQL, pendingViews)
 				if arrowProfile != nil {
 					profile = arrowProfile
@@ -79,17 +78,20 @@ func executeArrowJSONQuery(
 			conn = sqlConn
 		}
 
-		if err == nil && reader != nil {
-			// Wrap conn so Close() releases registered views and Arrow memory.
-			conn = &viewReleaseConn{Conn: conn.(interface{ Close() error }), viewRelease: viewRelease}
-		} else {
-			// Error path -- clean up.
+		if err != nil {
+			// Error: clean up connection-scoped resources immediately so there
+			// are no stranded Arrow views or leaked connections regardless
+			// of which code paths run between here and the common handler below.
 			if viewRelease != nil {
 				viewRelease()
 			}
 			if sqlConn != nil {
 				sqlConn.Close()
 			}
+		} else {
+			// Success: wrap conn so Close() releases registered views and
+			// their Arrow record batches via sync.Once.
+			conn = &viewReleaseConn{Conn: conn.(interface{ Close() error }), viewRelease: viewRelease}
 		}
 	} else {
 		// No pending views -- use the standard Arrow query path.

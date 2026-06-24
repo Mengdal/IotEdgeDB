@@ -15,7 +15,6 @@ import (
 	"iedb/internal/database"
 	"iedb/internal/ingest"
 
-	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	duckdb "github.com/duckdb/duckdb-go/v2"
 )
@@ -144,34 +143,6 @@ func arrowQueryWithViews(ctx context.Context, conn *sql.Conn, query string, view
 
 	return reader, viewRelease, nil
 }
-
-// viewEntriesToRecordBatch converts a *ingest.Entry to an Arrow RecordBatch.
-// Only callable from duckdb_arrow build context.
-func viewEntriesToRecordBatch(views map[string]any) (map[string]arrow.RecordBatch, error) {
-	result := make(map[string]arrow.RecordBatch, len(views))
-	for viewName, val := range views {
-		entry, ok := val.(*ingest.Entry)
-		if !ok || entry == nil {
-			continue
-		}
-		schema := entry.GetArrowSchema()
-		if schema == nil {
-			continue
-		}
-		rec, err := database.BuildArrowRecordBatch(entry, schema)
-		if err != nil {
-			// Clean up any already-converted batches.
-			for _, r := range result {
-				r.Release()
-			}
-			return nil, fmt.Errorf("failed to build RecordBatch for view %q: %w", viewName, err)
-		}
-		result[viewName] = rec
-	}
-	return result, nil
-}
-
-
 // arrowQueryWithViewsProfiled executes an Arrow query with pending buffer VIEWs
 // registered, with DuckDB profiling enabled. Returns the reader, view release
 // function, profile, and error.

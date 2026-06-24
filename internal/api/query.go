@@ -1375,11 +1375,22 @@ localProcessing:
 	if cached {
 		h.ensurePendingViews(convertedSQL, req.SQL, headerDB)
 	}
+
+	// Snapshot pendingViews under lock (shallow copy) so it is safe to
+	// read outside the lock.  A second request's wrapWithBufferView could
+	// mutate h.pendingViews concurrently — the copy isolates this request.
+	var pendingViews map[string]any
+	if len(h.pendingViews) > 0 {
+		pendingViews = make(map[string]any, len(h.pendingViews))
+		for k, v := range h.pendingViews {
+			pendingViews[k] = v
+		}
+	}
 	h.pendingMu.Unlock()
 
 	// Store pending views on Fiber context for use by executeArrowJSONQuery.
-	if len(h.pendingViews) > 0 {
-		c.Locals("pendingViews", h.pendingViews)
+	if len(pendingViews) > 0 {
+		c.Locals("pendingViews", pendingViews)
 	}
 
 	if h.debugEnabled {
@@ -1662,8 +1673,12 @@ localProcessing:
 
 		// Check for pending buffer VIEWs. If present, use a connection-aware
 		// path that registers VIEWs on a pinned connection before executing.
-		// Note: profile mode + views in the database/sql fallback is a
-		// rare edge case; we use the same path and skip profile collection.
+		// Note: Profile mode is unavailable here because DuckDB profiling
+		// PRAGMAs are connection-scoped and the view-registration path does
+		// not inject profiling PRAGMAs. This is an acceptable trade-off:
+		// the Arrow-native path (executeArrowJSONQuery) handles profiling
+		// with views via arrowQueryWithViewsProfiled, and the database/sql
+		// fallback with views is a rare edge case (driver-level issue only).
 		if pendingViewsRaw, ok := c.Locals("pendingViews").(map[string]any); ok && len(pendingViewsRaw) > 0 && queryWithViewsFunc != nil {
 			rows, profileConn, viewRelease, err = queryWithViewsFunc(h, ctx, convertedSQL, pendingViewsRaw)
 		} else {
@@ -3133,9 +3148,17 @@ func (h *QueryHandler) estimateQuery(c *fiber.Ctx) error {
 		})
 	}
 
-	// Convert SQL to storage paths (with caching)
+	// Convert SQL to storage paths (with caching), snapshotting any buffer
+	// VIEW references so they can be registered on the query connection.
+	var pendingViews map[string]any
 	h.pendingMu.Lock()
 	convertedSQL, _ := h.getTransformedSQL(req.SQL, headerDB)
+	if len(h.pendingViews) > 0 {
+		pendingViews = make(map[string]any, len(h.pendingViews))
+		for k, v := range h.pendingViews {
+			pendingViews[k] = v
+		}
+	}
 	h.pendingMu.Unlock()
 
 	// Create a COUNT(*) version of the query
@@ -3156,8 +3179,17 @@ func (h *QueryHandler) estimateQuery(c *fiber.Ctx) error {
 		defer cancel()
 	}
 
-	// Execute count query with timeout support
-	rows, err := h.db.QueryContext(ctx, countSQL)
+	// Execute count query with timeout support — uses view-registered
+	// connection when buffer VIEWs were snapshotted during SQL conversion.
+	var rows *sql.Rows
+	var viewsConn *sql.Conn
+	var viewRelease func()
+	var err error
+	if len(pendingViews) > 0 && queryWithViewsFunc != nil {
+		rows, viewsConn, viewRelease, err = queryWithViewsFunc(h, ctx, countSQL, pendingViews)
+	} else {
+		rows, err = h.db.QueryContext(ctx, countSQL)
+	}
 	if err != nil {
 		// Check if it was a timeout
 		if h.queryTimeout > 0 && ctx.Err() == context.DeadlineExceeded {
@@ -3177,6 +3209,12 @@ func (h *QueryHandler) estimateQuery(c *fiber.Ctx) error {
 			WarningLevel:    "error",
 			ExecutionTimeMs: float64(time.Since(start).Milliseconds()),
 		})
+	}
+	if viewsConn != nil {
+		defer viewsConn.Close()
+	}
+	if viewRelease != nil {
+		defer viewRelease()
 	}
 	defer rows.Close()
 
@@ -3459,19 +3497,30 @@ func (h *QueryHandler) queryMeasurement(c *fiber.Ctx) error {
 	}
 
 	// Build SQL query with validated parameters
-	sql := fmt.Sprintf("SELECT * FROM %s.%s", database, measurement)
+	querySQL := fmt.Sprintf("SELECT * FROM %s.%s", database, measurement)
 	if where != "" {
-		sql += " WHERE " + where
+		querySQL += " WHERE " + where
 	}
-	sql += " ORDER BY " + orderBy
-	sql += fmt.Sprintf(" LIMIT %d", limit)
-	sql += fmt.Sprintf(" OFFSET %d", offset)
+	querySQL += " ORDER BY " + orderBy
+	querySQL += fmt.Sprintf(" LIMIT %d", limit)
+	querySQL += fmt.Sprintf(" OFFSET %d", offset)
 
 	// Convert SQL to storage paths (with caching)
 	// Note: This endpoint builds its own db.measurement SQL, so no header optimization
+	var pendingViews map[string]any
 	h.pendingMu.Lock()
-	convertedSQL, _ := h.getTransformedSQL(sql, "")
+	convertedSQL, _ := h.getTransformedSQL(querySQL, "")
+	if len(h.pendingViews) > 0 {
+		pendingViews = make(map[string]any, len(h.pendingViews))
+		for k, v := range h.pendingViews {
+			pendingViews[k] = v
+		}
+	}
 	h.pendingMu.Unlock()
+
+	if len(pendingViews) > 0 {
+		c.Locals("pendingViews", pendingViews)
+	}
 
 	h.logger.Debug().
 		Str("measurement", measurement).
@@ -3491,11 +3540,20 @@ func (h *QueryHandler) queryMeasurement(c *fiber.Ctx) error {
 		}
 	}
 
-	// Fallback: database/sql path
-	rows, err := h.db.Query(convertedSQL)
+	// Fallback: database/sql path — uses view-registered connection when
+	// buffer VIEWs were snapshotted during SQL conversion.
+	ctx := context.Background()
+	var rows *sql.Rows
+	var viewsConn *sql.Conn
+	var viewRelease func()
+	if len(pendingViews) > 0 && queryWithViewsFunc != nil {
+		rows, viewsConn, viewRelease, err = queryWithViewsFunc(h, ctx, convertedSQL, pendingViews)
+	} else {
+		rows, err = h.db.Query(convertedSQL)
+	}
 	if err != nil {
 		m.IncQueryErrors()
-		h.logger.Error().Err(err).Str("sql", sql).Msg("Measurement query failed")
+		h.logger.Error().Err(err).Str("sql", convertedSQL).Msg("Measurement query failed")
 		return c.Status(fiber.StatusInternalServerError).JSON(QueryResponse{
 			Success:         false,
 			Error:           err.Error(),
@@ -3508,6 +3566,12 @@ func (h *QueryHandler) queryMeasurement(c *fiber.Ctx) error {
 	columns, err := rows.Columns()
 	if err != nil {
 		rows.Close()
+		if viewsConn != nil {
+			viewsConn.Close()
+		}
+		if viewRelease != nil {
+			viewRelease()
+		}
 		m.IncQueryErrors()
 		h.logger.Error().Err(err).Msg("Failed to get column names in measurement query")
 		return c.Status(fiber.StatusInternalServerError).JSON(QueryResponse{
@@ -3542,7 +3606,12 @@ func (h *QueryHandler) queryMeasurement(c *fiber.Ctx) error {
 		w.Flush()
 
 		rows.Close()
-
+		if viewsConn != nil {
+			viewsConn.Close()
+		}
+		if viewRelease != nil {
+			viewRelease()
+		}
 		if streamErr != nil {
 			m.IncQueryErrors()
 			h.logger.Error().Err(streamErr).

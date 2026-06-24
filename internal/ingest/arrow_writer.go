@@ -481,10 +481,6 @@ func (w *ArrowWriter) writeRecordToParquet(schema *arrow.Schema, arrays []arrow.
 // bufferShard represents a single shard of the buffer map with its own lock
 
 // bufferEntry holds all buffered data and metadata for a single measurement key.
-// It replaces the former TypedColumnBatch — all operations that previously
-// created or consumed TypedColumnBatch now use bufferEntry directly.
-// In snapshot scenarios (sort intermediates, VIEW returns), startTime,
-// estimatedBytes, and refreshIndex are zero-value dead fields.
 type bufferEntry struct {
 	columns        map[string]ColumnData // growing typed column arrays with null bitmaps
 	tagColumns     []string              // tag column names (stable for this schema, set on first write)
@@ -493,7 +489,6 @@ type bufferEntry struct {
 	estimatedBytes uint64                // estimated memory usage
 	schema         string                // column signature for schema evolution
 	arrowSchema    *arrow.Schema         // inferred Arrow schema (nil until first flush preparation)
-	refreshIndex   int                   // Arrow VIEW incremental refresh cursor
 }
 
 // Entry is the exported alias for bufferEntry. External consumers
@@ -2190,7 +2185,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		entry.startTime = time.Now().UTC()
 		entry.recordCount = 0
 		entry.estimatedBytes = 0
-		entry.refreshIndex = 0
 	}
 
 	// Single-pass: convert []interface{} -> typed slices + append to entry
@@ -2319,7 +2313,6 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		entry.startTime = time.Now().UTC()
 		entry.recordCount = 0
 		entry.estimatedBytes = 0
-		entry.refreshIndex = 0
 	}
 	if entry.arrowSchema == nil && len(src.columns) > 0 {
 		tagCols := src.tagColumns
@@ -2694,7 +2687,9 @@ func (b *ArrowBuffer) estimateTotalBufferBytes() uint64 {
 	return total
 }
 
-// AllBufferKeys returns all buffer keys across all shards.
+// AllBufferKeys returns all buffer keys across all shards, excluding empty entries.
+// Used by diagnostic endpoints and query-time VIEW construction to discover which
+// measurements have buffered in-memory data not yet flushed to Parquet storage.
 func (b *ArrowBuffer) AllBufferKeys() []string {
 	var keys []string
 	for i := uint32(0); i < b.shardCount; i++ {
@@ -3627,37 +3622,6 @@ func (b *ArrowBuffer) GetStats() map[string]interface{} {
 		"flush_queue_depth":      b.queueDepth.Load(),
 		"flush_workers":          b.flushWorkers,
 	}
-}
-
-func (b *ArrowBuffer) SinceRefresh(bufferKey string) ([]*Entry, error) {
-	shard := b.getShard(bufferKey)
-	shard.mu.RLock()
-	entry, ok := shard.buffers[bufferKey]
-	if ok && !entry.isEmpty() && entry.refreshIndex < entry.recordCount {
-		subColumns := make(map[string]ColumnData, len(entry.columns))
-		for name, col := range entry.columns {
-			subColumns[name] = colSliceFrom(col, entry.refreshIndex)
-		}
-		shard.mu.RUnlock()
-		return []*Entry{{
-			columns:     subColumns,
-			tagColumns:  entry.tagColumns,
-			schema:      entry.schema,
-			recordCount: entry.recordCount - entry.refreshIndex,
-		}}, nil
-	}
-	shard.mu.RUnlock()
-	return nil, nil
-}
-
-// MarkRefreshed 更新指定 bufferKey 的刷新游标。
-func (b *ArrowBuffer) MarkRefreshed(bufferKey string) {
-	shard := b.getShard(bufferKey)
-	shard.mu.Lock()
-	if entry, ok := shard.buffers[bufferKey]; ok {
-		entry.refreshIndex = entry.recordCount
-	}
-	shard.mu.Unlock()
 }
 
 // TotalBufferedRecords 返回指定 bufferKey 的总缓冲记录数。
