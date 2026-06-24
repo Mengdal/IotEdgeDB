@@ -2248,14 +2248,16 @@ func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement str
 	innerExpr := strings.TrimPrefix(expr, keyword+" ")
 	var b strings.Builder
 	b.WriteString(keyword)
-	b.WriteString(" (SELECT * FROM (")
+	// Single SELECT wrapping: (SELECT * FROM read_parquet(...) UNION ALL SELECT * FROM "view") _iedb_buf
+	// DuckDB rejects (read_parquet(...)) — table functions cannot be wrapped in bare parentheses.
+	// The alias _iedb_buf is required for DuckDB to accept the UNION ALL as a derived table.
+	b.WriteString(" (SELECT * FROM ")
 	b.WriteString(innerExpr)
-	b.WriteByte(')')
 	for _, k := range keys {
 		b.WriteString(" UNION ALL SELECT * FROM ")
 		b.WriteString(database.QuoteIdent(database.ViewName(k)))
 	}
-	b.WriteByte(')')
+	b.WriteString(") _iedb_buf")
 	return b.String()
 }
 
