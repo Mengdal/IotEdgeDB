@@ -12,6 +12,14 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// benchBufferHardLimit is a safety net preventing unbounded buffer growth
+// during benchmarks.  It is set high enough that a normal short-duration
+// benchmark run never hits it (normal peak per-benchmark is ~15 MB),
+// and low enough to stay well below the OOM threshold even on 256 MB systems.
+// On an ARM system with 500 MB this leaves ~370 MB for the OS, Go runtime,
+// and DuckDB — comfortable headroom.
+const benchBufferHardLimit = 128 << 20 // 128 MB
+
 // ---------------------------------------------------------------------------
 // Benchmark: bufferEntry access vs separate maps (the structural win)
 // ---------------------------------------------------------------------------
@@ -101,7 +109,7 @@ func BenchmarkBufferEntry_WriteFlushCycle(b *testing.B) {
 		// Flush phase: extract + wrap (replace mergeBatches)
 		_ = &bufferEntry{
 			columns:    entry.columns,
-						tagColumns: entry.tagColumns,
+			tagColumns: entry.tagColumns,
 		}
 		b.StopTimer()
 	}
@@ -258,6 +266,7 @@ func BenchmarkIngest_WriteBuffer(b *testing.B) {
 			FlushWorkers:   4,
 			FlushQueueSize: 256,
 		}, storage, logger)
+		buf.SetBufferHardLimit(benchBufferHardLimit)
 		defer buf.Close()
 
 		ctx := context.Background()
@@ -278,6 +287,7 @@ func BenchmarkIngest_WriteBuffer(b *testing.B) {
 			FlushWorkers:   4,
 			FlushQueueSize: 256,
 		}, storage, logger)
+		buf.SetBufferHardLimit(benchBufferHardLimit)
 		defer buf.Close()
 
 		ctx := context.Background()
@@ -310,6 +320,7 @@ func BenchmarkIngest_ConcurrentWrites(b *testing.B) {
 				FlushWorkers:   shards / 2,
 				FlushQueueSize: 256,
 			}, storage, logger)
+			buf.SetBufferHardLimit(benchBufferHardLimit)
 			defer buf.Close()
 
 			ctx := context.Background()
@@ -365,6 +376,7 @@ func BenchmarkIngest_ConcurrentWriteAndRead(b *testing.B) {
 		FlushWorkers:   4,
 		FlushQueueSize: 256,
 	}, storage, logger)
+	buf.SetBufferHardLimit(benchBufferHardLimit)
 	defer buf.Close()
 
 	ctx := context.Background()

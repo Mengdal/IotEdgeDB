@@ -43,6 +43,29 @@ const (
 // Using a shared instance avoids allocator overhead per-write operation.
 var sharedArrowAllocator = memory.NewGoAllocator()
 
+// sortIndicesPool reuses permutation index slices across sort operations.
+// Sorting allocates []int of size N for permutation indices; reusing them
+// avoids repeated allocation when flush batches are consistently sized.
+var sortIndicesPool = sync.Pool{
+	New: func() any { return make([]int, 0, 10000) },
+}
+
+func getSortIndices(n int) []int {
+	if v := sortIndicesPool.Get(); v != nil {
+		s := v.([]int)
+		if cap(s) >= n {
+			return s[:n]
+		}
+	}
+	return make([]int, n)
+}
+
+func putSortIndices(s []int) {
+	if s != nil && cap(s) > 0 {
+		sortIndicesPool.Put(s)
+	}
+}
+
 // int64SliceToTimestamps reinterprets a []int64 as []arrow.Timestamp without copying.
 // Safe because arrow.Timestamp is defined as `type Timestamp int64` (identical layout).
 // LIFETIME: the caller must ensure src is not GC'd or reallocated while the returned
@@ -50,6 +73,34 @@ var sharedArrowAllocator = memory.NewGoAllocator()
 // same stack frame as src.
 func int64SliceToTimestamps(src []int64) []arrow.Timestamp {
 	return *(*[]arrow.Timestamp)(unsafe.Pointer(&src))
+}
+
+// buildValidityBitmap converts a []bool validity slice to an Arrow bitmap buffer.
+// Returns (nil, 0) when all values are valid (no nulls), which is the Arrow convention
+// for "all valid" and avoids an allocation entirely on the common path.
+func buildValidityBitmap(valid []bool) (*memory.Buffer, int) {
+	if len(valid) == 0 {
+		return nil, 0
+	}
+	// Fast scan: count nulls. Most time-series data has zero nulls.
+	nullCount := 0
+	for _, v := range valid {
+		if !v {
+			nullCount++
+		}
+	}
+	if nullCount == 0 {
+		return nil, 0
+	}
+	// Build Arrow bitmap: 1 bit per value, LSB-first within each byte.
+	bitmapSize := (len(valid) + 7) / 8
+	bitmap := make([]byte, bitmapSize)
+	for i, v := range valid {
+		if v {
+			bitmap[i/8] |= 1 << (i % 8)
+		}
+	}
+	return memory.NewBufferBytes(bitmap), nullCount
 }
 
 // getFlushMessageType returns the human-readable flush type message for logging
@@ -364,7 +415,10 @@ func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement stri
 		}
 	}()
 
-	// Build arrays
+	// Build arrays — numeric types bypass the builder to avoid an extra
+	// data copy inside AppendValues.  Zero-copy buffers (NewBufferBytes)
+	// reference the sorted column slices directly; lifetime is safe because
+	// entry.columns outlives every array and record created in this function.
 	for i, field := range schema.Fields() {
 		cd, ok := entry.columns[field.Name]
 		if !ok {
@@ -375,37 +429,62 @@ func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement stri
 
 		switch field.Type.ID() {
 		case arrow.INT64:
-			builder := array.NewInt64Builder(mem)
-			builders[i] = builder
-			if intCol, ok := col.([]int64); ok {
-				builder.AppendValues(intCol, colValidity)
-			} else {
+			intCol, ok := col.([]int64)
+			if !ok {
 				return nil, fmt.Errorf("column %s: expected []int64, got %T", field.Name, col)
 			}
-			arrays[i] = builder.NewArray()
+			if len(intCol) == 0 {
+				builder := array.NewInt64Builder(mem)
+				builders[i] = builder
+				arrays[i] = builder.NewArray()
+				continue
+			}
+			validBuf, nulls := buildValidityBitmap(colValidity)
+			dataBuf := memory.NewBufferBytes(
+				unsafe.Slice((*byte)(unsafe.Pointer(&intCol[0])), len(intCol)*8))
+			arrData := array.NewData(arrow.PrimitiveTypes.Int64, len(intCol),
+				[]*memory.Buffer{validBuf, dataBuf}, nil, nulls, 0)
+			arrays[i] = array.NewInt64Data(arrData)
+			arrData.Release()
 
 		case arrow.TIMESTAMP:
-			builder := array.NewTimestampBuilder(mem, arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType))
-			builders[i] = builder
-			if intCol, ok := col.([]int64); ok {
-				// MEMORY FIX: Zero-copy conversion from []int64 to []arrow.Timestamp
-				// This avoids allocating a temporary slice on every write
-				tsValues := int64SliceToTimestamps(intCol)
-				builder.AppendValues(tsValues, colValidity)
-			} else {
+			intCol, ok := col.([]int64)
+			if !ok {
 				return nil, fmt.Errorf("column %s: expected []int64 for timestamp, got %T", field.Name, col)
 			}
-			arrays[i] = builder.NewArray()
+			if len(intCol) == 0 {
+				builder := array.NewTimestampBuilder(mem, arrow.FixedWidthTypes.Timestamp_us.(*arrow.TimestampType))
+				builders[i] = builder
+				arrays[i] = builder.NewArray()
+				continue
+			}
+			tsValues := int64SliceToTimestamps(intCol)
+			validBuf, nulls := buildValidityBitmap(colValidity)
+			dataBuf := memory.NewBufferBytes(
+				unsafe.Slice((*byte)(unsafe.Pointer(&tsValues[0])), len(tsValues)*8))
+			arrData := array.NewData(arrow.FixedWidthTypes.Timestamp_us, len(tsValues),
+				[]*memory.Buffer{validBuf, dataBuf}, nil, nulls, 0)
+			arrays[i] = array.NewTimestampData(arrData)
+			arrData.Release()
 
 		case arrow.FLOAT64:
-			builder := array.NewFloat64Builder(mem)
-			builders[i] = builder
-			if floatCol, ok := col.([]float64); ok {
-				builder.AppendValues(floatCol, colValidity)
-			} else {
+			floatCol, ok := col.([]float64)
+			if !ok {
 				return nil, fmt.Errorf("column %s: expected []float64, got %T", field.Name, col)
 			}
-			arrays[i] = builder.NewArray()
+			if len(floatCol) == 0 {
+				builder := array.NewFloat64Builder(mem)
+				builders[i] = builder
+				arrays[i] = builder.NewArray()
+				continue
+			}
+			validBuf, nulls := buildValidityBitmap(colValidity)
+			dataBuf := memory.NewBufferBytes(
+				unsafe.Slice((*byte)(unsafe.Pointer(&floatCol[0])), len(floatCol)*8))
+			arrData := array.NewData(arrow.PrimitiveTypes.Float64, len(floatCol),
+				[]*memory.Buffer{validBuf, dataBuf}, nil, nulls, 0)
+			arrays[i] = array.NewFloat64Data(arrData)
+			arrData.Release()
 
 		case arrow.STRING:
 			builder := array.NewStringBuilder(mem)
@@ -428,15 +507,25 @@ func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement stri
 			arrays[i] = builder.NewArray()
 
 		case arrow.DECIMAL128:
-			dt := field.Type.(*arrow.Decimal128Type)
-			builder := array.NewDecimal128Builder(mem, dt)
-			builders[i] = builder
-			if decCol, ok := col.([]decimal128.Num); ok {
-				builder.AppendValues(decCol, colValidity)
-			} else {
+			decCol, ok := col.([]decimal128.Num)
+			if !ok {
 				return nil, fmt.Errorf("column %s: expected []decimal128.Num, got %T", field.Name, col)
 			}
-			arrays[i] = builder.NewArray()
+			if len(decCol) == 0 {
+				dt := field.Type.(*arrow.Decimal128Type)
+				builder := array.NewDecimal128Builder(mem, dt)
+				builders[i] = builder
+				arrays[i] = builder.NewArray()
+				continue
+			}
+			dt := field.Type.(*arrow.Decimal128Type)
+			validBuf, nulls := buildValidityBitmap(colValidity)
+			dataBuf := memory.NewBufferBytes(
+				unsafe.Slice((*byte)(unsafe.Pointer(&decCol[0])), len(decCol)*16))
+			arrData := array.NewData(dt, len(decCol),
+				[]*memory.Buffer{validBuf, dataBuf}, nil, nulls, 0)
+			arrays[i] = array.NewDecimal128Data(arrData)
+			arrData.Release()
 
 		default:
 			return nil, fmt.Errorf("unsupported Arrow type for column %s: %s", field.Name, field.Type.Name())
@@ -452,8 +541,11 @@ func (w *ArrowWriter) writeRecordToParquet(schema *arrow.Schema, arrays []arrow.
 	record := array.NewRecord(schema, arrays, -1)
 	defer record.Release()
 
-	// Write to Parquet
+	// Write to Parquet with pre-allocated buffer.
+	// Estimate compressed output size to avoid reallocation growth.
+	// Conservative heuristic: numRows × numCols × 12 bytes per compressed value.
 	var buf bytes.Buffer
+	buf.Grow(int(record.NumRows()) * int(record.NumCols()) * 12)
 
 	// Use pre-built writer properties (constructed once at startup, immutable)
 	writer, err := pqarrow.NewFileWriter(
@@ -509,7 +601,6 @@ type Entry = bufferEntry
 func (e *bufferEntry) isEmpty() bool {
 	return len(e.columns) == 0
 }
-
 
 // GetColumns returns the columns map for external consumers (database package).
 func (e *bufferEntry) GetColumns() map[string]ColumnData { return e.columns }
@@ -576,6 +667,7 @@ func colLen(c ColumnData) int {
 		return 0
 	}
 }
+
 // colAppend concatenates two ColumnData values. dst and src must have the same element type.
 // Validity bitmaps are merged: src.Validity is appended to dst.Validity.
 // When only one side has Validity, the other side is treated as all-valid (true).
@@ -584,50 +676,86 @@ func colAppend(dst, src ColumnData) ColumnData {
 		return src
 	}
 	switch v := src.Data.(type) {
-	case []int64: {
-		dstData := dst.Data.([]int64)
-		var mergedValidity []bool
-		if dst.Validity != nil || src.Validity != nil {
-			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+	case []int64:
+		{
+			dstData := dst.Data.([]int64)
+			need := len(dstData) + len(v)
+			if cap(dstData) < need {
+				grown := make([]int64, len(dstData), need+need/4)
+				copy(grown, dstData)
+				dstData = grown
+			}
+			var mergedValidity []bool
+			if dst.Validity != nil || src.Validity != nil {
+				mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+			}
+			return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
 		}
-		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
-	}
-	case []float64: {
-		dstData := dst.Data.([]float64)
-		var mergedValidity []bool
-		if dst.Validity != nil || src.Validity != nil {
-			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+	case []float64:
+		{
+			dstData := dst.Data.([]float64)
+			need := len(dstData) + len(v)
+			if cap(dstData) < need {
+				grown := make([]float64, len(dstData), need+need/4)
+				copy(grown, dstData)
+				dstData = grown
+			}
+			var mergedValidity []bool
+			if dst.Validity != nil || src.Validity != nil {
+				mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+			}
+			return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
 		}
-		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
-	}
-	case []string: {
-		dstData := dst.Data.([]string)
-		var mergedValidity []bool
-		if dst.Validity != nil || src.Validity != nil {
-			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+	case []string:
+		{
+			dstData := dst.Data.([]string)
+			need := len(dstData) + len(v)
+			if cap(dstData) < need {
+				grown := make([]string, len(dstData), need+need/4)
+				copy(grown, dstData)
+				dstData = grown
+			}
+			var mergedValidity []bool
+			if dst.Validity != nil || src.Validity != nil {
+				mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+			}
+			return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
 		}
-		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
-	}
-	case []bool: {
-		dstData := dst.Data.([]bool)
-		var mergedValidity []bool
-		if dst.Validity != nil || src.Validity != nil {
-			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+	case []bool:
+		{
+			dstData := dst.Data.([]bool)
+			need := len(dstData) + len(v)
+			if cap(dstData) < need {
+				grown := make([]bool, len(dstData), need+need/4)
+				copy(grown, dstData)
+				dstData = grown
+			}
+			var mergedValidity []bool
+			if dst.Validity != nil || src.Validity != nil {
+				mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+			}
+			return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
 		}
-		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
-	}
-	case []decimal128.Num: {
-		dstData := dst.Data.([]decimal128.Num)
-		var mergedValidity []bool
-		if dst.Validity != nil || src.Validity != nil {
-			mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+	case []decimal128.Num:
+		{
+			dstData := dst.Data.([]decimal128.Num)
+			need := len(dstData) + len(v)
+			if cap(dstData) < need {
+				grown := make([]decimal128.Num, len(dstData), need+need/4)
+				copy(grown, dstData)
+				dstData = grown
+			}
+			var mergedValidity []bool
+			if dst.Validity != nil || src.Validity != nil {
+				mergedValidity = mergeValidity(dst.Validity, src.Validity, len(dstData), len(v))
+			}
+			return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
 		}
-		return ColumnData{Data: append(dstData, v...), Validity: mergedValidity}
-	}
 	default:
 		return dst
 	}
 }
+
 // mergeValidity merges two validity bitmaps when appending columns.
 // dstLen is the number of pre-existing rows that dst covers.
 // srcLen is the number of rows in the source batch.
@@ -931,8 +1059,8 @@ type flushTask struct {
 	bufferKey   string
 	database    string
 	measurement string
-	entry       *bufferEntry          // replaces data, validity, tagColumns, recordCount, arrowSchema
-	trigger     string                // "size", "age", "hard_limit", or "manual"
+	entry       *bufferEntry // replaces data, validity, tagColumns, recordCount, arrowSchema
+	trigger     string       // "size", "age", "hard_limit", or "manual"
 }
 
 // WALWriter interface for Write-Ahead Log support
@@ -973,7 +1101,6 @@ type ArrowBuffer struct {
 	// Set by cmd/iedb/main.go when clustering + peer replication is enabled.
 	// Called asynchronously after each flush — never blocks the flush path.
 	fileRegistrar FileRegistrar
-
 
 	// Adaptive flush engine (always active in production).
 	adaptiveFlush atomic.Pointer[AdaptiveFlushEngine]
@@ -1647,7 +1774,7 @@ func (b *ArrowBuffer) WriteArrowRecord(ctx context.Context, database, measuremen
 // extracted by reference to avoid copying the Arrow backing store.
 func arrowRecordToEntry(record arrow.Record) *bufferEntry {
 	entry := &bufferEntry{
-		columns:    make(map[string]ColumnData, int(record.NumCols())),
+		columns:     make(map[string]ColumnData, int(record.NumCols())),
 		recordCount: int(record.NumRows()),
 	}
 
@@ -2384,7 +2511,6 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		Bool("flushing", shouldFlush).
 		Msg("Added typed columnar data to buffer")
 
-
 	return nil
 }
 
@@ -2421,8 +2547,6 @@ func entryToWALRecords(database, measurement string, entry *bufferEntry, decimal
 
 	return records
 }
-
-
 
 // convertToDecimal128Slice converts a []interface{} column to []decimal128.Num.
 // Accepts float64, float32, int64, int*, uint*, and string values.
@@ -2660,7 +2784,6 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 					b.logger.Error().Err(cerr).Msg("Failed to write FLUSH_OK control record")
 				}
 			}
-
 
 			trigger := task.trigger
 			if trigger == "" {
@@ -3112,9 +3235,9 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 	shard.mu.Unlock()
 
 	merged := &bufferEntry{
-		columns:    columns,
-		tagColumns: tagCols,
-		schema:     entry.schema,
+		columns:     columns,
+		tagColumns:  tagCols,
+		schema:      entry.schema,
 		recordCount: recordCount,
 	}
 
@@ -3142,13 +3265,11 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 		}
 	}
 
-
 	metrics.Get().RecordBufferFlushRecords(trigger, recordCount)
 
 	shard.mu.Lock()
 	return nil
 }
-
 
 // prependFlushData prepends flushed data back into the buffer entry after a flush failure.
 // Old data (the failed flush payload) is placed BEFORE new data that may have arrived
@@ -3210,7 +3331,8 @@ func sortColumnsByTime(columns map[string]ColumnData) (map[string]ColumnData, er
 // sortColumnsByKeys sorts columns by multiple keys (e.g., sensor_id, then time)
 // Returns the sorted columns and any error encountered
 func sortColumnsByKeys(columns map[string]ColumnData, sortKeys []string) (map[string]ColumnData, error) {
-	sorted, _, err := sortColumnsByKeysWithPermutation(columns, sortKeys)
+	sorted, indices, err := sortColumnsByKeysWithPermutation(columns, sortKeys)
+	putSortIndices(indices)
 	return sorted, err
 }
 
@@ -3251,7 +3373,7 @@ func sortColumnsByKeysWithPermutation(columns map[string]ColumnData, sortKeys []
 	}
 
 	// Create permutation indices [0, 1, 2, ..., n-1]
-	indices := make([]int, n)
+	indices := getSortIndices(n)
 	for i := range indices {
 		indices[i] = i
 	}
@@ -3280,7 +3402,7 @@ func sortColumnsByTimeOnly(columns map[string]ColumnData) (map[string]ColumnData
 // sortColumnsByTimeOnlyWithPermutation sorts by time and returns the permutation used.
 // Returns nil indices when data is already sorted (no permutation needed).
 func sortColumnsByTimeOnlyWithPermutation(columns map[string]ColumnData) (map[string]ColumnData, []int, error) {
-timeCol, exists := columns["time"]
+	timeCol, exists := columns["time"]
 	if !exists {
 		return nil, nil, fmt.Errorf("time column not found")
 	}
@@ -3309,7 +3431,7 @@ timeCol, exists := columns["time"]
 	}
 
 	// Create permutation indices
-	indices := make([]int, n)
+	indices := getSortIndices(n)
 	for i := range indices {
 		indices[i] = i
 	}
@@ -3345,22 +3467,21 @@ func compareMultiKeyCached(cachedCols []ColumnData, i, j int) bool {
 	return false
 }
 
-
-
 // sortEntryByKeys sorts a bufferEntry by the given keys,
 // keeping validity bitmaps aligned with the reordered data.
 // Uses the permutation returned by sortColumnsByKeysWithPermutation to avoid
 // a second sort pass when validity bitmaps need reordering.
 func sortEntryByKeys(batch *bufferEntry, sortKeys []string) *bufferEntry {
-	sorted, _, err := sortColumnsByKeysWithPermutation(batch.columns, sortKeys)
+	sorted, indices, err := sortColumnsByKeysWithPermutation(batch.columns, sortKeys)
+	putSortIndices(indices)
 	if err != nil {
 		return batch
 	}
 	// nil indices means already sorted
 	result := &bufferEntry{
-		columns:    sorted,
-		tagColumns: batch.tagColumns,
-		schema:     batch.schema,
+		columns:     sorted,
+		tagColumns:  batch.tagColumns,
+		schema:      batch.schema,
 		recordCount: batch.recordCount,
 	}
 	return result
@@ -3374,9 +3495,9 @@ func sliceEntryByIndices(batch *bufferEntry, indices []int) *bufferEntry {
 		sliced[name] = colSlice(col, indices)
 	}
 	return &bufferEntry{
-		columns:    sliced,
-		tagColumns: batch.tagColumns,
-		schema:     batch.schema,
+		columns:     sliced,
+		tagColumns:  batch.tagColumns,
+		schema:      batch.schema,
 		recordCount: len(indices),
 	}
 }
@@ -3450,8 +3571,6 @@ func groupByHour(times []int64) (map[int64]*hourBucket, int64, int64, error) {
 
 	return buckets, globalMin, globalMax, nil
 }
-
-
 
 // generateStoragePath creates a hierarchical storage path for partition pruning
 // Format: {database}/{measurement}/{YYYY}/{MM}/{DD}/{HH}/{measurement}_{timestamp}_{nanos}.parquet
