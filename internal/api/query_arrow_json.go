@@ -5,6 +5,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,14 +54,54 @@ func executeArrowJSONQuery(
 	var profile *database.QueryProfile
 	var err error
 
-	if profileMode {
-		var sqlConn interface{ Close() error }
-		reader, sqlConn, profile, err = h.db.ArrowQueryWithProfileContext(ctx, convertedSQL)
-		conn = sqlConn
+	// Check for pending buffer VIEWs from the SQL conversion phase.
+	pendingViews, _ := c.Locals("pendingViews").(map[string]any)
+	hasViews := len(pendingViews) > 0
+
+	if hasViews {
+		// Views are connection-scoped -- acquire a connection, register VIEWs,
+		// and execute the Arrow query on the same connection.
+		var sqlConn *sql.Conn
+		var viewRelease func()
+		var arrowProfile *database.QueryProfile
+
+		sqlConn, err = h.db.DB().Conn(ctx)
+		if err == nil {
+			if profileMode {
+				// Profile mode with views: register views, enable profiling, then query.
+				reader, viewRelease, arrowProfile, err = arrowQueryWithViewsProfiled(ctx, sqlConn, convertedSQL, pendingViews)
+				if arrowProfile != nil {
+					profile = arrowProfile
+				}
+			} else {
+				reader, viewRelease, err = arrowQueryWithViews(ctx, sqlConn, convertedSQL, pendingViews)
+			}
+			conn = sqlConn
+		}
+
+		if err == nil && reader != nil {
+			// Wrap conn so Close() releases registered views and Arrow memory.
+			conn = &viewReleaseConn{Conn: conn.(interface{ Close() error }), viewRelease: viewRelease}
+		} else {
+			// Error path -- clean up.
+			if viewRelease != nil {
+				viewRelease()
+			}
+			if sqlConn != nil {
+				sqlConn.Close()
+			}
+		}
 	} else {
-		var sqlConn interface{ Close() error }
-		reader, sqlConn, err = h.db.ArrowQueryContext(ctx, convertedSQL)
-		conn = sqlConn
+		// No pending views -- use the standard Arrow query path.
+		if profileMode {
+			var sqlConn interface{ Close() error }
+			reader, sqlConn, profile, err = h.db.ArrowQueryWithProfileContext(ctx, convertedSQL)
+			conn = sqlConn
+		} else {
+			var sqlConn interface{ Close() error }
+			reader, sqlConn, err = h.db.ArrowQueryContext(ctx, convertedSQL)
+			conn = sqlConn
+		}
 	}
 
 	if err != nil {

@@ -108,6 +108,15 @@ var (
 // Returns (rowCount, handled). If handled is false, the caller falls back to database/sql.
 var arrowJSONQueryFunc func(h *QueryHandler, c *fiber.Ctx, ctx context.Context, cancel context.CancelFunc, convertedSQL string, profileMode bool, governanceMaxRows int, start time.Time, timestamp string, onComplete func(int), onFail func(string), onTimeout func()) (int, bool)
 
+// registerViewsFunc is set by query_arrow_views.go init() when compiled with duckdb_arrow tag.
+// It registers pending buffer VIEWs on a raw driver connection.
+// Returns a release function that frees the registered VIEWs' Arrow memory.
+var registerViewsFunc func(driverConn any, views map[string]any) (func(), error)
+
+// queryWithViewsFunc is set by query_arrow_views.go init() when compiled with duckdb_arrow tag.
+// It executes a database/sql query with pending buffer VIEWs registered on the same connection.
+var queryWithViewsFunc func(h *QueryHandler, ctx context.Context, query string, views map[string]any) (rows *sql.Rows, conn *sql.Conn, viewRelease func(), err error)
+
 // isIdentChar returns true if c is a valid SQL identifier character (a-z, A-Z, 0-9, _)
 func isIdentChar(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -495,6 +504,13 @@ type QueryHandler struct {
 
 	// Buffer VIEW integration (adaptive buffer — makes in-memory data queryable)
 	buffer *ingest.ArrowBuffer
+
+	// Pending buffer VIEWs for the current query.
+	// Populated by wrapWithBufferView during SQL conversion, consumed
+	// by registerPendingViewsOnConnection before query execution.
+	// The caller MUST hold pendingMu when reading/writing this map.
+	pendingMu    sync.Mutex
+	pendingViews map[string]any // viewName -> *ingest.Entry snapshot
 }
 
 // isDebugEnabled returns true if debug logging is enabled.
@@ -793,6 +809,66 @@ func (h *QueryHandler) SetQueryRegistry(registry *queryregistry.Registry) {
 // When set, queries automatically UNION buffer data with Parquet data.
 func (h *QueryHandler) SetBuffer(buf *ingest.ArrowBuffer) {
 	h.buffer = buf
+}
+
+// ensurePendingViews populates h.pendingViews by scanning the converted SQL
+// for VIEW name references and snapshotting the corresponding buffer entries.
+// This handles the cache-hit case where getTransformedSQL returned cached SQL
+// without calling wrapWithBufferView (which normally populates pendingViews).
+//
+// The caller MUST hold h.pendingMu.Lock() when calling this method.
+func (h *QueryHandler) ensurePendingViews(convertedSQL, originalSQL, headerDB string) {
+	if h.buffer == nil {
+		return
+	}
+	// Fast check: no VIEW names in the converted SQL at all
+	if !strings.Contains(convertedSQL, "_iedb_buffer_") {
+		return
+	}
+
+	refs := extractTableReferences(originalSQL)
+	for _, ref := range refs {
+		dbName := ref.Database
+		if dbName == "default" && headerDB != "" {
+			dbName = headerDB
+		}
+		keys := h.buffer.MeasurementBufferKeys(dbName, ref.Measurement)
+		if len(keys) == 0 {
+			continue
+		}
+		if h.pendingViews == nil {
+			h.pendingViews = make(map[string]any)
+		}
+		for _, k := range keys {
+			viewName := database.ViewName(k)
+			if _, exists := h.pendingViews[viewName]; exists {
+				continue
+			}
+			entry := h.buffer.SnapshotEntry(k)
+			if entry != nil {
+				h.pendingViews[viewName] = entry
+			}
+		}
+	}
+}
+
+// registerPendingViewsOnConnection extracts the pending VIEW snapshot entries
+// from h.pendingViews and registers them as DuckDB Arrow VIEWs on the given
+// driver connection. It clears h.pendingViews regardless of success.
+//
+// Panics if registerViewsFunc is nil (not compiled with duckdb_arrow tag).
+// The caller MUST ensure duckdb_arrow is available when h.buffer is set.
+func (h *QueryHandler) registerPendingViewsOnConnection(driverConn any) (release func(), err error) {
+	h.pendingMu.Lock()
+	views := h.pendingViews
+	h.pendingViews = nil
+	h.pendingMu.Unlock()
+
+	if len(views) == 0 {
+		return func() {}, nil
+	}
+
+	return registerViewsFunc(driverConn, views)
 }
 
 // InvalidateCaches clears all internal caches (partition pruner and SQL transform cache).
@@ -1291,8 +1367,20 @@ localProcessing:
 		})
 	}
 
-	// Convert SQL to storage paths and check for parallel execution opportunity
+	// Convert SQL to storage paths and check for parallel execution opportunity.
+	// Hold pendingMu during conversion so wrapWithBufferView can populate pendingViews.
+	// On cache hit, wrapWithBufferView was not called — rebuild pending views.
+	h.pendingMu.Lock()
 	convertedSQL, parallelInfo, cached := h.getTransformedSQLForParallel(req.SQL, headerDB)
+	if cached {
+		h.ensurePendingViews(convertedSQL, req.SQL, headerDB)
+	}
+	h.pendingMu.Unlock()
+
+	// Store pending views on Fiber context for use by executeArrowJSONQuery.
+	if len(h.pendingViews) > 0 {
+		c.Locals("pendingViews", h.pendingViews)
+	}
 
 	if h.debugEnabled {
 		h.logger.Debug().
@@ -1569,13 +1657,22 @@ localProcessing:
 
 		var rows *sql.Rows
 		var profileConn *sql.Conn // pinned connection for profiled queries — caller must close
+		var viewRelease func() // non-nil when pending buffer VIEWs were registered
 		var err error
 
-		if profileMode {
-			// Use profiled query to capture timing breakdown (with timeout support)
-			rows, profileConn, profile, err = h.db.QueryWithProfileContext(ctx, convertedSQL)
+		// Check for pending buffer VIEWs. If present, use a connection-aware
+		// path that registers VIEWs on a pinned connection before executing.
+		// Note: profile mode + views in the database/sql fallback is a
+		// rare edge case; we use the same path and skip profile collection.
+		if pendingViewsRaw, ok := c.Locals("pendingViews").(map[string]any); ok && len(pendingViewsRaw) > 0 && queryWithViewsFunc != nil {
+			rows, profileConn, viewRelease, err = queryWithViewsFunc(h, ctx, convertedSQL, pendingViewsRaw)
 		} else {
-			rows, err = h.db.QueryContext(ctx, convertedSQL)
+			if profileMode {
+				// Use profiled query to capture timing breakdown (with timeout support)
+				rows, profileConn, profile, err = h.db.QueryWithProfileContext(ctx, convertedSQL)
+			} else {
+				rows, err = h.db.QueryContext(ctx, convertedSQL)
+			}
 		}
 
 		if err != nil {
@@ -1639,6 +1736,9 @@ localProcessing:
 			if profileConn != nil {
 				profileConn.Close()
 			}
+			if viewRelease != nil {
+				viewRelease()
+			}
 			if cancel != nil {
 				cancel()
 			}
@@ -1677,6 +1777,9 @@ localProcessing:
 			rows.Close()
 			if profileConn != nil {
 				profileConn.Close()
+			}
+			if viewRelease != nil {
+				viewRelease()
 			}
 			if cancel != nil {
 				cancel()
@@ -2098,11 +2201,35 @@ func (h *QueryHandler) buildReadParquetExpr(path, originalSQL, keyword string) s
 // wrapWithBufferView wraps a read_parquet expression with a UNION ALL to all
 // buffer VIEWs for the measurement (one per schema variant). When the buffer has
 // no data for this measurement, returns the expression unchanged.
+//
+// The caller MUST hold h.pendingMu.Lock() when calling this method.
+// This method snapshots buffer entries and stores them in h.pendingViews
+// keyed by view name so they can be registered as DuckDB temporary VIEWs
+// on the query connection before execution.
 func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement string) string {
 	keys := h.buffer.MeasurementBufferKeys(dbName, measurement)
 	if len(keys) == 0 {
 		return expr
 	}
+
+	// Initialize pendingViews map if needed
+	if h.pendingViews == nil {
+		h.pendingViews = make(map[string]any)
+	}
+
+	// Snapshot each buffer entry and store in pendingViews
+	for _, k := range keys {
+		viewName := database.ViewName(k)
+		if _, exists := h.pendingViews[viewName]; exists {
+			continue // Already snapshotted
+		}
+		entry := h.buffer.SnapshotEntry(k)
+		if entry == nil {
+			continue
+		}
+		h.pendingViews[viewName] = entry
+	}
+
 	innerExpr := strings.TrimPrefix(expr, keyword+" ")
 	var b strings.Builder
 	b.WriteString(keyword)
@@ -3007,7 +3134,9 @@ func (h *QueryHandler) estimateQuery(c *fiber.Ctx) error {
 	}
 
 	// Convert SQL to storage paths (with caching)
+	h.pendingMu.Lock()
 	convertedSQL, _ := h.getTransformedSQL(req.SQL, headerDB)
+	h.pendingMu.Unlock()
 
 	// Create a COUNT(*) version of the query
 	countSQL := "SELECT COUNT(*) FROM (" + convertedSQL + ") AS t"
@@ -3340,7 +3469,9 @@ func (h *QueryHandler) queryMeasurement(c *fiber.Ctx) error {
 
 	// Convert SQL to storage paths (with caching)
 	// Note: This endpoint builds its own db.measurement SQL, so no header optimization
+	h.pendingMu.Lock()
 	convertedSQL, _ := h.getTransformedSQL(sql, "")
+	h.pendingMu.Unlock()
 
 	h.logger.Debug().
 		Str("measurement", measurement).
