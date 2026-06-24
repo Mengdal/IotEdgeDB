@@ -147,7 +147,7 @@ func (h *CompactionHandler) triggerCompaction(c *fiber.Ctx) error {
 	dbParam := c.Query("database", "")
 	if dbParam != "" && !isValidDatabaseName(dbParam) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid database name: must start with a letter and contain only alphanumeric characters, underscores, or hyphens (max 64 characters)",
+			"error": "Invalid database name: must start with a letter and contain only letters, digits, underscores, or hyphens (Unicode supported) (max 64 characters)",
 		})
 	}
 

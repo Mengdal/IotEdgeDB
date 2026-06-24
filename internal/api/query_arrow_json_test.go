@@ -5,6 +5,7 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"testing"
 	"time"

@@ -311,7 +311,7 @@ localProcessing:
 	// Validate database name to prevent path traversal
 	if !isValidDatabaseName(database) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid database name: must start with a letter and contain only alphanumeric characters, underscores, or hyphens (max 64 characters)",
+			"error": "invalid database name: must start with a letter and contain only letters, digits, underscores, or hyphens (Unicode supported) (max 64 characters)",
 		})
 	}
 
@@ -322,7 +322,7 @@ localProcessing:
 	for _, measurement := range measurements {
 		if !isValidMeasurementName(measurement) {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": fmt.Sprintf("invalid measurement name %q: must start with a letter and contain only alphanumeric characters, underscores, or hyphens", measurement),
+				"error": fmt.Sprintf("invalid measurement name %q: must start with a letter and contain only letters, digits, underscores, or hyphens (Unicode supported)", measurement),
 			})
 		}
 	}

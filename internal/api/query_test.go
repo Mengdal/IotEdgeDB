@@ -245,6 +245,54 @@ func TestStripSQLComments(t *testing.T) {
 	}
 }
 
+func TestDecodePathParam(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		want      string
+		wantError bool
+	}{
+		{
+			name:  "unicode measurement",
+			input: "%E7%94%B5%E8%A1%A8",
+			want:  "电表",
+		},
+		{
+			name:  "plain measurement",
+			input: "cpu",
+			want:  "cpu",
+		},
+		{
+			name:  "empty value",
+			input: "",
+			want:  "",
+		},
+		{
+			name:      "invalid escape",
+			input:     "%E7%94%",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := decodePathParam(tt.input)
+			if tt.wantError {
+				if err == nil {
+					t.Fatal("decodePathParam() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodePathParam() unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("decodePathParam() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConvertSQLWithCTE(t *testing.T) {
 	// Create a minimal QueryHandler for testing
 	h := &QueryHandler{
@@ -290,6 +338,26 @@ func TestConvertSQLWithCTE(t *testing.T) {
 				"read_parquet('./data/mydb/cpu/**/*.parquet'",
 			},
 			shouldNotContain: []string{},
+		},
+		{
+			name:     "unicode simple measurement converted",
+			inputSQL: "SELECT * FROM 电表",
+			shouldContain: []string{
+				"read_parquet('./data/default/电表/**/*.parquet'",
+			},
+			shouldNotContain: []string{
+				"FROM 电表",
+			},
+		},
+		{
+			name:     "unicode database table converted",
+			inputSQL: "SELECT * FROM hb.电表",
+			shouldContain: []string{
+				"read_parquet('./data/hb/电表/**/*.parquet'",
+			},
+			shouldNotContain: []string{
+				"FROM hb.电表",
+			},
 		},
 		{
 			name:     "JOIN with database.table converted",
@@ -924,6 +992,22 @@ func TestDBTablePattern(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConvertSQLToStoragePathsWithHeaderDBUnicodeMeasurement(t *testing.T) {
+	h := &QueryHandler{
+		storage: &mockLocalBackend{basePath: "./data"},
+		pruner:  pruning.NewPartitionPruner(zerolog.Nop()),
+		logger:  zerolog.Nop(),
+	}
+
+	result := h.convertSQLToStoragePathsWithHeaderDB("SELECT * FROM 电表", "hb")
+	if !strings.Contains(result, "read_parquet('./data/hb/电表/**/*.parquet'") {
+		t.Fatalf("unicode measurement was not converted with header database.\nResult: %s", result)
+	}
+	if strings.Contains(result, "FROM 电表") {
+		t.Fatalf("unicode measurement should not remain as a DuckDB table reference.\nResult: %s", result)
 	}
 }
 

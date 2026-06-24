@@ -91,6 +91,7 @@ docs/progress/
 /LICENSE
 /.gocache
 /.cache
+/.omo
 /cmd/tools
 front/
 iedb.toml

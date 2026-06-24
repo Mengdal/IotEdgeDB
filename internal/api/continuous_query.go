@@ -270,7 +270,7 @@ func (h *ContinuousQueryHandler) handleCreate(c *fiber.Ctx) error {
 	}
 	if !isValidMeasurementName(req.DestinationMeasurement) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid destination_measurement: must start with a letter and contain only alphanumeric characters, underscores, or hyphens",
+			"error": "invalid destination_measurement: must start with a letter and contain only letters, digits, underscores, or hyphens (Unicode supported)",
 		})
 	}
 	if req.Query == "" {
@@ -376,7 +376,7 @@ func (h *ContinuousQueryHandler) handleUpdate(c *fiber.Ctx) error {
 	// Validate destination_measurement if provided
 	if req.DestinationMeasurement != "" && !isValidMeasurementName(req.DestinationMeasurement) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid destination_measurement: must start with a letter and contain only alphanumeric characters, underscores, or hyphens",
+			"error": "invalid destination_measurement: must start with a letter and contain only letters, digits, underscores, or hyphens (Unicode supported)",
 		})
 	}
 

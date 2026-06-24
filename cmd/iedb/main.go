@@ -25,6 +25,7 @@ import (
 	"iedb/internal/ingest"
 	"iedb/internal/license"
 	"iedb/internal/logger"
+	"iedb/internal/mcp"
 	"iedb/internal/metrics"
 	"iedb/internal/mqtt"
 	"iedb/internal/queryregistry"
@@ -1156,6 +1157,13 @@ func main() {
 		queryHandler.SetAuthAndRBAC(authManager, rbacManager)
 	}
 	queryHandler.RegisterRoutes(server.GetApp())
+
+	// Register MCP handler (SDK-based)
+	mcpCfg := mcp.DefaultConfig()
+	mcpCfg.BaseURL = fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
+	mcpCfg.Token = cfg.Auth.BootstrapToken
+	mcpHandler := mcp.NewHandler(mcpCfg)
+	mcpHandler.RegisterRoutes(server.GetApp())
 
 	// Wire up cluster router to handlers for request forwarding
 	// This enables reader nodes to forward writes to writers, and

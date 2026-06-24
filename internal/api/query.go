@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"iedb/internal/auth"
 	"iedb/internal/cluster"
@@ -62,15 +65,15 @@ var (
 // benchmarks showed simpler patterns execute faster despite more passes.
 var (
 	// Pattern for database.table references (e.g., FROM mydb.mytable)
-	patternDBTable = regexp.MustCompile(`(?i)\bFROM\s+([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\b`)
+	patternDBTable = regexp.MustCompile(`(?i)\bFROM\s+([\p{L}\p{N}_]+)\.([\p{L}_][\p{L}\p{N}_]*)`)
 	// Pattern for simple table references (FROM table_name)
-	patternSimpleTable = regexp.MustCompile(`(?i)\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)\b`)
+	patternSimpleTable = regexp.MustCompile(`(?i)\bFROM\s+([\p{L}_][\p{L}\p{N}_]*)`)
 	// Pattern for database.table in JOIN clauses (e.g., JOIN mydb.mytable)
 	// Includes LATERAL JOIN support: "LATERAL JOIN", "JOIN LATERAL", "CROSS JOIN LATERAL"
-	patternJoinDBTable = regexp.MustCompile(`(?i)\b(?:(?:LEFT|RIGHT|INNER|OUTER|CROSS|NATURAL)?\s*)?(?:LATERAL\s+)?JOIN\s+(?:LATERAL\s+)?([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\b`)
+	patternJoinDBTable = regexp.MustCompile(`(?i)\b(?:(?:LEFT|RIGHT|INNER|OUTER|CROSS|NATURAL)?\s*)?(?:LATERAL\s+)?JOIN\s+(?:LATERAL\s+)?([\p{L}\p{N}_]+)\.([\p{L}_][\p{L}\p{N}_]*)`)
 	// Pattern for simple table in JOIN clauses (JOIN table_name)
 	// Includes LATERAL JOIN support: "LATERAL JOIN", "JOIN LATERAL", "CROSS JOIN LATERAL"
-	patternJoinSimpleTable = regexp.MustCompile(`(?i)\b(?:(?:LEFT|RIGHT|INNER|OUTER|CROSS|NATURAL)?\s*)?(?:LATERAL\s+)?JOIN\s+(?:LATERAL\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\b`)
+	patternJoinSimpleTable = regexp.MustCompile(`(?i)\b(?:(?:LEFT|RIGHT|INNER|OUTER|CROSS|NATURAL)?\s*)?(?:LATERAL\s+)?JOIN\s+(?:LATERAL\s+)?([\p{L}_][\p{L}\p{N}_]*)`)
 	// Pattern to extract CTE names from WITH clauses
 	// Matches: WITH name AS, WITH RECURSIVE name AS, and comma-separated CTEs
 	// CTE name extraction. DuckDB allows `WITH foo AS (...)` and
@@ -107,10 +110,29 @@ var (
 // Returns (rowCount, handled). If handled is false, the caller falls back to database/sql.
 var arrowJSONQueryFunc func(h *QueryHandler, c *fiber.Ctx, ctx context.Context, cancel context.CancelFunc, convertedSQL string, profileMode bool, governanceMaxRows int, start time.Time, timestamp string, onComplete func(int), onFail func(string), onTimeout func()) (int, bool)
 
-// isIdentChar returns true if c is a valid SQL identifier character (a-z, A-Z, 0-9, _)
+// isIdentChar returns true if c is a valid unquoted SQL identifier character.
 func isIdentChar(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9') || c == '_'
+}
+
+func isIdentRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func scanIdentifierEnd(sql string, start int) int {
+	end := start
+	for end < len(sql) {
+		r, size := utf8.DecodeRuneInString(sql[end:])
+		if r == utf8.RuneError && size == 1 {
+			break
+		}
+		if !isIdentRune(r) {
+			break
+		}
+		end += size
+	}
+	return end
 }
 
 // hasCrossDatabaseSyntax checks if SQL contains db.table patterns without using regex.
@@ -645,6 +667,17 @@ func validateHeaderDatabase(name string) error {
 	return validateIdentifier(name)
 }
 
+func decodePathParam(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid path parameter %q: %w", value, err)
+	}
+	return decoded, nil
+}
+
 // validateOrderByClause validates ORDER BY clause to prevent SQL injection
 func validateOrderByClause(orderBy string) error {
 	if orderBy == "" {
@@ -1023,8 +1056,14 @@ func (h *QueryHandler) RegisterRoutes(app *fiber.App) {
 // handleGetMeasurementSchema extracts the native Tag and Field schema by reading Parquet metadata
 func (h *QueryHandler) handleGetMeasurementSchema(c *fiber.Ctx) error {
 	start := time.Now()
-	database := c.Params("database")
-	measurement := c.Params("measurement")
+	database, err := decodePathParam(c.Params("database"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error(), "success": false})
+	}
+	measurement, err := decodePathParam(c.Params("measurement"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error(), "success": false})
+	}
 
 	if database == "" || measurement == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "database and measurement required", "success": false})
@@ -1035,18 +1074,27 @@ func (h *QueryHandler) handleGetMeasurementSchema(c *fiber.Ctx) error {
 	ctx := c.UserContext()
 
 	// 1. Read 'iedb:tags' from Parquet metadata
-	tagQuery := fmt.Sprintf(`SELECT value FROM parquet_kv_metadata('%s') WHERE key = 'iedb:tags' LIMIT 1`, escapedPath)
-	var tagValue string
-	tags := []string{}
+	// Note: Different files may have different tags (schema evolution), so we need to union all tags
+	tagQuery := fmt.Sprintf(`SELECT value FROM parquet_kv_metadata('%s') WHERE key = 'iedb:tags'`, escapedPath)
+	tagSet := make(map[string]struct{})
 	tagRows, tagErr := h.db.QueryContext(ctx, tagQuery)
 	if tagErr == nil {
 		defer tagRows.Close()
-		if tagRows.Next() {
-			_ = tagRows.Scan(&tagValue)
+		for tagRows.Next() {
+			var tagValue string
+			if err := tagRows.Scan(&tagValue); err == nil && tagValue != "" {
+				// Split and collect unique tags from all files
+				for _, tag := range strings.Split(tagValue, ",") {
+					if tag != "" {
+						tagSet[tag] = struct{}{}
+					}
+				}
+			}
 		}
 	}
-	if tagValue != "" {
-		tags = strings.Split(tagValue, ",")
+	tags := make([]string, 0, len(tagSet))
+	for tag := range tagSet {
+		tags = append(tags, tag)
 	}
 
 	// 2. Read column types from DuckDB schema
@@ -2322,10 +2370,7 @@ func (h *QueryHandler) convertSingleTableQuery(sql, sqlLower, database string) s
 	}
 
 	// Find table name end
-	end := start
-	for end < len(sql) && isIdentChar(sql[end]) {
-		end++
-	}
+	end := scanIdentifierEnd(sql, start)
 
 	if end == start {
 		return sql // No table found, return original
@@ -2361,10 +2406,7 @@ func (h *QueryHandler) convertSingleTableQueryForParallel(sql, sqlLower, databas
 	}
 
 	// Find table name end
-	end := start
-	for end < len(sql) && isIdentChar(sql[end]) {
-		end++
-	}
+	end := scanIdentifierEnd(sql, start)
 
 	if end == start {
 		return sql, nil // No table found, return original

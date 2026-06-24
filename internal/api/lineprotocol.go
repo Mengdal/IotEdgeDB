@@ -44,9 +44,10 @@ type LineProtocolHandler struct {
 	totalErrors       atomic.Int64
 }
 
-// Measurement name validation - must start with letter, contain only alphanumeric, underscore, or hyphen
-// This prevents XML-illegal control characters from corrupting S3 ListObjectsV2 responses
-var validMeasurementName = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
+// Measurement name validation - must start with a Unicode letter, contain only
+// Unicode letters, digits, underscore, or hyphen. Unicode letters (e.g., Chinese)
+// are safe in S3 paths and XML responses; control characters are still rejected.
+var validMeasurementName = regexp.MustCompile(`^[\p{L}][\p{L}\p{N}_-]*$`)
 
 // isValidMeasurementName validates a measurement name
 func isValidMeasurementName(name string) bool {
@@ -283,7 +284,7 @@ localProcessing:
 		if !isValidMeasurementName(measurement) {
 			h.totalErrors.Add(1)
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": fmt.Sprintf("invalid measurement name %q: must start with a letter and contain only alphanumeric characters, underscores, or hyphens", measurement),
+				"error": fmt.Sprintf("invalid measurement name %q: must start with a letter and contain only letters, digits, underscores, or hyphens", measurement),
 			})
 		}
 	}

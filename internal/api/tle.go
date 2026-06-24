@@ -82,7 +82,7 @@ func (h *TLEHandler) handleWrite(c *fiber.Ctx) error {
 	if !isValidDatabaseName(database) {
 		h.totalErrors.Add(1)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid database name: must start with a letter and contain only alphanumeric characters, underscores, or hyphens (max 64 characters)",
+			"error": "invalid database name: must start with a letter and contain only letters, digits, underscores, or hyphens (Unicode supported) (max 64 characters)",
 		})
 	}
 
@@ -147,7 +147,7 @@ localProcessing:
 	if !isValidMeasurementName(measurement) {
 		h.totalErrors.Add(1)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": fmt.Sprintf("invalid measurement name %q: must start with a letter and contain only alphanumeric characters, underscores, or hyphens", measurement),
+			"error": fmt.Sprintf("invalid measurement name %q: must start with a letter and contain only letters, digits, underscores, or hyphens (Unicode supported)", measurement),
 		})
 	}
 
