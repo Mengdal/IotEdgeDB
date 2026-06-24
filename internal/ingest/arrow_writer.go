@@ -251,13 +251,21 @@ func sortColumnsTimeFirst(colNames []string) {
 // tagColumns optionally lists which columns are tags (stored as schema metadata for compaction dedup).
 // decimalCols optionally maps column names to DecimalSpec for Decimal128 columns.
 func (w *ArrowWriter) inferSchema(columns map[string]ColumnData, tagColumns []string, decimalCols map[string]config.DecimalSpec) (*arrow.Schema, error) {
-	var fields []arrow.Field
-
-	for name, col := range columns {
-		// Skip internal metadata columns
-		if name[0] == '_' {
-			continue
+	// Collect sorted column names for deterministic schema field order.
+	// Go map iteration is non-deterministic; without sorting, Arrow VIEW
+	// schemas would have random column order, causing query result mismatches.
+	names := make([]string, 0, len(columns))
+	for name := range columns {
+		if len(name) > 0 && name[0] == '_' {
+			continue // skip internal metadata columns
 		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var fields []arrow.Field
+	for _, name := range names {
+		col := columns[name]
 
 		var arrowType arrow.DataType
 

@@ -1104,12 +1104,13 @@ func TestHTTPvsFlight_Parity_InMemory(t *testing.T) {
 
 	// --- Build Arrow VIEWs from buffer data ---
 
-	// Helper: register buffer data as DuckDB VIEW for a measurement
-	conn, err := db.DB().Conn(ctx)
+	// Helper: register buffer data as DuckDB VIEW for a measurement.
+	// arrow_scan VIEWs are DuckDB-instance-scoped (visible from all connections),
+	// so we close regConn before running queries to avoid pool exhaustion.
+	regConn, err := db.DB().Conn(ctx)
 	if err != nil {
 		t.Fatalf("get conn: %v", err)
 	}
-	defer conn.Close()
 
 	buildMeasView := func(meas string) string {
 		keys := buf.MeasurementBufferKeys("test", meas)
@@ -1134,7 +1135,7 @@ func TestHTTPvsFlight_Parity_InMemory(t *testing.T) {
 
 		viewName := database.ViewName(key)
 		var release func()
-		err = conn.Raw(func(driverConn any) error {
+		err = regConn.Raw(func(driverConn any) error {
 			dc, ok := driverConn.(driver.Conn)
 			if !ok {
 				return fmt.Errorf("not a driver.Conn")
@@ -1155,6 +1156,10 @@ func TestHTTPvsFlight_Parity_InMemory(t *testing.T) {
 
 	flightView := buildMeasView("flight_mem")
 	httpView := buildMeasView("http_mem")
+
+	// Release the registration connection — arrow_scan VIEWs are instance-scoped
+	// and remain visible after the registering connection closes.
+	regConn.Close()
 
 	flightSQL := fmt.Sprintf("SELECT int_val, float_val, bool_val FROM %s ORDER BY int_val", database.QuoteIdent(flightView))
 	httpSQL := fmt.Sprintf("SELECT int_val, float_val, bool_val FROM %s ORDER BY int_val", database.QuoteIdent(httpView))
