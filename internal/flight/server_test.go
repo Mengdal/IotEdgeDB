@@ -4,6 +4,7 @@ package flight
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -763,7 +764,6 @@ func TestWriteArrowRecord_ParityWithColumnar(t *testing.T) {
 		FlushWorkers:   2,
 		FlushQueueSize: 16,
 	}, store, logger)
-	buf.SetNotifier(nil) // no VIEW manager needed
 
 	ctx := context.Background()
 
@@ -883,7 +883,6 @@ func TestHTTPvsFlight_Parity_ByteLevel(t *testing.T) {
 		FlushWorkers:   2,
 		FlushQueueSize: 16,
 	}, store, logger)
-	buf.SetNotifier(nil)
 
 	ctx := context.Background()
 	dbName := "parity_db"
@@ -1028,8 +1027,7 @@ func TestHTTPvsFlight_Parity_ByteLevel(t *testing.T) {
 
 // TestHTTPvsFlight_Parity_InMemory verifies that Flight and HTTP MsgPack ingest
 // paths produce identical query results from in-memory buffer data, without
-// flushing to Parquet. Uses ArrowViewManager to register buffer entries as
-// DuckDB temporary views.
+// flushing to Parquet. Uses lazy VIEW construction from buffer snapshot.
 func TestHTTPvsFlight_Parity_InMemory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in-memory parity test in short mode")
@@ -1057,11 +1055,7 @@ func TestHTTPvsFlight_Parity_InMemory(t *testing.T) {
 		FlushQueueSize: 16,
 	}, storage, logger)
 
-	// Set up ArrowViewManager so buffer data is queryable via DuckDB views
-	viewMgr := database.NewArrowViewManager(db, buf, logger)
-	buf.SetNotifier(viewMgr)
-	defer viewMgr.Close()
-
+			
 	ctx := context.Background()
 	now := time.Now().UTC()
 	numRows := 50
@@ -1108,25 +1102,65 @@ func TestHTTPvsFlight_Parity_InMemory(t *testing.T) {
 		t.Fatalf("HTTP WriteColumnarRecord: %v", err)
 	}
 
-	// Wait for VIEW manager to register buffer data as DuckDB views
-	waitForView(t, viewMgr, "test", "flight_mem", 3*time.Second)
-	waitForView(t, viewMgr, "test", "http_mem", 3*time.Second)
+	// --- Build Arrow VIEWs from buffer data ---
 
-	// --- Query both paths via DuckDB VIEW ---
-	flightViewNames := viewMgr.MeasurementViewNames("test", "flight_mem")
-	httpViewNames := viewMgr.MeasurementViewNames("test", "http_mem")
-	if len(flightViewNames) == 0 {
-		t.Fatal("Flight path: no VIEW registered")
+	// Helper: register buffer data as DuckDB VIEW for a measurement
+	conn, err := db.DB().Conn(ctx)
+	if err != nil {
+		t.Fatalf("get conn: %v", err)
 	}
-	if len(httpViewNames) == 0 {
-		t.Fatal("HTTP path: no VIEW registered")
+	defer conn.Close()
+
+	buildMeasView := func(meas string) string {
+		keys := buf.MeasurementBufferKeys("test", meas)
+		if len(keys) == 0 {
+			t.Fatalf("no buffer data for test/%s", meas)
+			return ""
+		}
+		key := keys[0]
+		snapshot := buf.SnapshotEntry(key)
+		if snapshot == nil {
+			t.Fatalf("snapshot is nil for %s", key)
+		}
+		arrowSchema := snapshot.GetArrowSchema()
+		if arrowSchema == nil {
+			t.Fatalf("nil arrowSchema for %s", key)
+		}
+
+		rec, err := database.BuildArrowRecordBatch(snapshot, arrowSchema)
+		if err != nil {
+			t.Fatalf("BuildArrowRecordBatch: %v", err)
+		}
+
+		viewName := database.ViewName(key)
+		var release func()
+		err = conn.Raw(func(driverConn any) error {
+			dc, ok := driverConn.(driver.Conn)
+			if !ok {
+				return fmt.Errorf("not a driver.Conn")
+			}
+			var regErr error
+			release, regErr = database.RegisterBufferView(dc, viewName, rec)
+			return regErr
+		})
+		if err != nil {
+			t.Fatalf("RegisterBufferView: %v", err)
+		}
+		t.Cleanup(func() {
+			release()
+			rec.Release()
+		})
+		return viewName
 	}
 
-	flightSQL := fmt.Sprintf("SELECT int_val, float_val, bool_val FROM %s ORDER BY int_val", flightViewNames[0])
-	httpSQL := fmt.Sprintf("SELECT int_val, float_val, bool_val FROM %s ORDER BY int_val", httpViewNames[0])
+	flightView := buildMeasView("flight_mem")
+	httpView := buildMeasView("http_mem")
 
-	t.Logf("Flight VIEW: %s", flightViewNames[0])
-	t.Logf("HTTP VIEW:   %s", httpViewNames[0])
+	flightSQL := fmt.Sprintf("SELECT int_val, float_val, bool_val FROM %s ORDER BY int_val", database.QuoteIdent(flightView))
+	httpSQL := fmt.Sprintf("SELECT int_val, float_val, bool_val FROM %s ORDER BY int_val", database.QuoteIdent(httpView))
+
+	t.Logf("Flight VIEW: %s", flightView)
+	t.Logf("HTTP VIEW:   %s", httpView)
 
 	// Query Flight path
 	fReader, fConn, err := db.ArrowQueryContext(ctx, flightSQL)
@@ -1191,18 +1225,6 @@ func collectRows(t *testing.T, reader array.RecordReader) []parityRow {
 	return rows
 }
 
-// waitForView polls until the VIEW manager has registered data for a measurement.
-func waitForView(t *testing.T, mgr *database.ArrowViewManager, database, measurement string, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if mgr.HasMeasurementData(database, measurement) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timeout waiting for VIEW data: %s/%s", database, measurement)
-}
 
 // TestFlightSQL_ExternalClient_Verification starts a real TCP Flight server
 // and verifies Flight SQL metadata methods work from an external client

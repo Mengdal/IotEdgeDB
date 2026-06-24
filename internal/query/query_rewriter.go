@@ -4,16 +4,17 @@ import (
 	"strings"
 
 	"iedb/internal/database"
+	"iedb/internal/ingest"
 )
 
 // QueryRewriter 将用户 SQL 改写为包含缓冲数据的 UNION 查询。
 type QueryRewriter struct {
-	viewMgr *database.ArrowViewManager
+	buffer *ingest.ArrowBuffer
 }
 
 // NewQueryRewriter 创建查询改写器。
-func NewQueryRewriter(viewMgr *database.ArrowViewManager) *QueryRewriter {
-	return &QueryRewriter{viewMgr: viewMgr}
+func NewQueryRewriter(buffer *ingest.ArrowBuffer) *QueryRewriter {
+	return &QueryRewriter{buffer: buffer}
 }
 
 // Rewrite 将用户查询改写为同时查询 Parquet 文件和所有 schema 变体缓冲临时表的查询。
@@ -23,8 +24,8 @@ func (r *QueryRewriter) Rewrite(userSQL, measurementKey, partitionPath string) s
 	if len(parts) != 2 {
 		return userSQL
 	}
-	viewNames := r.viewMgr.MeasurementViewNames(parts[0], parts[1])
-	if len(viewNames) == 0 {
+	keys := r.buffer.MeasurementBufferKeys(parts[0], parts[1])
+	if len(keys) == 0 {
 		return userSQL
 	}
 
@@ -34,10 +35,10 @@ func (r *QueryRewriter) Rewrite(userSQL, measurementKey, partitionPath string) s
 	buf.WriteString("\tSELECT * FROM read_parquet('")
 	buf.WriteString(partitionPath)
 	buf.WriteString("')\n")
-	for _, vn := range viewNames {
+	for _, k := range keys {
 		buf.WriteString("\tUNION ALL\n")
 		buf.WriteString("\tSELECT * FROM ")
-		buf.WriteString(database.QuoteIdent(vn))
+		buf.WriteString(database.QuoteIdent(database.ViewName(k)))
 		buf.WriteByte('\n')
 	}
 	buf.WriteString(")\n")
@@ -52,5 +53,6 @@ func (r *QueryRewriter) HasBufferData(measurementKey string) bool {
 	if len(parts) != 2 {
 		return false
 	}
-	return r.viewMgr.HasMeasurementData(parts[0], parts[1])
+	keys := r.buffer.MeasurementBufferKeys(parts[0], parts[1])
+	return len(keys) > 0
 }

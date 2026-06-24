@@ -19,6 +19,7 @@ import (
 	"iedb/internal/cluster"
 	"iedb/internal/database"
 	"iedb/internal/governance"
+	"iedb/internal/ingest"
 	"iedb/internal/license"
 	"iedb/internal/metrics"
 	"iedb/internal/pruning"
@@ -493,7 +494,7 @@ type QueryHandler struct {
 	queryRegistry *queryregistry.Registry
 
 	// Buffer VIEW integration (adaptive buffer — makes in-memory data queryable)
-	viewMgr *database.ArrowViewManager
+	buffer *ingest.ArrowBuffer
 }
 
 // isDebugEnabled returns true if debug logging is enabled.
@@ -788,11 +789,10 @@ func (h *QueryHandler) SetQueryRegistry(registry *queryregistry.Registry) {
 	h.queryRegistry = registry
 }
 
-// SetArrowViewManager wires the Arrow VIEW manager for buffer data visibility.
-// When set, queries automatically UNION buffer data with Parquet data for
-// measurements that have unflushed buffered records.
-func (h *QueryHandler) SetArrowViewManager(vm *database.ArrowViewManager) {
-	h.viewMgr = vm
+// SetBuffer wires the ArrowBuffer for lazy buffer VIEW construction.
+// When set, queries automatically UNION buffer data with Parquet data.
+func (h *QueryHandler) SetBuffer(buf *ingest.ArrowBuffer) {
+	h.buffer = buf
 }
 
 // InvalidateCaches clears all internal caches (partition pruner and SQL transform cache).
@@ -2086,7 +2086,7 @@ func (h *QueryHandler) buildReadParquetExpr(path, originalSQL, keyword string) s
 	}
 
 	// Wrap with buffer VIEW if data is still in-memory
-	if h.viewMgr != nil {
+	if h.buffer != nil {
 		database, measurement := h.extractDBMeasurementFromPath(path)
 		if database != "" && measurement != "" {
 			expr = h.wrapWithBufferView(expr, keyword, database, measurement)
@@ -2099,14 +2099,8 @@ func (h *QueryHandler) buildReadParquetExpr(path, originalSQL, keyword string) s
 // buffer VIEWs for the measurement (one per schema variant). When the buffer has
 // no data for this measurement, returns the expression unchanged.
 func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement string) string {
-	if h.viewMgr == nil {
-		return expr
-	}
-	if !h.viewMgr.HasMeasurementData(dbName, measurement) {
-		return expr
-	}
-	viewNames := h.viewMgr.MeasurementViewNames(dbName, measurement)
-	if len(viewNames) == 0 {
+	keys := h.buffer.MeasurementBufferKeys(dbName, measurement)
+	if len(keys) == 0 {
 		return expr
 	}
 	innerExpr := strings.TrimPrefix(expr, keyword+" ")
@@ -2115,9 +2109,9 @@ func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement str
 	b.WriteString(" (SELECT * FROM (")
 	b.WriteString(innerExpr)
 	b.WriteByte(')')
-	for _, vn := range viewNames {
+	for _, k := range keys {
 		b.WriteString(" UNION ALL SELECT * FROM ")
-		b.WriteString(database.QuoteIdent(vn))
+		b.WriteString(database.QuoteIdent(database.ViewName(k)))
 	}
 	b.WriteByte(')')
 	return b.String()

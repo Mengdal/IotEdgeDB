@@ -5,22 +5,12 @@ import (
 	"testing"
 )
 
-// mockViewMgr implements a subset of ArrowViewManager for testing QueryRewriter.
-type mockViewMgr struct {
-	data map[string]bool
-}
-
-func (m *mockViewMgr) HasData(key string) bool {
-	return m.data[key]
-}
-
 func TestQueryRewriter_Rewrite(t *testing.T) {
-	// NOTE: QueryRewriter takes *database.ArrowViewManager which requires a real
-	// DuckDB connection. The rewrite logic is tested here via buildRewriteSQL
-	// which mirrors Rewrite(). Integration tests cover the full wiring.
+	// NOTE: Rewrite() uses MeasurementBufferKeys which requires a live buffer.
+	// The rewrite logic is tested here via buildRewriteSQL which mirrors Rewrite().
+	// Integration tests cover the full wiring.
 
 	t.Run("basic rewrite wraps SQL with CTE", func(t *testing.T) {
-		// Simulating what Rewrite does for verification
 		userSQL := `SELECT mean("usage") FROM default/cpu WHERE time > now() - 1h`
 		measurementKey := "default/cpu"
 		partitionPath := "/data/default/cpu/**/*.parquet"
@@ -40,7 +30,6 @@ func TestQueryRewriter_Rewrite(t *testing.T) {
 		if !strings.Contains(rewritten, "read_parquet") {
 			t.Error("rewritten SQL should contain read_parquet")
 		}
-		// The measurement key should be replaced with _iedb_source
 		if strings.Contains(rewritten, "FROM default/cpu") {
 			t.Error("rewritten SQL should replace measurement key with _iedb_source")
 		}
@@ -76,8 +65,7 @@ func TestQueryRewriter_Rewrite(t *testing.T) {
 	})
 }
 
-// buildRewriteSQL mirrors the logic of QueryRewriter.Rewrite for unit testing
-// without needing the actual *database.ArrowViewManager.
+// buildRewriteSQL mirrors the logic of QueryRewriter.Rewrite for unit testing.
 func buildRewriteSQL(userSQL, measurementKey, partitionPath, viewName string) string {
 	rewritten := `
 		WITH _iedb_source AS (
@@ -91,34 +79,14 @@ func buildRewriteSQL(userSQL, measurementKey, partitionPath, viewName string) st
 	return rewritten
 }
 
-func TestQueryRewriter_HasBufferData(t *testing.T) {
-	// Test the mock directly to verify the delegation pattern
-	mgr := &mockViewMgr{data: map[string]bool{
-		"db/has_data": true,
-		"db/no_data":  false,
-	}}
-
-	if !mgr.HasData("db/has_data") {
-		t.Error("has_data should return true")
-	}
-	if mgr.HasData("db/no_data") {
-		t.Error("no_data should return false")
-	}
-	if mgr.HasData("unknown") {
-		t.Error("unknown key should return false")
-	}
-}
-
 func TestViewNameFormat(t *testing.T) {
-	// Test the database.ViewName function indirectly by checking format
-	// ViewName replaces "/" with "_" and adds "_iedb_buffer_" prefix
 	tests := []struct {
 		bufferKey string
 		expected  string
 	}{
 		{"default/cpu", "_iedb_buffer_default_cpu"},
 		{"db/measurement", "_iedb_buffer_db_measurement"},
-		{"nested/db/cpu", "_iedb_buffer_nested_db_cpu"}, // only last / is significant in buffer key format
+		{"nested/db/cpu", "_iedb_buffer_nested_db_cpu"},
 	}
 
 	for _, tt := range tests {

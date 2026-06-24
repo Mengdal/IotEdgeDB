@@ -30,7 +30,6 @@ import (
 	"iedb/internal/logger"
 	"iedb/internal/metrics"
 	"iedb/internal/mqtt"
-	"iedb/internal/query"
 	"iedb/internal/queryregistry"
 	"iedb/internal/reconciliation"
 	"iedb/internal/scheduler"
@@ -358,16 +357,10 @@ func main() {
 	// When exceeded, oldest entries are evicted; if still over, 503 backpressure.
 	arrowBuffer.SetBufferHardLimit(memoryMonitor.BufferLimit() * 2)
 
-	// 3. Arrow VIEW manager (buffer data queryable via DuckDB temp tables)
-	// Registered with shutdown coordinator so refreshLoop goroutine is
-	// stopped before the DuckDB pool closes.
-	arrowViewMgr := database.NewArrowViewManager(db, arrowBuffer, logger.Get("arrow-view"))
-	arrowBuffer.SetNotifier(arrowViewMgr)
-	shutdownCoordinator.Register("arrow-view", arrowViewMgr, shutdown.PriorityBuffer)
+	// 3. Buffer reference for lazy Arrow VIEW construction at query time.
+	// VIEWs are built synchronously from buffer data when queries execute.
 
 	// 4. Query rewriter (transparent Parquet + buffer UNION queries)
-	queryRewriter := query.NewQueryRewriter(arrowViewMgr)
-	_ = queryRewriter // held for future direct use; currently integrated via buildReadParquetExpr
 
 	// === SIGHUP 配置热加载 ===
 	reloadCoordinator := config.NewReloadCoordinator(
@@ -1187,10 +1180,8 @@ func main() {
 	if authManager != nil && rbacManager != nil {
 		queryHandler.SetAuthAndRBAC(authManager, rbacManager)
 	}
-	// Wire buffer VIEW for transparent in-memory data visibility in queries
-	if arrowViewMgr != nil {
-		queryHandler.SetArrowViewManager(arrowViewMgr)
-	}
+	// Wire buffer for lazy Arrow VIEW construction at query time
+	queryHandler.SetBuffer(arrowBuffer)
 	queryHandler.RegisterRoutes(server.GetApp())
 
 	// Wire up cluster router to handlers for request forwarding

@@ -680,3 +680,16 @@ func sumOperatorTimings(operators []duckdbProfileOperator) float64 {
 	}
 	return total
 }
+
+// ViewName converts a bufferKey to a DuckDB VIEW name.
+// Example: "test/cpu__a1b2c3d4" -> "_iedb_buffer_test_cpu__a1b2c3d4"
+func ViewName(bufferKey string) string {
+	return "_iedb_buffer_" + strings.ReplaceAll(bufferKey, "/", "_")
+}
+
+// QuoteIdent wraps a SQL identifier in double quotes and escapes internal
+// double-quotes by doubling them, per the SQL standard. DuckDB follows the
+// same convention as PostgreSQL for quoted identifiers.
+func QuoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}

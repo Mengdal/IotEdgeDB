@@ -497,8 +497,7 @@ type bufferEntry struct {
 }
 
 // Entry is the exported alias for bufferEntry. External consumers
-// (database.ArrowViewManager) reference this name; internal code uses
-// bufferEntry for consistency.
+// reference this name; internal code uses bufferEntry for consistency.
 type Entry = bufferEntry
 
 // isEmpty returns true when the entry has no buffered columnar data.
@@ -517,6 +516,9 @@ func (e *bufferEntry) GetSchema() string { return e.schema }
 
 // GetTagColumns returns the tag column names for external consumers (database package).
 func (e *bufferEntry) GetTagColumns() []string { return e.tagColumns }
+
+// GetArrowSchema returns the cached Arrow schema, or nil if not yet inferred.
+func (e *bufferEntry) GetArrowSchema() *arrow.Schema { return e.arrowSchema }
 
 // appendEntryToEntry appends data from src bufferEntry into dst bufferEntry.
 
@@ -969,8 +971,6 @@ type ArrowBuffer struct {
 	// Called asynchronously after each flush — never blocks the flush path.
 	fileRegistrar FileRegistrar
 
-	// Optional buffer change notifier (injected by database package)
-	notifier BufferChangeNotifier
 
 	// Adaptive flush engine (always active in production).
 	adaptiveFlush atomic.Pointer[AdaptiveFlushEngine]
@@ -2267,9 +2267,6 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 		Bool("flushing", shouldFlush).
 		Msg("Added columnar data to buffer")
 
-	if b.notifier != nil {
-		b.notifier.OnNewData(bufferKey)
-	}
 	return nil
 }
 
@@ -2386,9 +2383,6 @@ func (b *ArrowBuffer) writeTypedColumnarInternal(ctx context.Context, database, 
 		Bool("flushing", shouldFlush).
 		Msg("Added typed columnar data to buffer")
 
-	if b.notifier != nil {
-		b.notifier.OnNewData(bufferKey)
-	}
 
 	return nil
 }
@@ -2666,9 +2660,6 @@ func (b *ArrowBuffer) flushWorker(workerID int) {
 				}
 			}
 
-			if b.notifier != nil {
-				b.notifier.OnFlushComplete(task.bufferKey)
-			}
 
 			trigger := task.trigger
 			if trigger == "" {
@@ -2704,7 +2695,6 @@ func (b *ArrowBuffer) estimateTotalBufferBytes() uint64 {
 }
 
 // AllBufferKeys returns all buffer keys across all shards.
-// Used by ArrowViewManager for full-scan recovery when notifyCh overflows.
 func (b *ArrowBuffer) AllBufferKeys() []string {
 	var keys []string
 	for i := uint32(0); i < b.shardCount; i++ {
@@ -2715,6 +2705,68 @@ func (b *ArrowBuffer) AllBufferKeys() []string {
 				continue
 			}
 			keys = append(keys, key)
+		}
+		shard.mu.RUnlock()
+	}
+	return keys
+}
+
+// SnapshotEntry creates a zero-copy snapshot of a buffer entry for the given bufferKey.
+// Only copies slice headers (Data and Validity are shallow copies of the underlying
+// Go slices), not the underlying arrays. Go's append semantics guarantee that existing
+// elements are never modified, making this safe for concurrent use.
+//
+// Returns nil if the entry is not found or is empty.
+//
+// The snapshot is extracted under a shard read lock, so it is consistent at the
+// moment of acquisition. The caller should use the snapshot promptly; the data it
+// references remains valid because Go's GC never moves slice backing arrays and
+// colAppend never modifies existing elements.
+func (b *ArrowBuffer) SnapshotEntry(bufferKey string) *Entry {
+	shard := b.getShard(bufferKey)
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+
+	entry, ok := shard.buffers[bufferKey]
+	if !ok || entry.isEmpty() {
+		return nil
+	}
+
+	// Shallow copy of the columns map — each ColumnData retains its slice header
+	// (Data any, Validity []bool) pointing to the same backing arrays.
+	cols := make(map[string]ColumnData, len(entry.columns))
+	for name, col := range entry.columns {
+		cols[name] = col
+	}
+
+	// Copy tagColumns slice header (same backing array, which is never modified after creation)
+	tagCols := entry.tagColumns
+
+	return &Entry{
+		columns:     cols,
+		tagColumns:  tagCols,
+		schema:      entry.schema,
+		recordCount: entry.recordCount,
+		arrowSchema: entry.arrowSchema,
+	}
+}
+
+// MeasurementBufferKeys returns all buffer keys whose base key (after stripping
+// the schema hash) matches "database/measurement". This enables query-time lookup
+// of all schema variants for a measurement.
+func (b *ArrowBuffer) MeasurementBufferKeys(database, measurement string) []string {
+	baseKey := database + "/" + measurement
+	var keys []string
+	for i := uint32(0); i < b.shardCount; i++ {
+		shard := b.shards[i]
+		shard.mu.RLock()
+		for key := range shard.buffers {
+			if stripped, _ := StripSchemaHash(key); stripped == baseKey {
+				entry := shard.buffers[key]
+				if !entry.isEmpty() {
+					keys = append(keys, key)
+				}
+			}
 		}
 		shard.mu.RUnlock()
 	}
@@ -3040,9 +3092,6 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard, bufferKey, database, measurement, trigger string) error {
 	entry, exists := shard.buffers[bufferKey]
 	if !exists || entry.isEmpty() {
-		if b.notifier != nil {
-			b.notifier.OnFlushComplete(bufferKey)
-		}
 		return nil
 	}
 
@@ -3090,9 +3139,6 @@ func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard,
 		}
 	}
 
-	if b.notifier != nil {
-		b.notifier.OnFlushComplete(bufferKey)
-	}
 
 	metrics.Get().RecordBufferFlushRecords(trigger, recordCount)
 
@@ -3581,12 +3627,6 @@ func (b *ArrowBuffer) GetStats() map[string]interface{} {
 		"flush_queue_depth":      b.queueDepth.Load(),
 		"flush_workers":          b.flushWorkers,
 	}
-}
-
-// SetNotifier 设置缓冲变更通知回调。
-// 由 database 包在启动时注入 ArrowViewManager。
-func (b *ArrowBuffer) SetNotifier(n BufferChangeNotifier) {
-	b.notifier = n
 }
 
 func (b *ArrowBuffer) SinceRefresh(bufferKey string) ([]*Entry, error) {
