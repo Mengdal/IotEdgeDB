@@ -1,0 +1,52 @@
+name: Test Build (no release)
+
+on:
+  push:
+    branches:
+      - 'test/**'
+  workflow_dispatch:
+
+jobs:
+  build-amd64:
+    name: Build linux/amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+        run: |
+          go build -v -tags=duckdb_arrow -o iedb-linux-amd64 ./cmd/iedb
+          file iedb-linux-amd64
+          ls -lh iedb-linux-amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iedb-linux-amd64
+          path: iedb-linux-amd64
+          retention-days: 3
+
+  build-arm64:
+    name: Build linux/arm64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+        run: |
+          go build -v -tags=duckdb_arrow -o iedb-linux-arm64 ./cmd/iedb
+          file iedb-linux-arm64
+          ls -lh iedb-linux-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iedb-linux-arm64
+          path: iedb-linux-arm64
+          retention-days: 3
