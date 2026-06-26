@@ -2292,16 +2292,13 @@ func (h *QueryHandler) buildReadParquetExprForMeasurement(database, measurement,
 // buildReadParquetExprForParallel builds a read_parquet expression and returns
 // parallel execution info if the query can benefit from parallel partition scanning.
 // Returns (sql_expression, parallel_info) where parallel_info is non-nil if parallel is recommended.
-func (h *QueryHandler) buildReadParquetExprForParallel(path, originalSQL, keyword string) (string, *ParallelQueryInfo) {
+func (h *QueryHandler) buildReadParquetExprForParallel(path, originalSQL, keyword, database, measurement string) (string, *ParallelQueryInfo) {
 	options := buildReadParquetOptions()
 
 	// wrapWithBuffer wraps the expression with buffer VIEW UNION if in-memory data exists.
 	wrapWithBuffer := func(expr string) string {
-		if h.buffer != nil {
-			database, measurement := h.extractDBMeasurementFromPath(path)
-			if database != "" && measurement != "" {
-				expr = h.wrapWithBufferView(expr, keyword, database, measurement)
-			}
+		if h.buffer != nil && database != "" && measurement != "" {
+			expr = h.wrapWithBufferView(expr, keyword, database, measurement)
 		}
 		return expr
 	}
@@ -2601,7 +2598,7 @@ func (h *QueryHandler) convertSingleTableQueryForParallel(sql, sqlLower, databas
 
 	// Build replacement with parallel info (hot tier only)
 	path := h.getStoragePath(database, tableName)
-	replacement, parallelInfo := h.buildReadParquetExprForParallel(path, sql, "FROM")
+	replacement, parallelInfo := h.buildReadParquetExprForParallel(path, sql, "FROM", database, tableLower)
 
 	convertedSQL := sql[:idx] + replacement + sql[end:]
 
