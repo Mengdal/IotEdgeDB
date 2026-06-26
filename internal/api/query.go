@@ -2246,19 +2246,53 @@ func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement str
 	}
 
 	innerExpr := strings.TrimPrefix(expr, keyword+" ")
+
+	// Check whether there are any Parquet files for this measurement.
+	// If read_parquet with an empty glob throws "No files found" in DuckDB,
+	// the entire UNION ALL query fails before the buffer VIEW rows are returned.
+	// When there are no Parquet files, skip the read_parquet and query only the VIEW.
+	hasParquet := h.storage != nil && h.hasParquetFiles(dbName, measurement)
+
 	var b strings.Builder
 	b.WriteString(keyword)
-	// Single SELECT wrapping: (SELECT * FROM read_parquet(...) UNION ALL SELECT * FROM "view") _iedb_buf
-	// DuckDB rejects (read_parquet(...)) — table functions cannot be wrapped in bare parentheses.
-	// The alias _iedb_buf is required for DuckDB to accept the UNION ALL as a derived table.
-	b.WriteString(" (SELECT * FROM ")
-	b.WriteString(innerExpr)
-	for _, k := range keys {
-		b.WriteString(" UNION ALL SELECT * FROM ")
-		b.WriteString(database.QuoteIdent(database.ViewName(k)))
+	if hasParquet {
+		// Single SELECT wrapping: (SELECT * FROM read_parquet(...) UNION ALL SELECT * FROM "view") _iedb_buf
+		// DuckDB rejects (read_parquet(...)) — table functions cannot be wrapped in bare parentheses.
+		// The alias _iedb_buf is required for DuckDB to accept the UNION ALL as a derived table.
+		b.WriteString(" (SELECT * FROM ")
+		b.WriteString(innerExpr)
+		for _, k := range keys {
+			b.WriteString(" UNION ALL SELECT * FROM ")
+			b.WriteString(database.QuoteIdent(database.ViewName(k)))
+		}
+		b.WriteString(") _iedb_buf")
+	} else {
+		// No Parquet files — query buffer VIEWs only
+		b.WriteString(" * FROM ")
+		b.WriteString(database.QuoteIdent(database.ViewName(keys[0])))
+		for _, k := range keys[1:] {
+			b.WriteString(" UNION ALL SELECT * FROM ")
+			b.WriteString(database.QuoteIdent(database.ViewName(k)))
+		}
 	}
-	b.WriteString(") _iedb_buf")
 	return b.String()
+}
+
+// hasParquetFiles returns true if there are Parquet files in the storage path for the
+// given database/measurement. Used to decide whether to UNION buffer views with
+// read_parquet() (which throws an error in DuckDB when the glob matches 0 files).
+func (h *QueryHandler) hasParquetFiles(database, measurement string) bool {
+	path := h.getStoragePath(database, measurement)
+	// Strip the glob suffix to get the prefix
+	prefix := strings.TrimSuffix(path, "/**/*.parquet")
+	if prefix == path {
+		return false
+	}
+	files, err := h.storage.List(context.Background(), prefix)
+	if err != nil {
+		return false
+	}
+	return len(files) > 0
 }
 
 // buildReadParquetExprForMeasurement builds a read_parquet expression for a database/measurement pair.
