@@ -2295,6 +2295,17 @@ func (h *QueryHandler) buildReadParquetExprForMeasurement(database, measurement,
 func (h *QueryHandler) buildReadParquetExprForParallel(path, originalSQL, keyword string) (string, *ParallelQueryInfo) {
 	options := buildReadParquetOptions()
 
+	// wrapWithBuffer wraps the expression with buffer VIEW UNION if in-memory data exists.
+	wrapWithBuffer := func(expr string) string {
+		if h.buffer != nil {
+			database, measurement := h.extractDBMeasurementFromPath(path)
+			if database != "" && measurement != "" {
+				expr = h.wrapWithBufferView(expr, keyword, database, measurement)
+			}
+		}
+		return expr
+	}
+
 	// Apply partition pruning
 	optimizedPath, wasOptimized := h.pruner.OptimizeTablePath(path, originalSQL)
 
@@ -2307,8 +2318,12 @@ func (h *QueryHandler) buildReadParquetExprForParallel(path, originalSQL, keywor
 					Str("keyword", keyword).
 					Msg("Partition pruning: Using parallel execution")
 
-				// Return placeholder for template and parallel info
-				return keyword + " {PARTITION_PATH}", &ParallelQueryInfo{
+				// Return placeholder for template and parallel info.
+				// Buffer VIEW wrapping is applied to the template so each
+				// parallel partition task includes in-memory data.
+				template := keyword + " {PARTITION_PATH}"
+				template = wrapWithBuffer(template)
+				return template, &ParallelQueryInfo{
 					Paths:              pathList,
 					ReadParquetOptions: options,
 				}
@@ -2325,14 +2340,17 @@ func (h *QueryHandler) buildReadParquetExprForParallel(path, originalSQL, keywor
 			}
 			pathsStr.WriteString("]")
 			h.logger.Info().Int("partition_count", len(pathList)).Str("keyword", keyword).Msg("Partition pruning: Using targeted paths")
-			return keyword + " read_parquet(" + pathsStr.String() + ", " + options + ")", nil
+			expr := keyword + " read_parquet(" + pathsStr.String() + ", " + options + ")"
+			return wrapWithBuffer(expr), nil
 		} else if pathStr, ok := optimizedPath.(string); ok {
 			h.logger.Info().Str("optimized_path", pathStr).Str("keyword", keyword).Msg("Partition pruning: Using optimized path")
-			return keyword + " read_parquet(" + quotePath(pathStr) + ", " + options + ")", nil
+			expr := keyword + " read_parquet(" + quotePath(pathStr) + ", " + options + ")"
+			return wrapWithBuffer(expr), nil
 		}
 	}
 
-	return keyword + " read_parquet(" + quotePath(path) + ", " + options + ")", nil
+	expr := keyword + " read_parquet(" + quotePath(path) + ", " + options + ")"
+	return wrapWithBuffer(expr), nil
 }
 
 // shouldSkipTableConversion returns true if the table name should not be converted to a storage path
