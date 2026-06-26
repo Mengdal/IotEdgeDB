@@ -5,6 +5,7 @@ package database
 import (
 	"database/sql/driver"
 	"fmt"
+	"sort"
 	"unsafe"
 
 	"iedb/internal/ingest"
@@ -142,6 +143,53 @@ func BuildArrowRecordBatch(entry *ingest.Entry, schema *arrow.Schema) (arrow.Rec
 	}
 
 	return record, nil
+}
+
+// BuildArrowSchema infers an Arrow schema from the Entry's column data types.
+// This is used when the entry's arrowSchema field has not been populated yet
+// (i.e., data is still in-memory and has not been flushed to Parquet).
+func BuildArrowSchema(entry *ingest.Entry) *arrow.Schema {
+	columns := entry.GetColumns()
+	if columns == nil {
+		return nil
+	}
+	fields := make([]arrow.Field, 0, len(columns))
+	for name, cd := range columns {
+		var dt arrow.DataType
+		switch cd.Data.(type) {
+		case []string:
+			dt = arrow.BinaryTypes.String
+		case []int64:
+			if name == "time" || name == "_time" {
+				dt = arrow.FixedWidthTypes.Timestamp_us
+			} else {
+				dt = arrow.PrimitiveTypes.Int64
+			}
+		case []float64:
+			dt = arrow.PrimitiveTypes.Float64
+		case []bool:
+			dt = arrow.FixedWidthTypes.Boolean
+		case []decimal128.Num:
+			dt = &arrow.Decimal128Type{Precision: 38, Scale: 19}
+		default:
+			continue // unsupported type, skip column
+		}
+		fields = append(fields, arrow.Field{Name: name, Type: dt, Nullable: true})
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	// Ensure "time" column is first for consistent ordering.
+	sort.Slice(fields, func(i, j int) bool {
+		if fields[i].Name == "time" {
+			return true
+		}
+		if fields[j].Name == "time" {
+			return false
+		}
+		return fields[i].Name < fields[j].Name
+	})
+	return arrow.NewSchema(fields, nil)
 }
 
 // registerBufferView wraps an Arrow RecordBatch in a RecordReader and registers

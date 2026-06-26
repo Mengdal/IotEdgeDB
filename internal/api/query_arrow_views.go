@@ -50,7 +50,12 @@ func registerPendingViews(driverConn any, views map[string]any) (func(), error) 
 		}
 		schema := entry.GetArrowSchema()
 		if schema == nil {
-			continue
+			// Schema not yet inferred (data is still in-memory, not flushed).
+			// Build the Arrow schema on the fly from the column data types.
+			schema = database.BuildArrowSchema(entry)
+			if schema == nil {
+				continue
+			}
 		}
 
 		rec, err := database.BuildArrowRecordBatch(entry, schema)
