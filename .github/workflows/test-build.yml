@@ -3,7 +3,7 @@ name: Test Build (no release)
 on:
   push:
     branches:
-      - 'test/**'
+      - 'feat/**'
   workflow_dispatch:
 
 jobs:
