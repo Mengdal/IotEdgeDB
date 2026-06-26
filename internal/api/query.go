@@ -2267,14 +2267,23 @@ func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement str
 		}
 		b.WriteString(") _iedb_buf")
 	} else {
-		// No Parquet files — query buffer VIEWs only
-		b.WriteString(" * FROM ")
-		b.WriteString(database.QuoteIdent(database.ViewName(keys[0])))
-		for _, k := range keys[1:] {
-			b.WriteString(" UNION ALL SELECT * FROM ")
-			b.WriteString(database.QuoteIdent(database.ViewName(k)))
+		// No Parquet files — replace the read_parquet(...) entirely with the VIEW.
+		// The keyword is already written (e.g. "FROM"), so we just add " view_name".
+		// For multiple schema variants, wrap in a derived table.
+		if len(keys) == 1 {
+			b.WriteString(" ")
+			b.WriteString(database.QuoteIdent(database.ViewName(keys[0])))
+		} else {
+			b.WriteString(" (SELECT * FROM ")
+			b.WriteString(database.QuoteIdent(database.ViewName(keys[0])))
+			for _, k := range keys[1:] {
+				b.WriteString(" UNION ALL SELECT * FROM ")
+				b.WriteString(database.QuoteIdent(database.ViewName(k)))
+			}
+			b.WriteString(") _iedb_buf")
 		}
 	}
+	return b.String()
 	return b.String()
 }
 
