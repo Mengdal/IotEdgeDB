@@ -105,12 +105,15 @@ func TestTryEnqueueFlush_QueueFull(t *testing.T) {
 
 func TestTryEnqueueFlush_CtxCanceled(t *testing.T) {
 	buf := newCriticalBuf(t)
-	buf.cancel()
 	defer buf.Close()
-	drainFlushQueue(buf)
+
+	// With the restructured tryEnqueueFlush, ctx.Done() is checked first
+	// in its own select — the queue-send arm cannot compete.  This makes
+	// the outcome deterministic regardless of queue state.
+	buf.cancel()
 
 	_, cancel := context.WithCancel(context.Background())
-	task := flushTask{ cancel: cancel, bufferKey: "k", entry: &bufferEntry{}}
+	task := flushTask{cancel: cancel, bufferKey: "k", entry: &bufferEntry{}}
 	got := buf.tryEnqueueFlush(task, cancel, "k", 3)
 	if got != flushCtxCanceled {
 		t.Fatalf("expected flushCtxCanceled, got %v", got)

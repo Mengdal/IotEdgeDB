@@ -2017,6 +2017,23 @@ func (b *ArrowBuffer) tryEnqueueFlush(
 	bufferKey string,
 	totalBuffered int,
 ) flushSendOutcome {
+	// ctx cancellation is a global stop signal — check it first, before
+	// any attempt to send on the queue.  The original three-arm select
+	// made ctx.Done() equal-priority with the queue send; Go would
+	// randomly choose the send when both were ready, enqueuing a task
+	// that exiting workers would never process (orphaned data).
+	select {
+	case <-b.ctx.Done():
+		flushCancel()
+		b.logger.Warn().
+			Str("buffer_key", bufferKey).
+			Int("records", totalBuffered).
+			Msg("Flush queue send aborted: ArrowBuffer ctx canceled (data preserved in WAL)")
+		metrics.Get().IncWALRecordsPreserved(int64(totalBuffered))
+		return flushCtxCanceled
+	default:
+	}
+
 	if b.closing.Load() {
 		flushCancel()
 		b.logger.Warn().
@@ -2026,6 +2043,7 @@ func (b *ArrowBuffer) tryEnqueueFlush(
 		metrics.Get().IncWALRecordsPreserved(int64(totalBuffered))
 		return flushSkipClosing
 	}
+
 	select {
 	case b.flushQueue <- task:
 		b.queueDepth.Add(1)
@@ -2035,14 +2053,6 @@ func (b *ArrowBuffer) tryEnqueueFlush(
 			Int64("queue_depth", b.queueDepth.Load()).
 			Msg("Buffer size exceeded, queued flush to worker pool")
 		return flushQueued
-	case <-b.ctx.Done():
-		flushCancel()
-		b.logger.Warn().
-			Str("buffer_key", bufferKey).
-			Int("records", totalBuffered).
-			Msg("Flush queue send aborted: ArrowBuffer ctx canceled (data preserved in WAL)")
-		metrics.Get().IncWALRecordsPreserved(int64(totalBuffered))
-		return flushCtxCanceled
 	default:
 		flushCancel()
 		b.logger.Warn().
@@ -2972,7 +2982,10 @@ func (b *ArrowBuffer) evictOldestEntries(targetBytes uint64, inlineFlushCount *i
 				arrowSchema: arrowSchema,
 			}
 			startTime := time.Now()
-			if err := b.flushPartitionedData(context.Background(), oldestKey, parts[0], parts[1], merged, "hard_limit", startTime); err != nil {
+			flushCtx, flushCancel := context.WithTimeout(b.ctx, b.flushTimeout)
+			err := b.flushPartitionedData(flushCtx, oldestKey, parts[0], parts[1], merged, "hard_limit", startTime)
+			flushCancel()
+			if err != nil {
 				b.logger.Error().
 					Str("buffer_key", oldestKey).
 					Int("records", merged.recordCount).

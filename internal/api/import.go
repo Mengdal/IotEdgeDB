@@ -422,15 +422,6 @@ func (h *ImportHandler) handleLineProtocolImport(c *fiber.Ctx) error {
 		importedMeasurements = append(importedMeasurements, measurement)
 	}
 
-	// Force flush to ensure data is persisted before returning
-	if err := h.arrowBuffer.FlushAll(c.Context()); err != nil {
-		h.totalErrors.Add(1)
-		h.logger.Error().Err(err).Str("database", database).Msg("LP import: flush failed")
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to flush imported data: " + err.Error(),
-		})
-	}
-
 	durationMs := time.Since(start).Milliseconds()
 	h.totalRecords.Add(totalRows)
 
@@ -912,15 +903,6 @@ func (h *ImportHandler) handleTLEImport(c *fiber.Ctx) error {
 			Msg("TLE import: failed to write to buffer")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fmt.Sprintf("failed to ingest measurement %q: %v", measurement, err),
-		})
-	}
-
-	// Force flush to ensure data is persisted before returning
-	if err := h.arrowBuffer.FlushAll(c.Context()); err != nil {
-		h.totalErrors.Add(1)
-		h.logger.Error().Err(err).Str("database", database).Msg("TLE import: flush failed")
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to flush imported data: " + err.Error(),
 		})
 	}
 
