@@ -2290,13 +2290,13 @@ func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement str
 // hasParquetFiles returns true if there are Parquet files in the storage path for the
 // given database/measurement. Used to decide whether to UNION buffer views with
 // read_parquet() (which throws an error in DuckDB when the glob matches 0 files).
+//
+// NOTE: getStoragePath returns the full path including the base prefix (e.g.
+// "/data/iedb/db/meas/**/*.parquet"), but storage.List internally joins with
+// the base path again.  We must NOT pass the full path to List — pass only
+// the database/measurement prefix so it is not doubled.
 func (h *QueryHandler) hasParquetFiles(database, measurement string) bool {
-	path := h.getStoragePath(database, measurement)
-	// Strip the glob suffix to get the prefix
-	prefix := strings.TrimSuffix(path, "/**/*.parquet")
-	if prefix == path {
-		return false
-	}
+	prefix := database + "/" + measurement
 	files, err := h.storage.List(context.Background(), prefix)
 	if err != nil {
 		return false
