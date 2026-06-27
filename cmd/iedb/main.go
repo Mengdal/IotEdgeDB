@@ -346,6 +346,10 @@ func main() {
 		CheckIntervalMS:   cfg.Ingest.MemoryCheckIntervalMS,
 	}, duckdbLimitMB, logger.Get("memory-monitor"))
 	go memoryMonitor.Run(context.Background())
+	shutdownCoordinator.RegisterHook("memory-monitor", func(ctx context.Context) error {
+		memoryMonitor.Stop()
+		return nil
+	}, shutdown.PriorityBuffer)
 
 	// 2. Adaptive flush engine (replaces fixed-size periodic flush)
 	maxAge := time.Duration(cfg.Ingest.MaxBufferAgeSeconds) * time.Second

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,6 +41,7 @@ type MemoryMonitor struct {
 	totalMemory uint64              // 系统总内存（字节），启动时检测一次
 	duckdbLimit uint64              // DuckDB memory_limit（字节）
 	stopCh      chan struct{}
+	stopOnce    sync.Once
 	logger      zerolog.Logger
 
 	// === 可热加载 ===
@@ -218,9 +220,11 @@ func (m *MemoryMonitor) MinBufferBytes() uint64 {
 	return m.minBufferBytes.Load()
 }
 
-// Stop 停止监控循环。
+// Stop 停止监控循环。可安全地多次调用。
 func (m *MemoryMonitor) Stop() {
-	close(m.stopCh)
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+	})
 }
 
 // ValidateConfig 实现 config.Reloadable 接口。

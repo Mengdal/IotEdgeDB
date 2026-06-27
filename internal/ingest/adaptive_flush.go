@@ -33,7 +33,6 @@ type AdaptiveFlushEngine struct {
 	maxBufferBytes atomic.Uint64
 	minBufferBytes atomic.Uint64
 	maxAge         atomic.Int64 // 纳秒
-	candidatesBuf  []flushCandidate
 	logger         zerolog.Logger
 }
 
@@ -135,7 +134,7 @@ func (e *AdaptiveFlushEngine) evaluate() {
 
 // collectCandidates 遍历所有 shard，收集 bufferEntry 的快照（按值复制）。
 func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
-	e.candidatesBuf = e.candidatesBuf[:0]
+	var candidates []flushCandidate
 	for i := uint32(0); i < e.buffer.shardCount; i++ {
 		shard := e.buffer.shards[i]
 		shard.mu.RLock()
@@ -143,7 +142,7 @@ func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 			if entry.isEmpty() {
 				continue
 			}
-			e.candidatesBuf = append(e.candidatesBuf, flushCandidate{
+			candidates = append(candidates, flushCandidate{
 				shardIdx:       int(i),
 				bufferKey:      key,
 				estimatedBytes: entry.estimatedBytes,
@@ -153,7 +152,7 @@ func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 		}
 		shard.mu.RUnlock()
 	}
-	return e.candidatesBuf
+	return candidates
 }
 
 // filterExpired 筛选出超过 maxAge 的缓冲。
@@ -209,22 +208,31 @@ func (e *AdaptiveFlushEngine) flushUntilBelow(
 		if remaining <= targetBytes {
 			break
 		}
-		remaining -= candidates[i].estimatedBytes
 		if candidates[i].trigger == "" {
 			candidates[i].trigger = "hard_limit"
 		}
-		e.flushCandidate(candidates[i])
+		flushed := e.flushCandidate(candidates[i])
+		if flushed > 0 {
+			// Only deduct bytes actually flushed.  If the entry was already
+			// empty (flushed by a concurrent path between collectCandidates
+			// and now), flushed==0 and remaining is unchanged.
+			if flushed > remaining {
+				remaining = 0
+			} else {
+				remaining -= flushed
+			}
+		}
 	}
 }
 
 // flushCandidate 触发单个 bufferKey 的刷盘。
-func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
+func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) uint64 {
 	shard := e.buffer.shards[c.shardIdx]
 	shard.mu.Lock()
 	entry, exists := shard.buffers[c.bufferKey]
 	if !exists || entry.isEmpty() {
 		shard.mu.Unlock()
-		return
+		return 0
 	}
 	recordCount := entry.recordCount
 	database, measurement := splitKeyToDBAndMeas(c.bufferKey)
@@ -265,6 +273,11 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 		prependFlushDataToEntry(entry, columns, tagCols, recordCount)
 	}
 	shard.mu.Unlock()
+
+	if outcome == flushQueued {
+		return c.estimatedBytes
+	}
+	return 0
 }
 
 // splitKeyToDBAndMeas 将 bufferKey 拆分为 database 和 measurement，
