@@ -1,9 +1,9 @@
 name: Test Build (no release)
 
 on:
-  push:
-    branches:
-      - 'feat/**'
+  # push:
+  #   branches:
+  #     - 'feat/**'
   workflow_dispatch:
 
 jobs:
