@@ -369,6 +369,63 @@ func TestEvaluate_PressureTriggersFlush(t *testing.T) {
 }
 
 // ============================================================================
+// SECTION 5b: flushCandidate return value (F2 fix)
+// ============================================================================
+
+func TestFlushCandidate_ReturnsBytesWhenFlushed(t *testing.T) {
+	buf := newCriticalBuf(t)
+	defer buf.Close()
+	drainFlushQueue(buf)
+
+	buf.WriteColumnarDirect(context.Background(), "db", "cpu", map[string][]interface{}{
+		"host": {"srv1"}, "usage": {float64(1.0)},
+	})
+	drainFlushQueue(buf)
+
+	keys := buf.AllBufferKeys()
+	t.Logf("buffer keys: %v", keys)
+	if len(keys) == 0 {
+		t.Skip("no entries (auto-flushed)")
+	}
+
+	m := newCriticalMonitor(t)
+	defer m.Stop()
+	e := NewAdaptiveFlushEngine(buf, m, 30*time.Second, zerolog.New(zerolog.NewTestWriter(t)).Level(zerolog.Disabled))
+
+	// Use collectCandidates to get the correct shardIdx for the entry
+	candidates := e.collectCandidates()
+	if len(candidates) == 0 {
+		t.Fatal("no candidates collected")
+	}
+	c := candidates[0]
+	c.estimatedBytes = 4096 // verify we return the candidate's value, not some other
+	c.trigger = "hard_limit"
+
+	flushed := e.flushCandidate(c)
+	if flushed != 4096 {
+		t.Errorf("flushCandidate should return estimatedBytes when entry exists, got %d", flushed)
+	}
+}
+
+func TestFlushCandidate_ReturnsZeroWhenEntryAlreadyGone(t *testing.T) {
+	buf := newCriticalBuf(t)
+	defer buf.Close()
+	m := newCriticalMonitor(t)
+	defer m.Stop()
+	e := NewAdaptiveFlushEngine(buf, m, 30*time.Second, zerolog.New(zerolog.NewTestWriter(t)).Level(zerolog.Disabled))
+
+	// Non-existent key → entry already gone → should return 0
+	c := flushCandidate{
+		shardIdx: 0, bufferKey: "no/such__key", estimatedBytes: 500,
+		recordCount: 1, startTime: time.Now(), trigger: "hard_limit",
+	}
+	flushed := e.flushCandidate(c)
+	if flushed != 0 {
+		t.Errorf("flushCandidate should return 0 when entry is already gone, got %d", flushed)
+	}
+}
+
+// ============================================================================
 // SECTION 6: flushWorker
 // ============================================================================
 

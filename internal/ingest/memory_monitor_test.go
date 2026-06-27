@@ -393,3 +393,30 @@ func TestMemoryMonitor_BufferLimitAfterReload(t *testing.T) {
 		t.Errorf("after auto reload: expected 4GB, got %d", limit)
 	}
 }
+
+// ============================================================================
+// F3 fix: Stop() must not panic on double-close
+// ============================================================================
+
+func TestMemoryMonitor_StopDoubleClose(t *testing.T) {
+	logger := zerolog.New(zerolog.NewTestWriter(t)).Level(zerolog.Disabled)
+	m := NewMemoryMonitor(MemoryMonitorConfig{
+		MaxBufferMemoryMB: 128,
+		MinBufferMemoryMB: 16,
+		GreenPct:          50,
+		RedPct:            20,
+	}, 0, logger)
+
+	// First Stop should succeed
+	m.Stop()
+
+	// Second Stop should NOT panic (sync.Once guard)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Stop() panicked on second call: %v", r)
+			}
+		}()
+		m.Stop()
+	}()
+}
