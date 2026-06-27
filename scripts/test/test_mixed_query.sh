@@ -67,12 +67,13 @@ BATCH_B="cpu,host=srv-b1 usage=30.0 ${TS_B1}
 cpu,host=srv-b2 usage=40.0 ${TS_B2}"
 
 # Write batch B then query in rapid succession — beat the 1s adaptive engine tick
-RESULT=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/v1/write/line-protocol" \
+curl -s -o /dev/null -X POST "$BASE/api/v1/write/line-protocol" \
     -H "Content-Type: text/plain" -H "x-iedb-database: $DB" $(auth) \
-    -d "$BATCH_B" && \
-    curl -s -X POST "$BASE/api/v1/query" \
+    -d "$BATCH_B"
+
+RESULT=$(curl -s -X POST "$BASE/api/v1/query" \
     -H "Content-Type: application/json" -H "x-iedb-database: $DB" $(auth) \
-    -d '{"sql":"SELECT host, usage FROM cpu ORDER BY usage"}')
+    -d '{"sql":"SELECT host, usage FROM cpu ORDER BY host"}')
 
 ROW_COUNT=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('row_count',0))" 2>/dev/null)
 HOSTS=$(echo "$RESULT" | python3 -c "import sys,json; print(','.join(r[0] for r in json.load(sys.stdin).get('data',[])))" 2>/dev/null)
