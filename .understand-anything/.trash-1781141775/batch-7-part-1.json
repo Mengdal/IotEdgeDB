@@ -1,0 +1,2720 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/cluster/raft/errors.go",
+      "type": "file",
+      "name": "errors.go",
+      "filePath": "internal/cluster/raft/errors.go",
+      "summary": "Raft 包的错误哨兵定义，提供 ErrManifestApply 作为清单操作失败的统一错误标识，位于叶子节点包中避免循环导入。",
+      "tags": [
+        "error-handling",
+        "raft",
+        "sentinel"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/raft/fsm.go",
+      "type": "file",
+      "name": "fsm.go",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "summary": "Raft 集群的有限状态机（FSM）实现，管理节点注册、角色切换、文件清单和元数据持久化，通过 hashicorp/raft 库驱动。",
+      "tags": [
+        "raft",
+        "state-machine",
+        "cluster-management"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go 类型化命令模式 + JSON 序列化: 通过 CommandType 枚举和类型化 Payload 实现 FSM 命令分发。"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:Apply",
+      "type": "function",
+      "name": "Apply",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        237,
+        270
+      ],
+      "summary": "应用 Raft 日志条目，通过 CommandType 分发到具体处理方法",
+      "tags": [
+        "raft",
+        "command-dispatch"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyAddNode",
+      "type": "function",
+      "name": "applyAddNode",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        272,
+        293
+      ],
+      "summary": "添加节点到集群 FSM",
+      "tags": [
+        "raft",
+        "node-management"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyRemoveNode",
+      "type": "function",
+      "name": "applyRemoveNode",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        295,
+        315
+      ],
+      "summary": "从集群 FSM 移除节点",
+      "tags": [
+        "raft",
+        "node-management"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyUpdateNode",
+      "type": "function",
+      "name": "applyUpdateNode",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        317,
+        337
+      ],
+      "summary": "更新节点信息",
+      "tags": [
+        "raft",
+        "node-management"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyUpdateNodeState",
+      "type": "function",
+      "name": "applyUpdateNodeState",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        339,
+        367
+      ],
+      "summary": "更新节点状态（健康/不可用）",
+      "tags": [
+        "raft",
+        "node-management"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyPromoteWriter",
+      "type": "function",
+      "name": "applyPromoteWriter",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        369,
+        423
+      ],
+      "summary": "将写入节点提升为主写入节点，处理 writer 故障转移",
+      "tags": [
+        "raft",
+        "failover"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyDemoteWriter",
+      "type": "function",
+      "name": "applyDemoteWriter",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        425,
+        454
+      ],
+      "summary": "将主写入节点降级为备用节点",
+      "tags": [
+        "raft",
+        "failover"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyRegisterFile",
+      "type": "function",
+      "name": "applyRegisterFile",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        456,
+        515
+      ],
+      "summary": "在集群清单中注册新写入的文件",
+      "tags": [
+        "raft",
+        "file-manifest"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyDeleteFile",
+      "type": "function",
+      "name": "applyDeleteFile",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        517,
+        557
+      ],
+      "summary": "从集群清单中删除文件记录",
+      "tags": [
+        "raft",
+        "file-manifest"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyUpdateFile",
+      "type": "function",
+      "name": "applyUpdateFile",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        559,
+        606
+      ],
+      "summary": "更新文件元数据（用于部分重写后修改大小/校验和）",
+      "tags": [
+        "raft",
+        "file-manifest"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyAssignCompactor",
+      "type": "function",
+      "name": "applyAssignCompactor",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        608,
+        634
+      ],
+      "summary": "将节点指派为活跃的压缩器",
+      "tags": [
+        "raft",
+        "compaction"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:applyBatchFileOps",
+      "type": "function",
+      "name": "applyBatchFileOps",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        636,
+        667
+      ],
+      "summary": "批量处理文件操作（注册和删除），减少 Raft 日志条目数",
+      "tags": [
+        "raft",
+        "file-manifest"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:Snapshot",
+      "type": "function",
+      "name": "Snapshot",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        670,
+        689
+      ],
+      "summary": "创建 FSM 快照用于 Raft 快照和恢复",
+      "tags": [
+        "raft",
+        "snapshot"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:Restore",
+      "type": "function",
+      "name": "Restore",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        692,
+        729
+      ],
+      "summary": "从快照恢复 FSM 状态",
+      "tags": [
+        "raft",
+        "snapshot"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:GetNode",
+      "type": "function",
+      "name": "GetNode",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        732,
+        741
+      ],
+      "summary": "根据节点 ID 查询节点信息",
+      "tags": [
+        "raft",
+        "query"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:GetAllNodes",
+      "type": "function",
+      "name": "GetAllNodes",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        744,
+        753
+      ],
+      "summary": "获取所有节点的副本（用于快照持久化）",
+      "tags": [
+        "raft",
+        "query"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:GetNodesByRole",
+      "type": "function",
+      "name": "GetNodesByRole",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        756,
+        767
+      ],
+      "summary": "按角色筛选节点列表",
+      "tags": [
+        "raft",
+        "query"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:GetFile",
+      "type": "function",
+      "name": "GetFile",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        788,
+        797
+      ],
+      "summary": "根据路径查询文件清单条目",
+      "tags": [
+        "raft",
+        "query"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:GetAllFiles",
+      "type": "function",
+      "name": "GetAllFiles",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        807,
+        816
+      ],
+      "summary": "获取所有文件清单条目（用于快照）",
+      "tags": [
+        "raft",
+        "query"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:GetFilesByDatabase",
+      "type": "function",
+      "name": "GetFilesByDatabase",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        821,
+        836
+      ],
+      "summary": "按数据库筛选文件清单条目",
+      "tags": [
+        "raft",
+        "query"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm.go:Persist",
+      "type": "function",
+      "name": "Persist",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        854,
+        874
+      ],
+      "summary": "将 FSM 快照持久化到存储",
+      "tags": [
+        "raft",
+        "snapshot"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/cluster/raft/fsm.go:ClusterFSM",
+      "type": "class",
+      "name": "ClusterFSM",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        224,
+        244
+      ],
+      "summary": "集群 Raft FSM 核心结构体，管理节点注册表和文件清单，提供快照/恢复和查询接口",
+      "tags": [
+        "raft",
+        "state-machine"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:internal/cluster/raft/fsm.go:FSMSnapshot",
+      "type": "class",
+      "name": "FSMSnapshot",
+      "filePath": "internal/cluster/raft/fsm.go",
+      "lineRange": [
+        222,
+        227
+      ],
+      "summary": "FSM 快照数据容器，用于 Raft 快照持久化和恢复",
+      "tags": [
+        "raft",
+        "snapshot"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/raft/fsm_test.go",
+      "type": "file",
+      "name": "fsm_test.go",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "summary": "ClusterFSM 的全面单元测试，覆盖节点生命周期管理、文件清单操作、快照恢复、批量操作和回调机制的所有核心路径",
+      "tags": [
+        "test",
+        "raft",
+        "state-machine"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:makeCommand",
+      "type": "function",
+      "name": "makeCommand",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        18,
+        32
+      ],
+      "summary": "创建测试用的 FSM 命令",
+      "tags": [
+        "test",
+        "helper"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMAddNode",
+      "type": "function",
+      "name": "TestFSMAddNode",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        34,
+        72
+      ],
+      "summary": "测试添加节点的完整流程和状态验证",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMRemoveNode",
+      "type": "function",
+      "name": "TestFSMRemoveNode",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        74,
+        102
+      ],
+      "summary": "测试移除节点后的查询和隔离性",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMUpdateNodeState",
+      "type": "function",
+      "name": "TestFSMUpdateNodeState",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        104,
+        127
+      ],
+      "summary": "测试节点状态更新",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMUpdateNodeStateNotFound",
+      "type": "function",
+      "name": "TestFSMUpdateNodeStateNotFound",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        129,
+        141
+      ],
+      "summary": "测试更新不存在节点时的行为",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMGetNodesByRole",
+      "type": "function",
+      "name": "TestFSMGetNodesByRole",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        143,
+        174
+      ],
+      "summary": "测试按角色查询节点列表的正确性",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMSnapshotRestore",
+      "type": "function",
+      "name": "TestFSMSnapshotRestore",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        176,
+        221
+      ],
+      "summary": "测试 FSM 快照创建和完整恢复流程",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMCallbacks",
+      "type": "function",
+      "name": "TestFSMCallbacks",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        223,
+        263
+      ],
+      "summary": "测试 SetCallbacks 中注册的节点事件回调",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMGetAllNodes",
+      "type": "function",
+      "name": "TestFSMGetAllNodes",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        265,
+        279
+      ],
+      "summary": "测试获取所有节点列表的快照一致性",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMCloneIsolation",
+      "type": "function",
+      "name": "TestFSMCloneIsolation",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        281,
+        297
+      ],
+      "summary": "测试 FSM 快照的隔离性（修改快照不影响源）",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMTotalCores",
+      "type": "function",
+      "name": "TestFSMTotalCores",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        299,
+        318
+      ],
+      "summary": "测试节点总核心数统计",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMTotalCoresAfterRemove",
+      "type": "function",
+      "name": "TestFSMTotalCoresAfterRemove",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        320,
+        345
+      ],
+      "summary": "测试移除节点后核心数统计的准确性",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMSnapshotRestoreWithCores",
+      "type": "function",
+      "name": "TestFSMSnapshotRestoreWithCores",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        356,
+        393
+      ],
+      "summary": "测试含核心数信息的快照恢复",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:makeFileEntry",
+      "type": "function",
+      "name": "makeFileEntry",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        416,
+        431
+      ],
+      "summary": "创建测试用的文件条目",
+      "tags": [
+        "test",
+        "helper"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMRegisterFile",
+      "type": "function",
+      "name": "TestFSMRegisterFile",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        433,
+        465
+      ],
+      "summary": "测试文件注册的完整流程",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMRegisterFileRejectsZeroCreatedAt",
+      "type": "function",
+      "name": "TestFSMRegisterFileRejectsZeroCreatedAt",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        470,
+        499
+      ],
+      "summary": "测试拒绝创建时间为零的文件注册",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMDeleteFile",
+      "type": "function",
+      "name": "TestFSMDeleteFile",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        501,
+        519
+      ],
+      "summary": "测试文件删除操作",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMDeleteNonexistentFile",
+      "type": "function",
+      "name": "TestFSMDeleteNonexistentFile",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        521,
+        530
+      ],
+      "summary": "测试删除不存在文件时的行为",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMGetFilesByDatabase",
+      "type": "function",
+      "name": "TestFSMGetFilesByDatabase",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        532,
+        560
+      ],
+      "summary": "测试按数据库查询文件清单",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMFileCallbacks",
+      "type": "function",
+      "name": "TestFSMFileCallbacks",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        562,
+        596
+      ],
+      "summary": "测试文件操作事件回调",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMFilesByDatabaseIndexConsistency",
+      "type": "function",
+      "name": "TestFSMFilesByDatabaseIndexConsistency",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        601,
+        681
+      ],
+      "summary": "测试按数据库索引的一致性",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMSnapshotRestoreWithFiles",
+      "type": "function",
+      "name": "TestFSMSnapshotRestoreWithFiles",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        683,
+        730
+      ],
+      "summary": "测试含文件清单的快照创建和恢复",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOps",
+      "type": "function",
+      "name": "TestFSMBatchFileOps",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        752,
+        805
+      ],
+      "summary": "测试批量文件操作的完整流程",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOpsRegistersOnly",
+      "type": "function",
+      "name": "TestFSMBatchFileOpsRegistersOnly",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        809,
+        828
+      ],
+      "summary": "测试纯注册操作的批处理",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOpsUnknownOpType",
+      "type": "function",
+      "name": "TestFSMBatchFileOpsUnknownOpType",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        832,
+        847
+      ],
+      "summary": "测试未知操作类型的容错处理",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOpsEmpty",
+      "type": "function",
+      "name": "TestFSMBatchFileOpsEmpty",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        850,
+        860
+      ],
+      "summary": "测试空批处理操作",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/cluster/raft/fsm_test.go:testSnapshotSink",
+      "type": "class",
+      "name": "testSnapshotSink",
+      "filePath": "internal/cluster/raft/fsm_test.go",
+      "lineRange": [
+        1,
+        4
+      ],
+      "summary": "测试用的快照接收器模拟实现",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/raft/logger.go",
+      "type": "file",
+      "name": "logger.go",
+      "filePath": "internal/cluster/raft/logger.go",
+      "summary": "将 zerolog 适配到 hashicorp/go-hclog 接口的适配器，使 Raft 库的内部日志通过项目统一的 zerolog 管道输出",
+      "tags": [
+        "logging",
+        "adapter",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/logger.go:Log",
+      "type": "function",
+      "name": "Log",
+      "filePath": "internal/cluster/raft/logger.go",
+      "lineRange": [
+        25,
+        38
+      ],
+      "summary": "将 hclog 级别映射到 zerolog 级别的通用日志方法",
+      "tags": [
+        "logging",
+        "adapter"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/logger.go:argsToFields",
+      "type": "function",
+      "name": "argsToFields",
+      "filePath": "internal/cluster/raft/logger.go",
+      "lineRange": [
+        107,
+        120
+      ],
+      "summary": "将 hclog 的键值对参数转换为 zerolog 字段格式",
+      "tags": [
+        "logging",
+        "helper"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/cluster/raft/logger.go:zerologAdapter",
+      "type": "class",
+      "name": "zerologAdapter",
+      "filePath": "internal/cluster/raft/logger.go",
+      "lineRange": [
+        12,
+        14
+      ],
+      "summary": "zerolog 到 go-hclog 的适配器，实现 hclog.Logger 接口的所有方法",
+      "tags": [
+        "logging",
+        "adapter"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/raft/node.go",
+      "type": "file",
+      "name": "node.go",
+      "filePath": "internal/cluster/raft/node.go",
+      "summary": "包装 hashicorp/raft 的高层节点 API，提供节点生命周期管理、Raft 集群操作和文件清单命令提交等功能",
+      "tags": [
+        "raft",
+        "node",
+        "cluster-management"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go Raft 节点包装模式: 封装底层 hashicorp/raft 库，通过 FSM 接口实现高级集群操作。"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:DefaultNodeConfig",
+      "type": "function",
+      "name": "DefaultNodeConfig",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        51,
+        61
+      ],
+      "summary": "返回包含合理默认值的 Raft 节点配置",
+      "tags": [
+        "raft",
+        "config"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:NewNode",
+      "type": "function",
+      "name": "NewNode",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        80,
+        113
+      ],
+      "summary": "创建并初始化新的 Raft 节点，包括传输层、日志存储和快照存储",
+      "tags": [
+        "raft",
+        "node"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        116,
+        254
+      ],
+      "summary": "启动 Raft 节点，包括配置调优、引导集群或加入现有集群",
+      "tags": [
+        "raft",
+        "node"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:Stop",
+      "type": "function",
+      "name": "Stop",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        257,
+        286
+      ],
+      "summary": "优雅停止 Raft 节点并释放资源",
+      "tags": [
+        "raft",
+        "node"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:Apply",
+      "type": "function",
+      "name": "Apply",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        332,
+        359
+      ],
+      "summary": "提交命令到 Raft 日志并等待提交完成",
+      "tags": [
+        "raft",
+        "command"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:AddVoter",
+      "type": "function",
+      "name": "AddVoter",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        362,
+        373
+      ],
+      "summary": "向 Raft 集群添加投票节点",
+      "tags": [
+        "raft",
+        "cluster"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:RemoveServer",
+      "type": "function",
+      "name": "RemoveServer",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        376,
+        388
+      ],
+      "summary": "从 Raft 集群移除服务器节点",
+      "tags": [
+        "raft",
+        "cluster"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:GetConfiguration",
+      "type": "function",
+      "name": "GetConfiguration",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        390,
+        404
+      ],
+      "summary": "获取当前 Raft 集群配置",
+      "tags": [
+        "raft",
+        "cluster"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:WaitForLeader",
+      "type": "function",
+      "name": "WaitForLeader",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        422,
+        439
+      ],
+      "summary": "等待 Raft 集群选举出领导者，带超时",
+      "tags": [
+        "raft",
+        "cluster"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:AddNode",
+      "type": "function",
+      "name": "AddNode",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        464,
+        476
+      ],
+      "summary": "通过 Raft 向集群添加节点的 FSM 命令",
+      "tags": [
+        "raft",
+        "cluster"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:RemoveNode",
+      "type": "function",
+      "name": "RemoveNode",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        479,
+        491
+      ],
+      "summary": "通过 Raft 从集群移除节点的 FSM 命令",
+      "tags": [
+        "raft",
+        "cluster"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:UpdateNodeState",
+      "type": "function",
+      "name": "UpdateNodeState",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        494,
+        506
+      ],
+      "summary": "通过 Raft 更新节点状态的 FSM 命令",
+      "tags": [
+        "raft",
+        "cluster"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:PromoteWriter",
+      "type": "function",
+      "name": "PromoteWriter",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        509,
+        521
+      ],
+      "summary": "通过 Raft 提升写入节点为主节点的 FSM 命令",
+      "tags": [
+        "raft",
+        "failover"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:DemoteWriter",
+      "type": "function",
+      "name": "DemoteWriter",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        524,
+        536
+      ],
+      "summary": "通过 Raft 降级主写入节点的 FSM 命令",
+      "tags": [
+        "raft",
+        "failover"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:RegisterFile",
+      "type": "function",
+      "name": "RegisterFile",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        541,
+        553
+      ],
+      "summary": "通过 Raft 注册新文件的 FSM 命令",
+      "tags": [
+        "raft",
+        "file-manifest"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:DeleteFile",
+      "type": "function",
+      "name": "DeleteFile",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        557,
+        569
+      ],
+      "summary": "通过 Raft 删除文件的 FSM 命令",
+      "tags": [
+        "raft",
+        "file-manifest"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/raft/node.go:AssignCompactor",
+      "type": "function",
+      "name": "AssignCompactor",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        573,
+        585
+      ],
+      "summary": "通过 Raft 指派压缩器节点的 FSM 命令",
+      "tags": [
+        "raft",
+        "compaction"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/cluster/raft/node.go:Node",
+      "type": "class",
+      "name": "Node",
+      "filePath": "internal/cluster/raft/node.go",
+      "lineRange": [
+        63,
+        76
+      ],
+      "summary": "Raft 节点的高级封装，管理 hashicorp/raft 实例、传输层和存储，提供集群操作 API",
+      "tags": [
+        "raft",
+        "node"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/cluster/raft/node_test.go",
+      "type": "file",
+      "name": "node_test.go",
+      "filePath": "internal/cluster/raft/node_test.go",
+      "summary": "Raft 节点的集成测试，覆盖节点启动停止、Raft 集群操作、配置验证和数据目录创建",
+      "tags": [
+        "test",
+        "raft",
+        "node"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node_test.go:TestNodeStartStop",
+      "type": "function",
+      "name": "TestNodeStartStop",
+      "filePath": "internal/cluster/raft/node_test.go",
+      "lineRange": [
+        12,
+        67
+      ],
+      "summary": "测试 Raft 节点的启动和停止生命周期",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node_test.go:TestNodeAddNodeViaRaft",
+      "type": "function",
+      "name": "TestNodeAddNodeViaRaft",
+      "filePath": "internal/cluster/raft/node_test.go",
+      "lineRange": [
+        69,
+        142
+      ],
+      "summary": "测试通过 Raft 添加节点的完整流程",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/raft/node_test.go:TestNodeUpdateNodeStateViaRaft",
+      "type": "function",
+      "name": "TestNodeUpdateNodeStateViaRaft",
+      "filePath": "internal/cluster/raft/node_test.go",
+      "lineRange": [
+        144,
+        198
+      ],
+      "summary": "测试通过 Raft 更新节点状态",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node_test.go:TestNodeRemoveNodeViaRaft",
+      "type": "function",
+      "name": "TestNodeRemoveNodeViaRaft",
+      "filePath": "internal/cluster/raft/node_test.go",
+      "lineRange": [
+        200,
+        253
+      ],
+      "summary": "测试通过 Raft 移除节点",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node_test.go:TestNodeStats",
+      "type": "function",
+      "name": "TestNodeStats",
+      "filePath": "internal/cluster/raft/node_test.go",
+      "lineRange": [
+        255,
+        301
+      ],
+      "summary": "测试节点统计信息的正确性",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node_test.go:TestNodeDataDirCreated",
+      "type": "function",
+      "name": "TestNodeDataDirCreated",
+      "filePath": "internal/cluster/raft/node_test.go",
+      "lineRange": [
+        303,
+        338
+      ],
+      "summary": "测试节点启动时数据目录的自动创建",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/raft/node_test.go:TestNodeConfigValidation",
+      "type": "function",
+      "name": "TestNodeConfigValidation",
+      "filePath": "internal/cluster/raft/node_test.go",
+      "lineRange": [
+        340,
+        378
+      ],
+      "summary": "测试节点配置验证的逻辑",
+      "tags": [
+        "test",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/cluster/registry.go",
+      "type": "file",
+      "name": "registry.go",
+      "filePath": "internal/cluster/registry.go",
+      "summary": "集群节点注册表，提供线程安全的节点增删查和管理，支持健康检查回调通知和按角色/状态筛选节点",
+      "tags": [
+        "registry",
+        "cluster-management",
+        "node-discovery"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:NewRegistry",
+      "type": "function",
+      "name": "NewRegistry",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        44,
+        63
+      ],
+      "summary": "创建新的节点注册表实例",
+      "tags": [
+        "registry",
+        "init"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:Register",
+      "type": "function",
+      "name": "Register",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        67,
+        98
+      ],
+      "summary": "注册新节点到集群，触发节点加入回调",
+      "tags": [
+        "registry",
+        "node-management"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:invokeCallback",
+      "type": "function",
+      "name": "invokeCallback",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        101,
+        127
+      ],
+      "summary": "安全执行回调函数，捕获 panic 并记录错误",
+      "tags": [
+        "registry",
+        "helper"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:Unregister",
+      "type": "function",
+      "name": "Unregister",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        130,
+        146
+      ],
+      "summary": "从注册表移除节点并触发节点离开回调",
+      "tags": [
+        "registry",
+        "node-management"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:RecordHeartbeat",
+      "type": "function",
+      "name": "RecordHeartbeat",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        164,
+        173
+      ],
+      "summary": "记录节点心跳时间戳",
+      "tags": [
+        "registry",
+        "health"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:filterNodes",
+      "type": "function",
+      "name": "filterNodes",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        211,
+        222
+      ],
+      "summary": "通用节点过滤器，支持按函数筛选",
+      "tags": [
+        "registry",
+        "helper"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:countNodes",
+      "type": "function",
+      "name": "countNodes",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        225,
+        236
+      ],
+      "summary": "通用节点计数器，支持按函数计数",
+      "tags": [
+        "registry",
+        "helper"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:GetPrimaryWriter",
+      "type": "function",
+      "name": "GetPrimaryWriter",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        279,
+        288
+      ],
+      "summary": "获取当前主写入节点",
+      "tags": [
+        "registry",
+        "query"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:SetCallbacks",
+      "type": "function",
+      "name": "SetCallbacks",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        321,
+        333
+      ],
+      "summary": "设置节点事件回调函数（加入/离开/健康/不健康）",
+      "tags": [
+        "registry",
+        "callbacks"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry.go:Summary",
+      "type": "function",
+      "name": "Summary",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        354,
+        388
+      ],
+      "summary": "生成集群节点摘要信息，包括各角色节点数量",
+      "tags": [
+        "registry",
+        "reporting"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/cluster/registry.go:Registry",
+      "type": "class",
+      "name": "Registry",
+      "filePath": "internal/cluster/registry.go",
+      "lineRange": [
+        11,
+        30
+      ],
+      "summary": "集群节点注册表，管理节点生命周期事件和健康状态追踪",
+      "tags": [
+        "registry",
+        "cluster"
+      ],
+      "complexity": "complex"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/nonce_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/nonce_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/raft_stream.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/tls.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/sharding/failover.go",
+      "target": "file:internal/cluster/registry.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:Apply",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyAddNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyRemoveNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyUpdateNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyUpdateNodeState",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyPromoteWriter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyDemoteWriter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyRegisterFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyDeleteFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyUpdateFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyAssignCompactor",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:applyBatchFileOps",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:Snapshot",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:Restore",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetAllNodes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetNodesByRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetAllFiles",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetFilesByDatabase",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:Persist",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "class:internal/cluster/raft/fsm.go:ClusterFSM",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "class:internal/cluster/raft/fsm.go:FSMSnapshot",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:makeCommand",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMAddNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMRemoveNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMUpdateNodeState",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMUpdateNodeStateNotFound",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMGetNodesByRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMSnapshotRestore",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMCallbacks",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMGetAllNodes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMCloneIsolation",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMTotalCores",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMTotalCoresAfterRemove",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMSnapshotRestoreWithCores",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:makeFileEntry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMRegisterFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMRegisterFileRejectsZeroCreatedAt",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMDeleteFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMDeleteNonexistentFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMGetFilesByDatabase",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMFileCallbacks",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMFilesByDatabaseIndexConsistency",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMSnapshotRestoreWithFiles",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOps",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOpsRegistersOnly",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOpsUnknownOpType",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOpsEmpty",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "class:internal/cluster/raft/fsm_test.go:testSnapshotSink",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/logger.go",
+      "target": "function:internal/cluster/raft/logger.go:Log",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/logger.go",
+      "target": "function:internal/cluster/raft/logger.go:argsToFields",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/logger.go",
+      "target": "class:internal/cluster/raft/logger.go:zerologAdapter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:DefaultNodeConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:NewNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:Stop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:Apply",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:AddVoter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:RemoveServer",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:GetConfiguration",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:WaitForLeader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:AddNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:RemoveNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:UpdateNodeState",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:PromoteWriter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:DemoteWriter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:RegisterFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:DeleteFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:AssignCompactor",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "class:internal/cluster/raft/node.go:Node",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeStartStop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeAddNodeViaRaft",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeUpdateNodeStateViaRaft",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeRemoveNodeViaRaft",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeStats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeDataDirCreated",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeConfigValidation",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:NewRegistry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:Register",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:invokeCallback",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:Unregister",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:RecordHeartbeat",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:filterNodes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:countNodes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:GetPrimaryWriter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:SetCallbacks",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:Summary",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "class:internal/cluster/registry.go:Registry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:Apply",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:Snapshot",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:Restore",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetNode",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetAllNodes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetNodesByRole",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetAllFiles",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:GetFilesByDatabase",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "function:internal/cluster/raft/fsm.go:Persist",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "class:internal/cluster/raft/fsm.go:ClusterFSM",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "class:internal/cluster/raft/fsm.go:FSMSnapshot",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMAddNode",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMRemoveNode",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMUpdateNodeState",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMUpdateNodeStateNotFound",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMGetNodesByRole",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMSnapshotRestore",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMCallbacks",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMGetAllNodes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMCloneIsolation",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMTotalCores",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMTotalCoresAfterRemove",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMSnapshotRestoreWithCores",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMRegisterFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMRegisterFileRejectsZeroCreatedAt",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMDeleteFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMDeleteNonexistentFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMGetFilesByDatabase",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMFileCallbacks",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMFilesByDatabaseIndexConsistency",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMSnapshotRestoreWithFiles",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOps",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOpsRegistersOnly",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOpsUnknownOpType",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm_test.go",
+      "target": "function:internal/cluster/raft/fsm_test.go:TestFSMBatchFileOpsEmpty",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/logger.go",
+      "target": "function:internal/cluster/raft/logger.go:Log",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:DefaultNodeConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:NewNode",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:Start",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:Stop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:Apply",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:AddVoter",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:RemoveServer",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:GetConfiguration",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:WaitForLeader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:AddNode",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:RemoveNode",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:UpdateNodeState",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:PromoteWriter",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:DemoteWriter",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:RegisterFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:DeleteFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "function:internal/cluster/raft/node.go:AssignCompactor",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "class:internal/cluster/raft/node.go:Node",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeStartStop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeAddNodeViaRaft",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeUpdateNodeStateViaRaft",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeRemoveNodeViaRaft",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeStats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeDataDirCreated",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/node_test.go",
+      "target": "function:internal/cluster/raft/node_test.go:TestNodeConfigValidation",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:NewRegistry",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:Register",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:Unregister",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:RecordHeartbeat",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:GetPrimaryWriter",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:SetCallbacks",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "function:internal/cluster/registry.go:Summary",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "class:internal/cluster/registry.go:Registry",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "file:internal/cluster/raft/fsm_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/raft/node_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "file:internal/cluster/registry_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "file:internal/cluster/registry.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/cluster/raft/logger.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/cluster/raft/fsm.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ]
+}

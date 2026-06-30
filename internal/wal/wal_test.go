@@ -85,8 +85,8 @@ func TestWriter_Defaults(t *testing.T) {
 	if writer.config.MaxSizeBytes != 100*1024*1024 {
 		t.Errorf("default max size: got %d, want %d", writer.config.MaxSizeBytes, 100*1024*1024)
 	}
-	if writer.config.MaxAge != time.Hour {
-		t.Errorf("default max age: got %v, want %v", writer.config.MaxAge, time.Hour)
+	if writer.config.MaxAge != 45*time.Minute {
+		t.Errorf("default max age: got %v, want %v", writer.config.MaxAge, 45*time.Minute)
 	}
 }
 
@@ -609,92 +609,80 @@ func TestWriter_AppendRaw_PayloadAtLimit(t *testing.T) {
 	}
 }
 
-func TestRecovery_SkipActiveFile(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "wal-test-skip-*")
+// TestRecovery_FlushOKStaging verifies the new staging-based recovery:
+// data → FLUSH_OK → data for same measurement: only unconfirmed data is replayed.
+func TestRecovery_FlushOKStaging(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "wal-test-staging-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create first WAL file
-	file1 := filepath.Join(tmpDir, "iedb-20240101_120000.wal")
-	writer1, err := NewWriter(&WriterConfig{
+	writer, err := NewWriter(&WriterConfig{
 		WALDir:       tmpDir,
 		SyncMode:     SyncModeAsync,
 		MaxSizeBytes: 100 * 1024 * 1024,
 		Logger:       zerolog.Nop(),
 	})
 	if err != nil {
-		t.Fatalf("failed to create writer1: %v", err)
+		t.Fatalf("failed to create writer: %v", err)
 	}
 
-	records := []map[string]interface{}{
-		{"measurement": "cpu", "value": 90.5},
-	}
-	writer1.Append(records)
-	time.Sleep(50 * time.Millisecond)
-	file1 = writer1.CurrentFile()
-	writer1.Close()
-
-	// Wait a moment to ensure different timestamp
-	time.Sleep(1100 * time.Millisecond)
-
-	// Create second WAL file
-	writer2, err := NewWriter(&WriterConfig{
-		WALDir:       tmpDir,
-		SyncMode:     SyncModeAsync,
-		MaxSizeBytes: 100 * 1024 * 1024,
-		Logger:       zerolog.Nop(),
+	// Write data for cpu measurement
+	writer.Append([]map[string]interface{}{
+		{"_measurement": "cpu", "value": 100.0},
 	})
-	if err != nil {
-		t.Fatalf("failed to create writer2: %v", err)
-	}
-
-	writer2.Append(records)
 	time.Sleep(50 * time.Millisecond)
-	file2 := writer2.CurrentFile()
-	writer2.Close()
 
-	// Verify both files exist and are different
-	if file1 == file2 {
-		t.Skip("WAL files have same path, skipping test")
-	}
+	// Write FLUSH_OK for cpu — this confirms the data is in Parquet
+	writer.AppendControl(FlushOK, "default", "cpu")
+	time.Sleep(50 * time.Millisecond)
 
-	// Recover with SkipActiveFile set to the second file
+	// Write more data for cpu — this is NOT confirmed (no FLUSH_OK)
+	writer.Append([]map[string]interface{}{
+		{"_measurement": "cpu", "value": 200.0},
+	})
+	time.Sleep(50 * time.Millisecond)
+
+	writer.Close()
+
+	// Recover — only the unconfirmed data (value=200) should be replayed
 	recovery := NewRecovery(tmpDir, zerolog.Nop())
 
-	var recoveredCount int
+	var recoveredValues []float64
 	callback := func(ctx context.Context, records []map[string]interface{}) error {
-		recoveredCount += len(records)
+		for _, r := range records {
+			if v, ok := r["value"].(float64); ok {
+				recoveredValues = append(recoveredValues, v)
+			}
+		}
 		return nil
 	}
 
-	stats, err := recovery.RecoverWithOptions(context.Background(), callback, &RecoveryOptions{
-		SkipActiveFile: file2,
-	})
+	stats, err := recovery.RecoverWithOptions(context.Background(), callback, nil)
 	if err != nil {
 		t.Fatalf("RecoverWithOptions failed: %v", err)
 	}
 
-	// Should have skipped one file
-	if stats.SkippedFiles != 1 {
-		t.Errorf("expected 1 skipped file, got %d", stats.SkippedFiles)
+	// Only the unconfirmed entry should be replayed
+	if len(recoveredValues) != 1 {
+		t.Fatalf("expected 1 recovered value, got %d: %v", len(recoveredValues), recoveredValues)
+	}
+	if recoveredValues[0] != 200.0 {
+		t.Errorf("expected recovered value 200.0, got %v", recoveredValues[0])
 	}
 
-	// Should have recovered from the first file only
-	if stats.RecoveredFiles != 1 {
-		t.Errorf("expected 1 recovered file, got %d", stats.RecoveredFiles)
+	// Staging cleared stat
+	if stats.StagingCleared != 1 {
+		t.Errorf("expected 1 staging cleared, got %d", stats.StagingCleared)
 	}
 
-	// Verify the skipped file still exists
-	if _, err := os.Stat(file2); os.IsNotExist(err) {
-		t.Error("skipped file should still exist")
+	// The single remaining staging entry should be replayed
+	if stats.RecoveredEntries != 1 {
+		t.Errorf("expected 1 recovered entry, got %d", stats.RecoveredEntries)
 	}
 
-	// Verify the recovered file was deleted
-	if _, err := os.Stat(file1); !os.IsNotExist(err) {
-		t.Error("recovered file should have been deleted")
-	}
+	t.Logf("FLUSH_OK staging: %d entries replayed, %d staging cleared", stats.RecoveredEntries, stats.StagingCleared)
 }
 
 func TestRecovery_BatchSize(t *testing.T) {
@@ -859,4 +847,284 @@ func TestRecovery_BatchSize_PartialBatchFailure(t *testing.T) {
 	if _, err := os.Stat(walFile); os.IsNotExist(err) {
 		t.Error("WAL file should be kept after partial batch failure")
 	}
+}
+
+// ==========================================================================
+// Control record tests
+// ==========================================================================
+
+// TestAppendControl_WritesAndReadsBack verifies that control records round-trip
+// correctly through the WAL: written, read, and correctly identified by type.
+func TestAppendControl_WritesAndReadsBack(t *testing.T) {
+	writer, tmpDir := newTestWriter(t, SyncModeAsync)
+	defer os.RemoveAll(tmpDir)
+
+	// Write FLUSH_OK
+	if err := writer.AppendControl(FlushOK, "testdb", "cpu_metrics"); err != nil {
+		t.Fatalf("AppendControl FLUSH_OK failed: %v", err)
+	}
+	// Write FLUSH_FAIL
+	if err := writer.AppendControl(FlushFail, "testdb", "memory_metrics"); err != nil {
+		t.Fatalf("AppendControl FLUSH_FAIL failed: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	walFile := writer.CurrentFile()
+	writer.Close()
+
+	// Read back
+	reader := NewReader(walFile, zerolog.Nop())
+	entries, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 control entries, got %d", len(entries))
+	}
+
+	// First entry: FLUSH_OK
+	e1 := entries[0]
+	if e1.Control == nil {
+		t.Fatal("expected first entry to be a control record")
+	}
+	if e1.Control.Type != FlushOK {
+		t.Errorf("expected FLUSH_OK (0x00), got 0x%02x", e1.Control.Type)
+	}
+	if e1.Control.Database != "testdb" {
+		t.Errorf("expected db 'testdb', got '%s'", e1.Control.Database)
+	}
+	if e1.Control.Measurement != "cpu_metrics" {
+		t.Errorf("expected meas 'cpu_metrics', got '%s'", e1.Control.Measurement)
+	}
+
+	// Second entry: FLUSH_FAIL
+	e2 := entries[1]
+	if e2.Control == nil {
+		t.Fatal("expected second entry to be a control record")
+	}
+	if e2.Control.Type != FlushFail {
+		t.Errorf("expected FLUSH_FAIL (0x02), got 0x%02x", e2.Control.Type)
+	}
+	if e2.Control.Measurement != "memory_metrics" {
+		t.Errorf("expected meas 'memory_metrics', got '%s'", e2.Control.Measurement)
+	}
+}
+
+// TestRecovery_FlushOKClearsOnlyOwnMeasurement verifies that a FLUSH_OK for
+// measurement A does not clear staging for measurement B.
+func TestRecovery_FlushOKClearsOnlyOwnMeasurement(t *testing.T) {
+	writer, tmpDir := newTestWriter(t, SyncModeAsync)
+	defer os.RemoveAll(tmpDir)
+
+	// Write data for two measurements
+	writer.Append([]map[string]interface{}{
+		{"_measurement": "cpu", "value": 1.0},
+		{"_measurement": "cpu", "value": 2.0},
+	})
+	time.Sleep(30 * time.Millisecond)
+
+	writer.Append([]map[string]interface{}{
+		{"_measurement": "memory", "value": 100.0},
+	})
+	time.Sleep(30 * time.Millisecond)
+
+	// FLUSH_OK only for cpu — memory stays in staging
+	writer.AppendControl(FlushOK, "default", "cpu")
+	time.Sleep(30 * time.Millisecond)
+	writer.Close()
+
+	// Recover
+	recovery := NewRecovery(tmpDir, zerolog.Nop())
+	recoveredByMeasurement := make(map[string]int)
+	callback := func(ctx context.Context, records []map[string]interface{}) error {
+		for _, r := range records {
+			m, _ := r["_measurement"].(string)
+			recoveredByMeasurement[m]++
+		}
+		return nil
+	}
+
+	stats, err := recovery.RecoverWithOptions(context.Background(), callback, nil)
+	if err != nil {
+		t.Fatalf("RecoverWithOptions failed: %v", err)
+	}
+
+	// cpu should have 0 recovered entries (cleared by FLUSH_OK)
+	if recoveredByMeasurement["cpu"] != 0 {
+		t.Errorf("expected 0 recovered cpu entries, got %d", recoveredByMeasurement["cpu"])
+	}
+	// memory should have 1 recovered entry (no FLUSH_OK)
+	if recoveredByMeasurement["memory"] != 1 {
+		t.Errorf("expected 1 recovered memory entry, got %d", recoveredByMeasurement["memory"])
+	}
+	if stats.StagingCleared != 1 {
+		t.Errorf("expected 1 staging cleared, got %d", stats.StagingCleared)
+	}
+}
+
+// TestRecovery_NoFlushOK_ReplaysAll verifies that without any FLUSH_OK,
+// all data is replayed at EOF.
+func TestRecovery_NoFlushOK_ReplaysAll(t *testing.T) {
+	writer, tmpDir := newTestWriter(t, SyncModeAsync)
+	defer os.RemoveAll(tmpDir)
+
+	records := make([]map[string]interface{}, 50)
+	for i := 0; i < 50; i++ {
+		records[i] = map[string]interface{}{
+			"_measurement": "temp",
+			"value":        float64(i),
+		}
+	}
+	writer.Append(records)
+	time.Sleep(50 * time.Millisecond)
+	writer.Close()
+
+	recovery := NewRecovery(tmpDir, zerolog.Nop())
+	recoveredCount := 0
+	callback := func(ctx context.Context, recs []map[string]interface{}) error {
+		recoveredCount += len(recs)
+		return nil
+	}
+
+	_, err := recovery.Recover(context.Background(), callback)
+	if err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	if recoveredCount != 50 {
+		t.Errorf("expected 50 recovered entries (no FLUSH_OK), got %d", recoveredCount)
+	}
+}
+
+// TestRecovery_FlushFailDoesNotClearStaging verifies FLUSH_FAIL is a no-op
+// during recovery — staging data is preserved.
+func TestRecovery_FlushFailDoesNotClearStaging(t *testing.T) {
+	writer, tmpDir := newTestWriter(t, SyncModeAsync)
+	defer os.RemoveAll(tmpDir)
+
+	// Write data
+	writer.Append([]map[string]interface{}{
+		{"_measurement": "sensor", "value": 42.0},
+	})
+	time.Sleep(30 * time.Millisecond)
+
+	// Write FLUSH_FAIL (simulating flush failure)
+	writer.AppendControl(FlushFail, "default", "sensor")
+	time.Sleep(30 * time.Millisecond)
+	writer.Close()
+
+	// Recover
+	recovery := NewRecovery(tmpDir, zerolog.Nop())
+	recoveredCount := 0
+	callback := func(ctx context.Context, recs []map[string]interface{}) error {
+		recoveredCount += len(recs)
+		return nil
+	}
+
+	_, err := recovery.Recover(context.Background(), callback)
+	if err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// FLUSH_FAIL is a no-op — data should still be replayed
+	if recoveredCount != 1 {
+		t.Errorf("expected 1 recovered entry (FLUSH_FAIL no-op), got %d", recoveredCount)
+	}
+}
+
+// TestRecovery_CrossFileFlushOK verifies that FLUSH_OK in a later WAL file
+// correctly clears staging accumulated from an earlier file. This covers
+// the scenario where data and its FLUSH_OK are in different files due to
+// WAL rotation between ingest and flush.
+func TestRecovery_CrossFileFlushOK(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "wal-cross-file-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// File 1: write data for cpu and memory measurements.
+	writer1, err := NewWriter(&WriterConfig{
+		WALDir:       tmpDir,
+		SyncMode:     SyncModeAsync,
+		MaxSizeBytes: 100 * 1024 * 1024,
+		Logger:       zerolog.Nop(),
+	})
+	if err != nil {
+		t.Fatalf("failed to create writer1: %v", err)
+	}
+
+	writer1.Append([]map[string]interface{}{
+		{"_measurement": "cpu", "value": 1.0},
+		{"_measurement": "cpu", "value": 2.0},
+	})
+	time.Sleep(30 * time.Millisecond)
+
+	writer1.Append([]map[string]interface{}{
+		{"_measurement": "memory", "value": 10.0},
+	})
+	time.Sleep(30 * time.Millisecond)
+	writer1.Close()
+
+	// Wait to ensure file timestamp difference.
+	time.Sleep(1100 * time.Millisecond)
+
+	// File 2: write FLUSH_OK for cpu (confirming file 1 data).
+	// Then write more cpu data (unconfirmed).
+	writer2, err := NewWriter(&WriterConfig{
+		WALDir:       tmpDir,
+		SyncMode:     SyncModeAsync,
+		MaxSizeBytes: 100 * 1024 * 1024,
+		Logger:       zerolog.Nop(),
+	})
+	if err != nil {
+		t.Fatalf("failed to create writer2: %v", err)
+	}
+
+	writer2.AppendControl(FlushOK, "default", "cpu")
+	time.Sleep(30 * time.Millisecond)
+
+	writer2.Append([]map[string]interface{}{
+		{"_measurement": "cpu", "value": 3.0},
+	})
+	time.Sleep(30 * time.Millisecond)
+	writer2.Close()
+
+	// Recover — should only replay:
+	//   - cpu value 3.0 (post-FLUSH_OK in file 2)
+	//   - memory value 10.0 (never got FLUSH_OK)
+	recovery := NewRecovery(tmpDir, zerolog.Nop())
+	recoveredByMeasurement := make(map[string][]float64)
+	callback := func(ctx context.Context, records []map[string]interface{}) error {
+		for _, r := range records {
+			m, _ := r["_measurement"].(string)
+			v, _ := r["value"].(float64)
+			recoveredByMeasurement[m] = append(recoveredByMeasurement[m], v)
+		}
+		return nil
+	}
+
+	stats, err := recovery.RecoverWithOptions(context.Background(), callback, nil)
+	if err != nil {
+		t.Fatalf("RecoverWithOptions failed: %v", err)
+	}
+
+	// cpu: only post-FLUSH_OK value 3.0 should survive
+	cpuVals := recoveredByMeasurement["cpu"]
+	if len(cpuVals) != 1 || cpuVals[0] != 3.0 {
+		t.Errorf("expected cpu=[3.0] (cross-file FLUSH_OK cleared file-1 data), got %v", cpuVals)
+	}
+
+	// memory: never got FLUSH_OK, should still be staged
+	memVals := recoveredByMeasurement["memory"]
+	if len(memVals) != 1 || memVals[0] != 10.0 {
+		t.Errorf("expected memory=[10.0] (no FLUSH_OK), got %v", memVals)
+	}
+
+	// One staging cleared (cpu), one replayed entry
+	if stats.StagingCleared != 1 {
+		t.Errorf("expected 1 staging cleared, got %d", stats.StagingCleared)
+	}
+
+	t.Logf("Cross-file FLUSH_OK: cpu staging cleared, memory replayed")
 }

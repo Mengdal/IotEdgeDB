@@ -1,0 +1,651 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/cluster/writer_failover.go",
+      "type": "file",
+      "name": "writer_failover.go",
+      "filePath": "internal/cluster/writer_failover.go",
+      "summary": "WriterFailoverManager 监控主写入节点的健康状态，当主节点失效时通过 Raft 共识自动将备用写入节点提升为主节点，支持冷却周期防止频繁故障转移。",
+      "tags": [
+        "failover",
+        "high-availability",
+        "writer",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/cluster/writer_failover_test.go",
+      "type": "file",
+      "name": "writer_failover_test.go",
+      "filePath": "internal/cluster/writer_failover_test.go",
+      "summary": "WriterFailoverManager 的单元测试，验证健康检查、故障转移触发和执行逻辑。",
+      "tags": [
+        "test",
+        "failover",
+        "high-availability"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/reconciliation/sweep_manifest.go",
+      "type": "file",
+      "name": "sweep_manifest.go",
+      "filePath": "internal/reconciliation/sweep_manifest.go",
+      "summary": "sweepOrphanManifest 清理 Manifest 中引用了但存储中实际已不存在的孤文件条目，支持批量删除、并行重检查、防重入门控和每个运行的 blast cap 限制。",
+      "tags": [
+        "reconciliation",
+        "manifest",
+        "cleanup",
+        "storage"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/wal/reader.go",
+      "type": "file",
+      "name": "reader.go",
+      "filePath": "internal/wal/reader.go",
+      "summary": "WAL Reader 读取 WAL 文件进行恢复操作，支持行格式和列格式两种写入路径的回读、CRC32 校验和验证以及控制记录（FLUSH_OK/FLUSH_FAIL）解析。",
+      "tags": [
+        "wal",
+        "reader",
+        "recovery",
+        "durability"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/wal/recovery.go",
+      "type": "file",
+      "name": "recovery.go",
+      "filePath": "internal/wal/recovery.go",
+      "summary": "WAL Recovery 管理器 FLUSH_OK 感知的 WAL 恢复，使用 staging 累积未确认数据，支持行列格式回放、增量回放防止 OOM 和部分失败重试策略。",
+      "tags": [
+        "wal",
+        "recovery",
+        "replay",
+        "durability"
+      ],
+      "complexity": "complex",
+      "languageNotes": "使用 staging map 按 measurement 聚合数据，FLUSH_OK 控制记录清除已确认的 staging，增量回放防止大 measurement 消耗过多内存。"
+    },
+    {
+      "id": "class:internal/cluster/writer_failover.go:WriterFailoverManager",
+      "type": "class",
+      "name": "WriterFailoverManager",
+      "filePath": "internal/cluster/writer_failover.go",
+      "summary": "WriterFailoverManager 监控主写入节点健康，在主节点失效时通过 Raft 共识自动提升备用写入节点，支持冷却周期和手动触发。",
+      "tags": [
+        "failover",
+        "high-availability",
+        "writer",
+        "raft"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        41,
+        59
+      ]
+    },
+    {
+      "id": "class:internal/cluster/writer_failover.go:WriterFailoverConfig",
+      "type": "class",
+      "name": "WriterFailoverConfig",
+      "filePath": "internal/cluster/writer_failover.go",
+      "summary": "WriterFailoverManager 的配置，包含注册表、Raft 节点、健康检查间隔、故障转移超时、冷却周期和健康阈值。",
+      "tags": [
+        "failover",
+        "config"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        16,
+        37
+      ]
+    },
+    {
+      "id": "class:internal/wal/reader.go:Reader",
+      "type": "class",
+      "name": "Reader",
+      "filePath": "internal/wal/reader.go",
+      "summary": "WAL Reader 读取 WAL 文件进行恢复，支持行格式和列格式消息回读、CRC32 校验和验证和控制记录解析。",
+      "tags": [
+        "wal",
+        "reader",
+        "recovery"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        16,
+        24
+      ]
+    },
+    {
+      "id": "class:internal/wal/reader.go:Entry",
+      "type": "class",
+      "name": "Entry",
+      "filePath": "internal/wal/reader.go",
+      "summary": "WAL 条目结构，包含时间戳、行格式记录列表、列格式数据和控制记录。",
+      "tags": [
+        "wal",
+        "data-structure"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        35,
+        40
+      ]
+    },
+    {
+      "id": "class:internal/wal/recovery.go:Recovery",
+      "type": "class",
+      "name": "Recovery",
+      "filePath": "internal/wal/recovery.go",
+      "summary": "WAL Recovery 管理器，扫描 WAL 目录并使用 FLUSH_OK 感知的 staging 恢复策略回放未确认数据。",
+      "tags": [
+        "wal",
+        "recovery",
+        "replay"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        56,
+        59
+      ]
+    },
+    {
+      "id": "class:internal/wal/recovery.go:RecoveryOptions",
+      "type": "class",
+      "name": "RecoveryOptions",
+      "filePath": "internal/wal/recovery.go",
+      "summary": "WAL 恢复的配置选项，包含批次大小、最大 staging 记录数和列格式回调函数。",
+      "tags": [
+        "wal",
+        "config"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        40,
+        53
+      ]
+    },
+    {
+      "id": "class:internal/wal/recovery.go:RecoveryStats",
+      "type": "class",
+      "name": "RecoveryStats",
+      "filePath": "internal/wal/recovery.go",
+      "summary": "WAL 恢复统计信息，包含已恢复文件数、批次数、条目数、损坏条目数、staging 清除数和恢复耗时。",
+      "tags": [
+        "wal",
+        "metrics",
+        "stats"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        21,
+        28
+      ]
+    },
+    {
+      "id": "function:internal/cluster/writer_failover.go:NewWriterFailoverManager",
+      "type": "function",
+      "name": "NewWriterFailoverManager",
+      "filePath": "internal/cluster/writer_failover.go",
+      "summary": "创建 WriterFailoverManager 实例，设置默认的健康检查间隔、故障转移超时和冷却周期。",
+      "tags": [
+        "constructor",
+        "failover",
+        "writer"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        62,
+        80
+      ]
+    },
+    {
+      "id": "function:internal/cluster/writer_failover.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/cluster/writer_failover.go",
+      "summary": "启动写入器故障转移管理器的健康检查循环。",
+      "tags": [
+        "failover",
+        "health-check",
+        "lifecycle"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        94,
+        108
+      ]
+    },
+    {
+      "id": "function:internal/cluster/writer_failover.go:checkPrimaryHealth",
+      "type": "function",
+      "name": "checkPrimaryHealth",
+      "filePath": "internal/cluster/writer_failover.go",
+      "summary": "检查主写入节点的健康状态，连续失败超过阈值时触发故障转移。",
+      "tags": [
+        "failover",
+        "health-check",
+        "monitoring"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        143,
+        174
+      ]
+    },
+    {
+      "id": "function:internal/cluster/writer_failover.go:HandleWriterUnhealthy",
+      "type": "function",
+      "name": "HandleWriterUnhealthy",
+      "filePath": "internal/cluster/writer_failover.go",
+      "summary": "处理写入节点不健康的回调，当主节点连续不健康时触发故障转移。",
+      "tags": [
+        "failover",
+        "callback",
+        "health"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        178,
+        212
+      ]
+    },
+    {
+      "id": "function:internal/cluster/writer_failover.go:executeFailover",
+      "type": "function",
+      "name": "executeFailover",
+      "filePath": "internal/cluster/writer_failover.go",
+      "summary": "执行故障转移操作：选择新的主节点、通过 Raft 提升并等待传播。",
+      "tags": [
+        "failover",
+        "raft",
+        "promotion"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        239,
+        290
+      ]
+    },
+    {
+      "id": "function:internal/cluster/writer_failover.go:TriggerManualFailover",
+      "type": "function",
+      "name": "TriggerManualFailover",
+      "filePath": "internal/cluster/writer_failover.go",
+      "summary": "手动触发主写入节点的故障转移，选择备用节点并执行提升操作。",
+      "tags": [
+        "failover",
+        "manual",
+        "trigger"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        327,
+        354
+      ]
+    },
+    {
+      "id": "function:internal/reconciliation/sweep_manifest.go:sweepOrphanManifest",
+      "type": "function",
+      "name": "sweepOrphanManifest",
+      "filePath": "internal/reconciliation/sweep_manifest.go",
+      "summary": "清理 manifest 中引用但存储中已不存在的孤文件条目，使用批量删除和并行重检查，支持 blast cap 和干运行模式。",
+      "tags": [
+        "reconciliation",
+        "manifest",
+        "cleanup",
+        "storage"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        34,
+        202
+      ]
+    },
+    {
+      "id": "function:internal/wal/reader.go:ReadAll",
+      "type": "function",
+      "name": "ReadAll",
+      "filePath": "internal/wal/reader.go",
+      "summary": "读取 WAL 文件中的所有条目，验证魔数、版本和 CRC32 校验和，跳过损坏条目。",
+      "tags": [
+        "wal",
+        "reader",
+        "recovery"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        50,
+        105
+      ]
+    },
+    {
+      "id": "function:internal/wal/reader.go:readEntry",
+      "type": "function",
+      "name": "readEntry",
+      "filePath": "internal/wal/reader.go",
+      "summary": "读取单个 WAL 条目，解析头部（长度、时间戳、校验和），验证 CRC32 并分发到控制记录/行格式/列格式解析。",
+      "tags": [
+        "wal",
+        "reader",
+        "parsing"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        108,
+        191
+      ]
+    },
+    {
+      "id": "function:internal/wal/recovery.go:RecoverWithOptions",
+      "type": "function",
+      "name": "RecoverWithOptions",
+      "filePath": "internal/wal/recovery.go",
+      "summary": "WAL 恢复主入口，使用 FLUSH_OK 感知的 staging 策略，按测量聚合数据并回放未确认条目。",
+      "tags": [
+        "wal",
+        "recovery",
+        "replay",
+        "staging"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        173,
+        384
+      ]
+    },
+    {
+      "id": "function:internal/wal/recovery.go:CleanupOldWALs",
+      "type": "function",
+      "name": "CleanupOldWALs",
+      "filePath": "internal/wal/recovery.go",
+      "summary": "清理过期的遗留 .wal.recovered 文件，删除超过指定最大年龄的文件。",
+      "tags": [
+        "wal",
+        "cleanup",
+        "maintenance"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        421,
+        459
+      ]
+    },
+    {
+      "id": "function:internal/wal/recovery.go:ListWALFiles",
+      "type": "function",
+      "name": "ListWALFiles",
+      "filePath": "internal/wal/recovery.go",
+      "summary": "列出所有活跃的 WAL 文件和遗留的 .recovered 文件路径。",
+      "tags": [
+        "wal",
+        "listing",
+        "files"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        466,
+        482
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "file:internal/cluster/raft/errors.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "file:internal/cluster/raft/fsm_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "file:internal/cluster/raft/fsm.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "file:internal/cluster/raft/logger.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "file:internal/cluster/raft/node_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/sweep_manifest.go",
+      "target": "file:internal/cluster/raft/errors.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/sweep_manifest.go",
+      "target": "file:internal/cluster/raft/fsm_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/sweep_manifest.go",
+      "target": "file:internal/cluster/raft/fsm.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/sweep_manifest.go",
+      "target": "file:internal/cluster/raft/logger.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/sweep_manifest.go",
+      "target": "file:internal/cluster/raft/node_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/sweep_manifest.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "class:internal/cluster/writer_failover.go:WriterFailoverManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "class:internal/cluster/writer_failover.go:WriterFailoverConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/reader.go",
+      "target": "class:internal/wal/reader.go:Reader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/reader.go",
+      "target": "class:internal/wal/reader.go:Entry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/recovery.go",
+      "target": "class:internal/wal/recovery.go:Recovery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/recovery.go",
+      "target": "class:internal/wal/recovery.go:RecoveryOptions",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/recovery.go",
+      "target": "class:internal/wal/recovery.go:RecoveryStats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "function:internal/cluster/writer_failover.go:NewWriterFailoverManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "function:internal/cluster/writer_failover.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "function:internal/cluster/writer_failover.go:checkPrimaryHealth",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "function:internal/cluster/writer_failover.go:HandleWriterUnhealthy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "function:internal/cluster/writer_failover.go:executeFailover",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "function:internal/cluster/writer_failover.go:TriggerManualFailover",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/reconciliation/sweep_manifest.go",
+      "target": "function:internal/reconciliation/sweep_manifest.go:sweepOrphanManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/reader.go",
+      "target": "function:internal/wal/reader.go:ReadAll",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/reader.go",
+      "target": "function:internal/wal/reader.go:readEntry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/recovery.go",
+      "target": "function:internal/wal/recovery.go:RecoverWithOptions",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/recovery.go",
+      "target": "function:internal/wal/recovery.go:CleanupOldWALs",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/wal/recovery.go",
+      "target": "function:internal/wal/recovery.go:ListWALFiles",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/reconciliation/sweep_manifest.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/cluster/writer_failover.go",
+      "target": "file:internal/cluster/registry.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/wal/recovery.go",
+      "target": "file:internal/wal/reader.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/cluster/writer_failover_test.go",
+      "target": "file:internal/cluster/writer_failover.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ]
+}

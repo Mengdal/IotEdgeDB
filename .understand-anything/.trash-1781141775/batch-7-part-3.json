@@ -1,0 +1,1282 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/cluster/router.go",
+      "type": "file",
+      "name": "router.go",
+      "filePath": "internal/cluster/router.go",
+      "summary": "集群请求路由器，将写入和查询请求转发到适当的节点，支持轮询、最少连接和随机三种负载均衡策略",
+      "tags": [
+        "routing",
+        "load-balancing",
+        "cluster"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/router.go:NewRouter",
+      "type": "function",
+      "name": "NewRouter",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        85,
+        111
+      ],
+      "summary": "创建请求路由器实例，默认超时 5 秒、重试 3 次",
+      "tags": [
+        "routing",
+        "init"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router.go:RouteWrite",
+      "type": "function",
+      "name": "RouteWrite",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        115,
+        134
+      ],
+      "summary": "将写入请求路由到合适的写入节点",
+      "tags": [
+        "routing",
+        "write"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router.go:RouteQuery",
+      "type": "function",
+      "name": "RouteQuery",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        138,
+        163
+      ],
+      "summary": "将查询请求路由到合适的读取节点",
+      "tags": [
+        "routing",
+        "query"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router.go:selectNode",
+      "type": "function",
+      "name": "selectNode",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        166,
+        182
+      ],
+      "summary": "根据负载均衡策略选择合适的节点",
+      "tags": [
+        "routing",
+        "selection"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/router.go:selectLeastConnections",
+      "type": "function",
+      "name": "selectLeastConnections",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        191,
+        212
+      ],
+      "summary": "最少连接策略的节点选择算法",
+      "tags": [
+        "routing",
+        "selection"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router.go:forwardRequest",
+      "type": "function",
+      "name": "forwardRequest",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        215,
+        245
+      ],
+      "summary": "执行请求转发，包含重试和错误处理",
+      "tags": [
+        "routing",
+        "forwarding"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router.go:doForward",
+      "type": "function",
+      "name": "doForward",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        248,
+        312
+      ],
+      "summary": "实际的 HTTP 请求转发，处理请求/响应复制和错误映射",
+      "tags": [
+        "routing",
+        "forwarding"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/router.go:incrementConns",
+      "type": "function",
+      "name": "incrementConns",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        315,
+        324
+      ],
+      "summary": "增加节点的活跃连接计数（用于最少连接策略）",
+      "tags": [
+        "routing",
+        "metrics"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/router.go:decrementConns",
+      "type": "function",
+      "name": "decrementConns",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        328,
+        337
+      ],
+      "summary": "减少节点的活跃连接计数",
+      "tags": [
+        "routing",
+        "metrics"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/router.go:CanRouteLocally",
+      "type": "function",
+      "name": "CanRouteLocally",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        351,
+        360
+      ],
+      "summary": "检查本地节点是否能处理指定角色的请求",
+      "tags": [
+        "routing",
+        "local"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/router.go:Stats",
+      "type": "function",
+      "name": "Stats",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        363,
+        379
+      ],
+      "summary": "返回路由器统计信息",
+      "tags": [
+        "routing",
+        "metrics"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/cluster/router.go:Router",
+      "type": "class",
+      "name": "Router",
+      "filePath": "internal/cluster/router.go",
+      "lineRange": [
+        70,
+        81
+      ],
+      "summary": "集群请求路由器，管理 HTTP 转发和负载均衡，维护活跃连接计数",
+      "tags": [
+        "routing",
+        "cluster"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/cluster/router_test.go",
+      "type": "file",
+      "name": "router_test.go",
+      "filePath": "internal/cluster/router_test.go",
+      "summary": "Router 的完整测试套件，覆盖写入/查询路由、负载均衡策略、请求转发和上下文取消等场景",
+      "tags": [
+        "test",
+        "routing",
+        "cluster"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:newTestRouter",
+      "type": "function",
+      "name": "newTestRouter",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        18,
+        27
+      ],
+      "summary": "创建测试用的路由器实例",
+      "tags": [
+        "test",
+        "helper"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterRouteWriteNoWriters",
+      "type": "function",
+      "name": "TestRouterRouteWriteNoWriters",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        29,
+        41
+      ],
+      "summary": "测试无可用写入节点时的路由行为",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterRouteWriteLocalCanHandle",
+      "type": "function",
+      "name": "TestRouterRouteWriteLocalCanHandle",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        43,
+        56
+      ],
+      "summary": "测试本地节点可处理写入时的优化路径",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterRouteQueryNoReaders",
+      "type": "function",
+      "name": "TestRouterRouteQueryNoReaders",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        58,
+        70
+      ],
+      "summary": "测试无可用读取节点时的路由行为",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterRouteQueryLocalCanHandle",
+      "type": "function",
+      "name": "TestRouterRouteQueryLocalCanHandle",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        72,
+        85
+      ],
+      "summary": "测试本地节点可处理查询时的优化路径",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterForwardRequest",
+      "type": "function",
+      "name": "TestRouterForwardRequest",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        87,
+        151
+      ],
+      "summary": "测试请求转发处理逻辑和响应复制",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterRoundRobinSelection",
+      "type": "function",
+      "name": "TestRouterRoundRobinSelection",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        153,
+        188
+      ],
+      "summary": "测试轮询负载均衡策略的正确性",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterLeastConnectionsSelection",
+      "type": "function",
+      "name": "TestRouterLeastConnectionsSelection",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        190,
+        228
+      ],
+      "summary": "测试最少连接负载均衡策略的正确性",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterActiveConnectionTracking",
+      "type": "function",
+      "name": "TestRouterActiveConnectionTracking",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        230,
+        255
+      ],
+      "summary": "测试活跃连接追踪的准确性",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterCanRouteLocally",
+      "type": "function",
+      "name": "TestRouterCanRouteLocally",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        257,
+        286
+      ],
+      "summary": "测试本地路由能力判断",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterStats",
+      "type": "function",
+      "name": "TestRouterStats",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        288,
+        324
+      ],
+      "summary": "测试路由器的统计信息报告",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterFallbackToWriterForQuery",
+      "type": "function",
+      "name": "TestRouterFallbackToWriterForQuery",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        326,
+        361
+      ],
+      "summary": "测试无读取节点时回退到写入节点处理查询",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterContextCancellation",
+      "type": "function",
+      "name": "TestRouterContextCancellation",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        363,
+        400
+      ],
+      "summary": "测试上下文取消时的路由行为",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/router_test.go:TestRouterQueryStringPreserved",
+      "type": "function",
+      "name": "TestRouterQueryStringPreserved",
+      "filePath": "internal/cluster/router_test.go",
+      "lineRange": [
+        402,
+        436
+      ],
+      "summary": "测试转发时查询字符串是否完整保留",
+      "tags": [
+        "test",
+        "routing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/cluster/security/auth.go",
+      "type": "file",
+      "name": "auth.go",
+      "filePath": "internal/cluster/security/auth.go",
+      "summary": "集群节点间通信的 HMAC 认证层，提供加入集群认证、文件获取认证和转发认证三种 HMAC 签名验证机制",
+      "tags": [
+        "authentication",
+        "security",
+        "hmac"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/security/auth.go:ValidateHMAC",
+      "type": "function",
+      "name": "ValidateHMAC",
+      "filePath": "internal/cluster/security/auth.go",
+      "lineRange": [
+        31,
+        46
+      ],
+      "summary": "验证节点加入集群的 HMAC 签名的完整性和时间戳新鲜度，防止重放攻击",
+      "tags": [
+        "authentication",
+        "security"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/security/auth.go:ValidateFetchHMAC",
+      "type": "function",
+      "name": "ValidateFetchHMAC",
+      "filePath": "internal/cluster/security/auth.go",
+      "lineRange": [
+        61,
+        76
+      ],
+      "summary": "验证文件获取请求的 HMAC（绑定请求路径，防止路径篡改重放）",
+      "tags": [
+        "authentication",
+        "security"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/security/auth.go:ValidateForwardHMAC",
+      "type": "function",
+      "name": "ValidateForwardHMAC",
+      "filePath": "internal/cluster/security/auth.go",
+      "lineRange": [
+        97,
+        112
+      ],
+      "summary": "验证领导转发请求的 HMAC（绑定命令 payload，防止命令篡改）",
+      "tags": [
+        "authentication",
+        "security"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/security/nonce_cache.go",
+      "type": "file",
+      "name": "nonce_cache.go",
+      "filePath": "internal/cluster/security/nonce_cache.go",
+      "summary": "Nonce 缓存提供 HMAC 认证的重放保护，通过追踪 (nodeID:nonce) 对并在可配置时间窗口内拒绝重复",
+      "tags": [
+        "security",
+        "replay-protection",
+        "cache"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/security/nonce_cache.go:Track",
+      "type": "function",
+      "name": "Track",
+      "filePath": "internal/cluster/security/nonce_cache.go",
+      "lineRange": [
+        40,
+        67
+      ],
+      "summary": "记录并验证 nonce 是否首次出现，使用惰性淘汰机制定期清理过期条目以避免后台协程开销",
+      "tags": [
+        "security",
+        "replay-protection"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/cluster/security/nonce_cache.go:NonceCache",
+      "type": "class",
+      "name": "NonceCache",
+      "filePath": "internal/cluster/security/nonce_cache.go",
+      "lineRange": [
+        15,
+        23
+      ],
+      "summary": "Nonce 缓存结构体，线程安全，通过惰性淘汰策略管理过期 nonce",
+      "tags": [
+        "security",
+        "cache"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/security/nonce_cache_test.go",
+      "type": "file",
+      "name": "nonce_cache_test.go",
+      "filePath": "internal/cluster/security/nonce_cache_test.go",
+      "summary": "NonceCache 的测试，覆盖重复检测、过期重用、并发安全和批量处理场景",
+      "tags": [
+        "test",
+        "security",
+        "cache"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/security/nonce_cache_test.go:TestNonceCache_ConcurrentAccess",
+      "type": "function",
+      "name": "TestNonceCache_ConcurrentAccess",
+      "filePath": "internal/cluster/security/nonce_cache_test.go",
+      "lineRange": [
+        52,
+        74
+      ],
+      "summary": "测试 NonceCache 在并发访问下的正确性",
+      "tags": [
+        "test",
+        "security"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/security/nonce_cache_test.go:TestNonceCache_ManyNonces",
+      "type": "function",
+      "name": "TestNonceCache_ManyNonces",
+      "filePath": "internal/cluster/security/nonce_cache_test.go",
+      "lineRange": [
+        76,
+        87
+      ],
+      "summary": "测试大量 nonce 的追踪处理",
+      "tags": [
+        "test",
+        "security"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/security/raft_stream.go",
+      "type": "file",
+      "name": "raft_stream.go",
+      "filePath": "internal/cluster/security/raft_stream.go",
+      "summary": "TLS 加密的 Raft 传输层，实现 hashicorp/raft 的 StreamLayer 接口以支持集群节点间启用 TLS 的通信",
+      "tags": [
+        "tls",
+        "raft",
+        "transport"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/security/raft_stream.go:NewTLSStreamLayer",
+      "type": "function",
+      "name": "NewTLSStreamLayer",
+      "filePath": "internal/cluster/security/raft_stream.go",
+      "lineRange": [
+        19,
+        28
+      ],
+      "summary": "创建 TLS 加密的 Raft 流传输层，监听 TLS 连接并支持发布地址",
+      "tags": [
+        "tls",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/cluster/security/raft_stream.go:TLSStreamLayer",
+      "type": "class",
+      "name": "TLSStreamLayer",
+      "filePath": "internal/cluster/security/raft_stream.go",
+      "lineRange": [
+        12,
+        15
+      ],
+      "summary": "实现 raft.StreamLayer 接口的 TLS 流传输层",
+      "tags": [
+        "tls",
+        "raft"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/security/tls.go",
+      "type": "file",
+      "name": "tls.go",
+      "filePath": "internal/cluster/security/tls.go",
+      "summary": "集群 TLS 配置工厂和网络工具，从 ClusterConfig 生成 tls.Config，支持双向 TLS 认证和证书过期检查",
+      "tags": [
+        "tls",
+        "security",
+        "networking"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/security/tls.go:ClusterTLSConfig",
+      "type": "function",
+      "name": "ClusterTLSConfig",
+      "filePath": "internal/cluster/security/tls.go",
+      "lineRange": [
+        16,
+        61
+      ],
+      "summary": "从集群配置生成 tls.Config，加载证书和 CA，检查证书过期并提供预警",
+      "tags": [
+        "tls",
+        "configuration"
+      ],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/nonce_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/nonce_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/raft_stream.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/raft/node.go",
+      "target": "file:internal/cluster/security/tls.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/nonce_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/nonce_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/raft_stream.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/tls.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/security/tls.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/security/tls.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/security/tls.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/security/tls.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/security/tls.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/security/tls.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/sharding/failover.go",
+      "target": "file:internal/cluster/router_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/sharding/failover.go",
+      "target": "file:internal/cluster/router.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:NewRouter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:RouteWrite",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:RouteQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:selectNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:selectLeastConnections",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:forwardRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:doForward",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:incrementConns",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:decrementConns",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:CanRouteLocally",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:Stats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "class:internal/cluster/router.go:Router",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:newTestRouter",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRouteWriteNoWriters",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRouteWriteLocalCanHandle",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRouteQueryNoReaders",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRouteQueryLocalCanHandle",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterForwardRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRoundRobinSelection",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterLeastConnectionsSelection",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterActiveConnectionTracking",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterCanRouteLocally",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterStats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterFallbackToWriterForQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterContextCancellation",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterQueryStringPreserved",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/auth.go",
+      "target": "function:internal/cluster/security/auth.go:ValidateHMAC",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/auth.go",
+      "target": "function:internal/cluster/security/auth.go:ValidateFetchHMAC",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/auth.go",
+      "target": "function:internal/cluster/security/auth.go:ValidateForwardHMAC",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/nonce_cache.go",
+      "target": "function:internal/cluster/security/nonce_cache.go:Track",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/nonce_cache.go",
+      "target": "class:internal/cluster/security/nonce_cache.go:NonceCache",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/nonce_cache_test.go",
+      "target": "function:internal/cluster/security/nonce_cache_test.go:TestNonceCache_ConcurrentAccess",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/nonce_cache_test.go",
+      "target": "function:internal/cluster/security/nonce_cache_test.go:TestNonceCache_ManyNonces",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/raft_stream.go",
+      "target": "function:internal/cluster/security/raft_stream.go:NewTLSStreamLayer",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/raft_stream.go",
+      "target": "class:internal/cluster/security/raft_stream.go:TLSStreamLayer",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/security/tls.go",
+      "target": "function:internal/cluster/security/tls.go:ClusterTLSConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:NewRouter",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:RouteWrite",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:RouteQuery",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:CanRouteLocally",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "function:internal/cluster/router.go:Stats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "class:internal/cluster/router.go:Router",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRouteWriteNoWriters",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRouteWriteLocalCanHandle",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRouteQueryNoReaders",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRouteQueryLocalCanHandle",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterForwardRequest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterRoundRobinSelection",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterLeastConnectionsSelection",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterActiveConnectionTracking",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterCanRouteLocally",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterStats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterFallbackToWriterForQuery",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterContextCancellation",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router_test.go",
+      "target": "function:internal/cluster/router_test.go:TestRouterQueryStringPreserved",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/auth.go",
+      "target": "function:internal/cluster/security/auth.go:ValidateHMAC",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/auth.go",
+      "target": "function:internal/cluster/security/auth.go:ValidateFetchHMAC",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/auth.go",
+      "target": "function:internal/cluster/security/auth.go:ValidateForwardHMAC",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/nonce_cache.go",
+      "target": "function:internal/cluster/security/nonce_cache.go:Track",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/nonce_cache.go",
+      "target": "class:internal/cluster/security/nonce_cache.go:NonceCache",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/nonce_cache_test.go",
+      "target": "function:internal/cluster/security/nonce_cache_test.go:TestNonceCache_ConcurrentAccess",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/nonce_cache_test.go",
+      "target": "function:internal/cluster/security/nonce_cache_test.go:TestNonceCache_ManyNonces",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/raft_stream.go",
+      "target": "function:internal/cluster/security/raft_stream.go:NewTLSStreamLayer",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/raft_stream.go",
+      "target": "class:internal/cluster/security/raft_stream.go:TLSStreamLayer",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/security/tls.go",
+      "target": "function:internal/cluster/security/tls.go:ClusterTLSConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "file:internal/cluster/router_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/security/nonce_cache.go",
+      "target": "file:internal/cluster/security/nonce_cache_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/router.go",
+      "target": "file:internal/cluster/registry.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/cluster/security/tls.go",
+      "target": "file:internal/config/config.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    }
+  ]
+}

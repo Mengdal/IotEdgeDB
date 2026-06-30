@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 
 	"iedb/internal/api"
@@ -27,6 +29,7 @@ import (
 	"iedb/internal/logger"
 	"iedb/internal/metrics"
 	"iedb/internal/mqtt"
+	"iedb/internal/query"
 	"iedb/internal/queryregistry"
 	"iedb/internal/reconciliation"
 	"iedb/internal/scheduler"
@@ -327,13 +330,21 @@ func main() {
 
 		// === Adaptive buffer wiring ===
 		// 1. Memory monitor (cgroup-aware memory pressure detection)
+		// Parse DuckDB memory_limit to properly compute buffer ceiling:
+		//   bufferLimit = totalMemory * 50% - duckdbMemoryLimit
+		duckdbLimitMB := 0
+		if cfg.Database.MemoryLimit != "" {
+			if limitBytes, err := config.ParseSize(cfg.Database.MemoryLimit); err == nil {
+				duckdbLimitMB = int(limitBytes / (1024 * 1024))
+			}
+		}
 		memoryMonitor := ingest.NewMemoryMonitor(ingest.MemoryMonitorConfig{
 			MaxBufferMemoryMB: cfg.Ingest.MaxBufferMemoryMB,
 			MinBufferMemoryMB: cfg.Ingest.MinBufferMemoryMB,
 			GreenPct:          cfg.Ingest.MemoryPressureGreenPct,
 			RedPct:            cfg.Ingest.MemoryPressureRedPct,
 			CheckIntervalMS:   cfg.Ingest.MemoryCheckIntervalMS,
-		}, 0, logger.Get("memory-monitor")) // duckdbLimitMB: 0 uses auto-detect
+		}, duckdbLimitMB, logger.Get("memory-monitor"))
 		go memoryMonitor.Run(context.Background())
 
 		// 2. Adaptive flush engine (replaces fixed-size periodic flush)
@@ -342,12 +353,51 @@ func main() {
 		arrowBuffer.SetAdaptiveFlushEngine(adaptiveEngine)
 		arrowBuffer.StartAdaptiveFlush()
 
+		// 2b. Buffer overflow protection: hard limit = memory limit × 2.
+		// When exceeded, oldest entries are evicted; if still over, 503 backpressure.
+		arrowBuffer.SetBufferHardLimit(memoryMonitor.BufferLimit() * 2)
+
 		// 3. Arrow VIEW manager (buffer data queryable via DuckDB temp tables)
-		arrowViewMgr := database.NewArrowViewManager(db, arrowBuffer, logger.Get("arrow-view"))
-		arrowBuffer.SetNotifier(arrowViewMgr)
+	// Registered with shutdown coordinator so refreshLoop goroutine is
+	// stopped before the DuckDB pool closes.
+	arrowViewMgr := database.NewArrowViewManager(db, arrowBuffer, logger.Get("arrow-view"))
+	arrowBuffer.SetNotifier(arrowViewMgr)
+	shutdownCoordinator.Register("arrow-view", arrowViewMgr, shutdown.PriorityBuffer)
 
-		// 4. Query rewriter (transparent Parquet + buffer UNION queries)
+	// 4. Query rewriter (transparent Parquet + buffer UNION queries)
+	queryRewriter := query.NewQueryRewriter(arrowViewMgr)
+	_ = queryRewriter // held for future direct use; currently integrated via buildReadParquetExpr
 
+		// === SIGHUP 配置热加载 ===
+		reloadCoordinator := config.NewReloadCoordinator(
+			cfg.ConfigFilePath,
+			logger.Get("config-reloader"),
+		)
+		reloadCoordinator.Register("memory-monitor", memoryMonitor)
+		reloadCoordinator.Register("adaptive-flush", adaptiveEngine)
+
+		doneCh := make(chan struct{})
+		sighupCh := make(chan os.Signal, 1)
+		signal.Notify(sighupCh, syscall.SIGHUP)
+		go func() {
+			for {
+				select {
+				case <-sighupCh:
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								log.Error().Interface("panic", r).Msg("SIGHUP reload panicked")
+							}
+						}()
+						if err := reloadCoordinator.Reload(); err != nil {
+							log.Warn().Err(err).Msg("config hot reload failed")
+						}
+					}()
+				case <-doneCh:
+					return
+				}
+			}
+		}()
 
 	// After ArrowBuffer flushes (priority 30) but before WAL closes (priority 40),
 	// purge WAL files since all data has been flushed to storage.
@@ -392,20 +442,20 @@ func main() {
 		}
 
 		// Start periodic WAL maintenance goroutine.
-		// Two modes:
-		//   Normal:   purge rotated WAL files older than safeAge (data already in parquet)
-		//   Recovery: when a flush failure is detected (S3 outage), replay WAL files
-		//             to re-buffer data that was cleared from buffers after failed flush
+		// With FLUSH_OK-based recovery, periodic maintenance only purges old WAL files.
+		// Flush failures are handled by restoring data back into the buffer at failure time,
+		// so no periodic recovery loop is needed.
 		walMaintenanceCtx, walMaintenanceCancel := context.WithCancel(context.Background())
 		shutdownCoordinator.RegisterHook("wal-periodic-maintenance", func(ctx context.Context) error {
 			walMaintenanceCancel()
 			return nil
 		}, shutdown.PriorityBuffer)
 
-		// Safe age threshold: after this duration, a rotated WAL file's data MUST have
-		// been flushed to parquet by the normal buffer flush cycle (MaxBufferAgeMS).
-		// We use 3x margin to account for flush worker delays and clock skew.
-		safeAge := time.Duration(cfg.Ingest.MaxBufferAgeMS) * time.Millisecond * 3
+		// Safe age threshold: MaxBufferAgeSeconds × 3.  The 3× margin covers flush worker
+		// queueing, Parquet write latency, and FLUSH_OK writing.  PurgeOlderThan only
+		// deletes non-active files, so the active file is always safe.
+		// Minimum 30s floor prevents premature purge with small MaxBufferAgeSeconds values.
+		safeAge := time.Duration(cfg.Ingest.MaxBufferAgeSeconds) * time.Second * 3
 		if safeAge < 30*time.Second {
 			safeAge = 30 * time.Second
 		}
@@ -421,54 +471,11 @@ func main() {
 				case <-walMaintenanceCtx.Done():
 					return
 				case <-ticker.C:
-					if arrowBuffer.HasFlushFailure() {
-						// Storage failure detected — replay WAL files to recover data
-						// that was cleared from buffers after failed flush
-						walLogger.Info().Msg("Flush failure detected, attempting WAL recovery")
-
-						// Purge old WAL files first (same as normal path) to avoid replaying
-						// data that was already successfully flushed to parquet before the failure.
-						if walWriter != nil {
-							deleted, purgeErr := walWriter.PurgeOlderThan(safeAge)
-							if purgeErr != nil {
-								walLogger.Error().Err(purgeErr).Msg("WAL purge before recovery failed")
-							} else if deleted > 0 {
-								walLogger.Info().Int("deleted", deleted).Msg("Purged old WAL files before recovery")
-							}
-						}
-
-						recovery := wal.NewRecovery(cfg.WAL.Directory, walLogger)
-						activeFile := ""
-						if walWriter != nil {
-							activeFile = walWriter.CurrentFile()
-						}
-						stats, err := recovery.RecoverWithOptions(context.Background(), recoveryCallback, &wal.RecoveryOptions{
-							SkipActiveFile:   activeFile,
-							BatchSize:        cfg.WAL.RecoveryBatchSize,
-							ColumnarCallback: columnarCallback,
-						})
-						if err != nil {
-							walLogger.Error().Err(err).Msg("WAL recovery after flush failure failed")
-						} else {
-							if stats.RecoveredFiles > 0 {
-								metrics.Get().IncWALRecoveryTotal()
-								metrics.Get().IncWALRecoveryRecords(int64(stats.RecoveredEntries))
-								walLogger.Info().
-									Int("files", stats.RecoveredFiles).
-									Int("entries", stats.RecoveredEntries).
-									Msg("WAL recovery after flush failure complete")
-							}
-							arrowBuffer.ResetFlushFailure()
-						}
-					} else {
-						// Normal operation — purge WAL files old enough that their data
-						// has been flushed to parquet by the normal buffer flush cycle
-						deleted, err := walWriter.PurgeOlderThan(safeAge)
-						if err != nil {
-							walLogger.Error().Err(err).Msg("Periodic WAL purge failed")
-						} else if deleted > 0 {
-							walLogger.Info().Int("deleted", deleted).Msg("Periodic WAL cleanup complete")
-						}
+					deleted, err := walWriter.PurgeOlderThan(safeAge)
+					if err != nil {
+						walLogger.Error().Err(err).Msg("Periodic WAL purge failed")
+					} else if deleted > 0 {
+						walLogger.Info().Int("deleted", deleted).Msg("Periodic WAL cleanup complete")
 					}
 				}
 			}
@@ -1179,6 +1186,10 @@ func main() {
 	if authManager != nil && rbacManager != nil {
 		queryHandler.SetAuthAndRBAC(authManager, rbacManager)
 	}
+	// Wire buffer VIEW for transparent in-memory data visibility in queries
+	if arrowViewMgr != nil {
+		queryHandler.SetArrowViewManager(arrowViewMgr)
+	}
 	queryHandler.RegisterRoutes(server.GetApp())
 
 	// Wire up cluster router to handlers for request forwarding
@@ -1723,6 +1734,8 @@ func main() {
 
 	// Wait for shutdown signal
 	sig := shutdownCoordinator.WaitForSignal()
+	close(doneCh)           // stop SIGHUP goroutine before component shutdown
+	signal.Stop(sighupCh)   // stop OS signal delivery
 	log.Info().Str("signal", sig.String()).Msg("Initiating graceful shutdown...")
 
 	// Perform graceful shutdown of all components

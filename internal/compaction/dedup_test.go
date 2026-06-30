@@ -30,8 +30,11 @@ func TestBuildCompactionQuery_WithDedup(t *testing.T) {
 	if !strings.Contains(query, "ROW_NUMBER") {
 		t.Error("expected ROW_NUMBER with dedup keys")
 	}
-	if !strings.Contains(query, `PARTITION BY "host", "region", "time"`) {
-		t.Error("expected PARTITION BY with tag columns and time")
+	if !strings.Contains(query, `PARTITION BY "host", "region"`) {
+		t.Error("expected PARTITION BY with tag columns")
+	}
+	if !strings.Contains(query, `CAST("time" AS TIMESTAMP WITH TIME ZONE)`) {
+		t.Error("expected CAST of time column")
 	}
 	if !strings.Contains(query, "EXCLUDE (__dedup_rn)") {
 		t.Error("expected EXCLUDE __dedup_rn")

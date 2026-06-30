@@ -196,13 +196,13 @@ func TestArrowBuffer_WriteRowFormat_ViaDecoder(t *testing.T) {
 	t.Logf("Parquet files written: %d", storage.writeCount())
 }
 
-// TestArrowBuffer_WriteRowFormat_ViaDecoder_SingleWrite — single write (no
-// size-based flush), rely on buffer-age flush.
+// TestArrowBuffer_WriteRowFormat_ViaDecoder_SingleWrite — single write
+// triggering size-based flush (MaxBufferSize=1).
 func TestArrowBuffer_WriteRowFormat_ViaDecoder_SingleWrite(t *testing.T) {
 	logger := zerolog.New(os.Stderr).Level(zerolog.DebugLevel)
 	cfg := &config.IngestConfig{
-		MaxBufferSize:  1000,
-		MaxBufferAgeMS: 200, // flush after 200ms
+		MaxBufferSize:  1, // trigger size-based flush on first write
+		MaxBufferAgeMS: 0, // not used (no periodic flush goroutine)
 		Compression:    "snappy",
 		ShardCount:     4,
 		FlushWorkers:   1,
@@ -238,13 +238,13 @@ func TestArrowBuffer_WriteRowFormat_ViaDecoder_SingleWrite(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	// Wait for age-based flush (200ms + grace).
+	// Wait for size-based flush.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) && storage.writeCount() == 0 {
 		time.Sleep(20 * time.Millisecond)
 	}
 
 	if storage.writeCount() == 0 {
-		t.Fatal("No Parquet files written — age-based flush failed for single row (issue #401)")
+		t.Fatal("No Parquet files written — size-based flush failed for single row")
 	}
 }

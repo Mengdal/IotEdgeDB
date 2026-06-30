@@ -2,29 +2,37 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"iedb/internal/config"
+	"iedb/internal/metrics"
 
 	"github.com/rs/zerolog"
 )
 
 // flushCandidate 是自适应决策引擎收集的缓冲快照。
+// Fields are copied by value under shard RLock to avoid data races
+// with concurrent write-path mutations of the same bufferEntry fields.
 type flushCandidate struct {
-	shardIdx       uint32
+	shardIdx       int
 	bufferKey      string
-	recordCount    int
-	estimatedBytes uint64
-	age            time.Duration
+	estimatedBytes uint64    // copied from entry.estimatedBytes under RLock
+	recordCount    int       // copied from entry.recordCount under RLock
+	startTime      time.Time // copied from entry.startTime under RLock
+	trigger        string    // "age", "hard_limit", or "pressure"
 }
 
 // AdaptiveFlushEngine 是内存压力驱动的自适应刷盘决策引擎。
 type AdaptiveFlushEngine struct {
 	buffer         *ArrowBuffer
 	monitor        *MemoryMonitor
-	maxBufferBytes uint64
-	minBufferBytes uint64
-	maxAge         time.Duration
+	maxBufferBytes atomic.Uint64
+	minBufferBytes atomic.Uint64
+	maxAge         atomic.Int64 // 纳秒
 	candidatesBuf  []flushCandidate
 	logger         zerolog.Logger
 }
@@ -36,14 +44,15 @@ func NewAdaptiveFlushEngine(
 	maxAge time.Duration,
 	logger zerolog.Logger,
 ) *AdaptiveFlushEngine {
-	return &AdaptiveFlushEngine{
-		buffer:         buffer,
-		monitor:        monitor,
-		maxBufferBytes: monitor.BufferLimit(),
-		minBufferBytes: monitor.MinBufferBytes(),
-		maxAge:         maxAge,
-		logger:         logger,
+	e := &AdaptiveFlushEngine{
+		buffer:  buffer,
+		monitor: monitor,
+		logger:  logger,
 	}
+	e.maxBufferBytes.Store(monitor.BufferLimit())
+	e.minBufferBytes.Store(monitor.MinBufferBytes())
+	e.maxAge.Store(int64(maxAge))
+	return e
 }
 
 // Run 主循环，每秒评估一次。
@@ -51,12 +60,23 @@ func (e *AdaptiveFlushEngine) Run(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	// GC timer re-reads maxAge on each cycle for hot-reload support.
+	gcTimer := time.NewTimer(time.Duration(e.maxAge.Load()) * 2)
+	defer gcTimer.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			e.evaluate()
+		case <-gcTimer.C:
+			e.buffer.gcEmptyEntries()
+			nextGC := time.Duration(e.maxAge.Load()) * 2
+			if nextGC < 5*time.Minute {
+				nextGC = 5 * time.Minute
+			}
+			gcTimer.Reset(nextGC)
 		}
 	}
 }
@@ -70,18 +90,24 @@ func (e *AdaptiveFlushEngine) evaluate() {
 	for _, c := range candidates {
 		totalBytes += c.estimatedBytes
 	}
-	if totalBytes > e.maxBufferBytes {
+
+	// Update buffer estimated bytes metric
+	metrics.Get().SetBufferEstimatedBytes(int64(totalBytes))
+
+	if totalBytes > e.maxBufferBytes.Load() {
 		e.logger.Debug().
 			Uint64("total_bytes", totalBytes).
-			Uint64("limit_bytes", e.maxBufferBytes).
+			Uint64("limit_bytes", e.maxBufferBytes.Load()).
 			Msg("Buffer hard limit exceeded, flushing largest")
-		e.flushUntilBelow(candidates, totalBytes, e.maxBufferBytes)
+		metrics.Get().IncHardLimitFlush()
+		e.flushUntilBelow(candidates, totalBytes, e.maxBufferBytes.Load())
 		return
 	}
 
 	// 15 分钟兜底
 	expired := e.filterExpired(candidates)
 	for _, c := range expired {
+		metrics.Get().IncAgeExpiredFlush()
 		e.flushCandidate(c)
 	}
 
@@ -91,32 +117,38 @@ func (e *AdaptiveFlushEngine) evaluate() {
 
 	// 按压力等级决策
 	pressure := e.monitor.PressureLevel()
+	metrics.Get().SetMemoryPressureLevel(int64(pressure))
 	switch pressure {
 	case PressureGreen:
 	case PressureYellow:
+		metrics.Get().IncAdaptiveFlush()
 		e.flushLargestUntil(candidates, func() bool {
 			return e.monitor.PressureLevel() == PressureGreen
 		})
 	case PressureRed:
+		metrics.Get().IncAdaptiveFlush()
 		e.flushLargestUntil(candidates, func() bool {
 			return e.monitor.PressureLevel() != PressureRed
 		})
 	}
 }
 
-// collectCandidates 遍历所有 shard，收集 bufferEntry 的引用。
+// collectCandidates 遍历所有 shard，收集 bufferEntry 的快照（按值复制）。
 func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 	e.candidatesBuf = e.candidatesBuf[:0]
 	for i := uint32(0); i < e.buffer.shardCount; i++ {
 		shard := e.buffer.shards[i]
 		shard.mu.RLock()
-		for key := range shard.buffers {
+		for key, entry := range shard.buffers {
+			if entry.isEmpty() {
+				continue
+			}
 			e.candidatesBuf = append(e.candidatesBuf, flushCandidate{
-				shardIdx:       i,
+				shardIdx:       int(i),
 				bufferKey:      key,
-				recordCount:    shard.bufferRecordCounts[key],
-				estimatedBytes: shard.bufferEstimatedBytes[key],
-				age:            time.Since(shard.bufferStartTimes[key]),
+				estimatedBytes: entry.estimatedBytes,
+				recordCount:    entry.recordCount,
+				startTime:      entry.startTime,
 			})
 		}
 		shard.mu.RUnlock()
@@ -127,8 +159,10 @@ func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 // filterExpired 筛选出超过 maxAge 的缓冲。
 func (e *AdaptiveFlushEngine) filterExpired(candidates []flushCandidate) []flushCandidate {
 	var expired []flushCandidate
+	maxAge := time.Duration(e.maxAge.Load())
 	for _, c := range candidates {
-		if c.age >= e.maxAge {
+		if time.Since(c.startTime) >= maxAge {
+			c.trigger = "age"
 			expired = append(expired, c)
 		}
 	}
@@ -144,16 +178,19 @@ func (e *AdaptiveFlushEngine) flushLargestUntil(
 		return candidates[i].recordCount > candidates[j].recordCount
 	})
 
-	minPerMeasurement := e.minBufferBytes / uint64(max(len(candidates), 1))
+	minPerMeasurement := e.minBufferBytes.Load() / uint64(max(len(candidates), 1))
 
-	for _, c := range candidates {
+	for i := range candidates {
 		if shouldStop() {
 			break
 		}
-		if c.estimatedBytes < minPerMeasurement {
+		if candidates[i].estimatedBytes < minPerMeasurement {
 			continue
 		}
-		e.flushCandidate(c)
+		if candidates[i].trigger == "" {
+			candidates[i].trigger = "pressure"
+		}
+		e.flushCandidate(candidates[i])
 	}
 }
 
@@ -168,12 +205,15 @@ func (e *AdaptiveFlushEngine) flushUntilBelow(
 	})
 
 	remaining := currentTotal
-	for _, c := range candidates {
+	for i := range candidates {
 		if remaining <= targetBytes {
 			break
 		}
-		remaining -= c.estimatedBytes
-		e.flushCandidate(c)
+		remaining -= candidates[i].estimatedBytes
+		if candidates[i].trigger == "" {
+			candidates[i].trigger = "hard_limit"
+		}
+		e.flushCandidate(candidates[i])
 	}
 }
 
@@ -181,22 +221,31 @@ func (e *AdaptiveFlushEngine) flushUntilBelow(
 func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 	shard := e.buffer.shards[c.shardIdx]
 	shard.mu.Lock()
-	records, exists := shard.buffers[c.bufferKey]
-	if !exists || len(records) == 0 {
+	entry, exists := shard.buffers[c.bufferKey]
+	if !exists || len(entry.batches) == 0 {
 		shard.mu.Unlock()
 		return
 	}
-	recordCount := shard.bufferRecordCounts[c.bufferKey]
+	recordCount := entry.recordCount
 	database, measurement := splitKeyToDBAndMeas(c.bufferKey)
-	delete(shard.buffers, c.bufferKey)
-	delete(shard.bufferRecordCounts, c.bufferKey)
-	delete(shard.bufferStartTimes, c.bufferKey)
-	delete(shard.bufferSchemas, c.bufferKey)
-	delete(shard.bufferEstimatedBytes, c.bufferKey)
-	delete(shard.bufferRefreshIndex, c.bufferKey)
-	shard.mu.Unlock()
+	// Extract batch references before deleting entry
+	records := make([]interface{}, len(entry.batches))
+	for i, batch := range entry.batches {
+		records[i] = batch
+	}
 
-	flushCtx, flushCancel := context.WithTimeout(context.Background(), e.buffer.flushTimeout)
+	// Determine trigger type: age-expired uses "age", hard-limit uses "hard_limit",
+	// pressure-driven (yellow/red) uses "pressure".
+	trigger := c.trigger
+	if trigger == "" {
+		trigger = "hard_limit"
+	}
+
+	// Try to enqueue BEFORE deleting the entry. tryEnqueueFlush is non-blocking
+	// and does not acquire shard locks — safe to call while holding shard.mu.
+	// Only delete the entry on successful enqueue; on failure the entry stays
+	// in buffer for retry on the next evaluate() cycle.
+	flushCtx, flushCancel := context.WithTimeout(e.buffer.ctx, e.buffer.flushTimeout)
 	task := flushTask{
 		ctx:         flushCtx,
 		cancel:      flushCancel,
@@ -205,15 +254,69 @@ func (e *AdaptiveFlushEngine) flushCandidate(c flushCandidate) {
 		measurement: measurement,
 		records:     records,
 		recordCount: recordCount,
+		trigger:     trigger,
+		arrowSchema: entry.arrowSchema,
 	}
-	e.buffer.tryEnqueueFlush(task, flushCancel, c.bufferKey, recordCount)
+	outcome := e.buffer.tryEnqueueFlush(task, flushCancel, c.bufferKey, recordCount)
+
+	if outcome == flushQueued {
+		entry.batches = nil
+		entry.recordCount = 0
+		entry.estimatedBytes = 0
+	}
+	shard.mu.Unlock()
 }
 
-// splitKeyToDBAndMeas 将 "database/measurement" 拆分为 database 和 measurement。
+// splitKeyToDBAndMeas 将 bufferKey 拆分为 database 和 measurement，
+// 同时剥离 schema hash 后缀（例如 "db/cpu__abc123" → ("db", "cpu")）。
 func splitKeyToDBAndMeas(key string) (database, measurement string) {
-	idx := strings.LastIndex(key, "/")
+	cleanKey, _ := StripSchemaHash(key)
+	idx := strings.LastIndex(cleanKey, "/")
 	if idx < 0 {
-		return key, key
+		return cleanKey, cleanKey
 	}
-	return key[:idx], key[idx+1:]
+	return cleanKey[:idx], cleanKey[idx+1:]
+}
+
+// ValidateConfig 实现 config.Reloadable 接口。
+func (e *AdaptiveFlushEngine) ValidateConfig(payload *config.ReloadPayload) error {
+	if payload == nil || payload.Ingest == nil {
+		return nil
+	}
+	ic := payload.Ingest
+	if ic.MaxBufferAgeSeconds < 10 {
+		return fmt.Errorf("max_buffer_age_seconds must be >= 10, got %d", ic.MaxBufferAgeSeconds)
+	}
+	if ic.MaxBufferAgeSeconds > 1_000_000_000 {
+		return fmt.Errorf("max_buffer_age_seconds must be <= 1000000000, got %d", ic.MaxBufferAgeSeconds)
+	}
+	return nil
+}
+
+// ReloadConfig 实现 config.Reloadable 接口。
+// IMPORTANT: MemoryMonitor.ReloadConfig must be called before this method,
+// because BufferLimit() and MinBufferBytes() are read from the monitor.
+// ReloadCoordinator guarantees this via registration order.
+func (e *AdaptiveFlushEngine) ReloadConfig(payload *config.ReloadPayload) error {
+	if payload == nil || payload.Ingest == nil {
+		return nil
+	}
+	ic := payload.Ingest
+	oldMaxAge := time.Duration(e.maxAge.Load())
+	newMaxAge := time.Duration(ic.MaxBufferAgeSeconds) * time.Second
+	newLimit := e.monitor.BufferLimit()
+	newMin := e.monitor.MinBufferBytes()
+	e.maxAge.Store(int64(newMaxAge))
+	e.maxBufferBytes.Store(newLimit)
+	e.minBufferBytes.Store(newMin)
+	// Keep ArrowBuffer overflow protection in sync with the reloaded limit.
+	if e.buffer != nil {
+		e.buffer.SetBufferHardLimit(newLimit * 2)
+	}
+	e.logger.Info().
+		Dur("old_max_age", oldMaxAge).
+		Dur("new_max_age", newMaxAge).
+		Uint64("buffer_limit_mb", newLimit/(1024*1024)).
+		Msg("自适应刷盘引擎配置已热加载")
+	return nil
 }

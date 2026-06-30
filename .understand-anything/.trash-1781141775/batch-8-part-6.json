@@ -1,0 +1,954 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/compaction/manifest.go",
+      "type": "file",
+      "name": "manifest.go",
+      "filePath": "internal/compaction/manifest.go",
+      "summary": "压缩清单管理器实现，在storage后端维护压缩作业的崩溃恢复状态，包括清单的写入、读取、列表、恢复和缓存功能。",
+      "tags": [
+        "compaction",
+        "crash-recovery",
+        "manifest"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/compaction/manifest_test.go",
+      "type": "file",
+      "name": "manifest_test.go",
+      "filePath": "internal/compaction/manifest_test.go",
+      "summary": "压缩清单管理器的测试套件，覆盖读写、列表、文件查询和孤儿清单恢复。",
+      "tags": [
+        "test",
+        "compaction",
+        "manifest"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/compaction/scheduler.go",
+      "type": "file",
+      "name": "scheduler.go",
+      "filePath": "internal/compaction/scheduler.go",
+      "summary": "压缩调度器实现，基于cron表达式自动调度压缩任务，支持集群角色门控（ClusterGate）和手动触发。",
+      "tags": [
+        "compaction",
+        "scheduler",
+        "cron"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:NewManifestManager",
+      "type": "function",
+      "name": "NewManifestManager",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        70,
+        77
+      ],
+      "summary": "创建清单管理器实例，初始化后台存储和缓存。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:GenerateManifestPath",
+      "type": "function",
+      "name": "GenerateManifestPath",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        80,
+        84
+      ],
+      "summary": "生成唯一的压缩清单存储路径。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:WriteManifest",
+      "type": "function",
+      "name": "WriteManifest",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        87,
+        112
+      ],
+      "summary": "写入压缩清单到存储后端。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:DeleteManifest",
+      "type": "function",
+      "name": "DeleteManifest",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        115,
+        129
+      ],
+      "summary": "从存储后端删除指定清单。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:ReadManifest",
+      "type": "function",
+      "name": "ReadManifest",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        132,
+        144
+      ],
+      "summary": "从存储后端读取指定清单内容。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:ListManifests",
+      "type": "function",
+      "name": "ListManifests",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        147,
+        162
+      ],
+      "summary": "列出存储中所有待处理的压缩清单。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:RecoverOrphanedManifests",
+      "type": "function",
+      "name": "RecoverOrphanedManifests",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        166,
+        201
+      ],
+      "summary": "恢复孤儿清单，检查压缩输出文件是否存在并完成清理。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:recoverManifest",
+      "type": "function",
+      "name": "recoverManifest",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        204,
+        296
+      ],
+      "summary": "单个清单的恢复逻辑：验证输出文件并清理源文件。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:GetFilesInManifests",
+      "type": "function",
+      "name": "GetFilesInManifests",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        300,
+        359
+      ],
+      "summary": "获取所有清单中记录的输入文件路径集合。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest.go:IsFileInManifest",
+      "type": "function",
+      "name": "IsFileInManifest",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        370,
+        377
+      ],
+      "summary": "检查指定文件是否已被任何清单记录。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/manifest.go:ManifestManager",
+      "type": "class",
+      "name": "ManifestManager",
+      "filePath": "internal/compaction/manifest.go",
+      "lineRange": [
+        56,
+        67
+      ],
+      "summary": "压缩清单管理器，维护崩溃恢复状态。",
+      "tags": [
+        "class"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest_test.go:TestManifestManager_WriteAndRead",
+      "type": "function",
+      "name": "TestManifestManager_WriteAndRead",
+      "filePath": "internal/compaction/manifest_test.go",
+      "lineRange": [
+        16,
+        100
+      ],
+      "summary": "测试清单的写入和读取。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest_test.go:TestManifestManager_ListManifests",
+      "type": "function",
+      "name": "TestManifestManager_ListManifests",
+      "filePath": "internal/compaction/manifest_test.go",
+      "lineRange": [
+        102,
+        158
+      ],
+      "summary": "测试清单列表功能。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest_test.go:TestManifestManager_GetFilesInManifests",
+      "type": "function",
+      "name": "TestManifestManager_GetFilesInManifests",
+      "filePath": "internal/compaction/manifest_test.go",
+      "lineRange": [
+        160,
+        220
+      ],
+      "summary": "测试从清单获取文件列表。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest_test.go:TestManifestManager_RecoverOrphanedManifests_OutputMissing",
+      "type": "function",
+      "name": "TestManifestManager_RecoverOrphanedManifests_OutputMissing",
+      "filePath": "internal/compaction/manifest_test.go",
+      "lineRange": [
+        222,
+        279
+      ],
+      "summary": "测试输出文件缺失时的孤儿清单恢复。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest_test.go:TestManifestManager_RecoverOrphanedManifests_OutputExists",
+      "type": "function",
+      "name": "TestManifestManager_RecoverOrphanedManifests_OutputExists",
+      "filePath": "internal/compaction/manifest_test.go",
+      "lineRange": [
+        281,
+        359
+      ],
+      "summary": "测试输出文件存在时的孤儿清单恢复。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/manifest_test.go:TestManifestManager_IsFileInManifest",
+      "type": "function",
+      "name": "TestManifestManager_IsFileInManifest",
+      "filePath": "internal/compaction/manifest_test.go",
+      "lineRange": [
+        361,
+        415
+      ],
+      "summary": "测试检查文件是否在清单中。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/scheduler.go:NewScheduler",
+      "type": "function",
+      "name": "NewScheduler",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        65,
+        103
+      ],
+      "summary": "创建压缩调度器实例，配置cron表达式、目标层级和集群门控。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/scheduler.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        106,
+        160
+      ],
+      "summary": "启动调度器，检查集群门控后开始等待cron触发。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/scheduler.go:Stop",
+      "type": "function",
+      "name": "Stop",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        163,
+        179
+      ],
+      "summary": "停止调度器，中止正在运行的压缩任务。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/scheduler.go:runCompaction",
+      "type": "function",
+      "name": "runCompaction",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        182,
+        200
+      ],
+      "summary": "执行一次压缩周期的内部方法。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/scheduler.go:TriggerNow",
+      "type": "function",
+      "name": "TriggerNow",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        210,
+        239
+      ],
+      "summary": "手动触发立即执行一次压缩周期。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/scheduler.go:Status",
+      "type": "function",
+      "name": "Status",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        252,
+        273
+      ],
+      "summary": "返回调度器的当前状态和运行信息。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/scheduler.go:IsEnabled",
+      "type": "function",
+      "name": "IsEnabled",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        276,
+        278
+      ],
+      "summary": "检查调度器是否启用。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/scheduler.go:IsRunning",
+      "type": "function",
+      "name": "IsRunning",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        281,
+        285
+      ],
+      "summary": "检查调度器是否正在运行。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/scheduler.go:ClusterGate",
+      "type": "class",
+      "name": "ClusterGate",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        22,
+        31
+      ],
+      "summary": "ClusterGate结构体",
+      "tags": [
+        "class"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/compaction/scheduler.go:Scheduler",
+      "type": "class",
+      "name": "Scheduler",
+      "filePath": "internal/compaction/scheduler.go",
+      "lineRange": [
+        34,
+        52
+      ],
+      "summary": "基于cron的压缩调度器，支持集群门控和手动触发。",
+      "tags": [
+        "class"
+      ],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:NewManifestManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:GenerateManifestPath",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:WriteManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:DeleteManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:ReadManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:ListManifests",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:RecoverOrphanedManifests",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:recoverManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:GetFilesInManifests",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:IsFileInManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "class:internal/compaction/manifest.go:ManifestManager",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_WriteAndRead",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_ListManifests",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_GetFilesInManifests",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_RecoverOrphanedManifests_OutputMissing",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_RecoverOrphanedManifests_OutputExists",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_IsFileInManifest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:NewScheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:Stop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:runCompaction",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:TriggerNow",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:Status",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:IsEnabled",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:IsRunning",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "class:internal/compaction/scheduler.go:ClusterGate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "class:internal/compaction/scheduler.go:Scheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:NewManifestManager",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:GenerateManifestPath",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:WriteManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:DeleteManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:ReadManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:ListManifests",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:RecoverOrphanedManifests",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:GetFilesInManifests",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "function:internal/compaction/manifest.go:IsFileInManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "class:internal/compaction/manifest.go:ManifestManager",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_WriteAndRead",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_ListManifests",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_GetFilesInManifests",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_RecoverOrphanedManifests_OutputMissing",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_RecoverOrphanedManifests_OutputExists",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "function:internal/compaction/manifest_test.go:TestManifestManager_IsFileInManifest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:NewScheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:Start",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:Stop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:TriggerNow",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:Status",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:IsEnabled",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "function:internal/compaction/scheduler.go:IsRunning",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "class:internal/compaction/scheduler.go:ClusterGate",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/scheduler.go",
+      "target": "class:internal/compaction/scheduler.go:Scheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/metrics/metrics.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/metrics/timeseries_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/metrics/timeseries.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest_test.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/manifest.go",
+      "target": "file:internal/compaction/manifest_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "nodes": [
+    {
+      "id": "service:deploy/kubernetes/namespace.yaml",
+      "type": "service",
+      "name": "namespace.yaml",
+      "filePath": "deploy/kubernetes/namespace.yaml",
+      "summary": "定义 IotEdgeDB 集群的 Kubernetes 命名空间（iedb），为所有集群资源提供隔离的运行环境和逻辑分组。",
+      "tags": ["kubernetes", "infrastructure", "namespace"],
+      "complexity": "simple"
+    },
+    {
+      "id": "service:deploy/kubernetes/headless-service.yaml",
+      "type": "service",
+      "name": "headless-service.yaml",
+      "filePath": "deploy/kubernetes/headless-service.yaml",
+      "summary": "定义 writer 和 reader 节点的 Headless Service，通过 DNS 为 StatefulSet Pod 提供稳定的网络标识和直接寻址能力。",
+      "tags": ["kubernetes", "infrastructure", "networking", "service-discovery"],
+      "complexity": "simple"
+    },
+    {
+      "id": "service:deploy/kubernetes/service.yaml",
+      "type": "service",
+      "name": "service.yaml",
+      "filePath": "deploy/kubernetes/service.yaml",
+      "summary": "定义 IotEdgeDB 集群的外部流量入口，包括写入专用的 LoadBalancer、读取专用的 LoadBalancer 和内部通信的 ClusterIP Service，实现读写流量的路由隔离。",
+      "tags": ["kubernetes", "infrastructure", "networking", "load-balancer"],
+      "complexity": "simple"
+    },
+    {
+      "id": "service:deploy/kubernetes/statefulset.yaml",
+      "type": "service",
+      "name": "statefulset.yaml",
+      "filePath": "deploy/kubernetes/statefulset.yaml",
+      "summary": "定义 IotEdgeDB 集群的核心工作负载部署，包含 3 副本的 writer StatefulSet（Raft 仲裁）和可水平扩展的 reader StatefulSet，配置集群环境变量、健康检查、资源限制和持久卷存储声明。",
+      "tags": ["kubernetes", "infrastructure", "deployment", "statefulset", "clustering"],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "service:deploy/kubernetes/headless-service.yaml",
+      "target": "service:deploy/kubernetes/namespace.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:deploy/kubernetes/service.yaml",
+      "target": "service:deploy/kubernetes/namespace.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:deploy/kubernetes/statefulset.yaml",
+      "target": "service:deploy/kubernetes/namespace.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:deploy/kubernetes/statefulset.yaml",
+      "target": "service:deploy/kubernetes/headless-service.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "service:deploy/kubernetes/headless-service.yaml",
+      "target": "service:deploy/kubernetes/statefulset.yaml",
+      "type": "serves",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "service:deploy/kubernetes/service.yaml",
+      "target": "service:deploy/kubernetes/statefulset.yaml",
+      "type": "serves",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "service:deploy/kubernetes/service.yaml",
+      "target": "service:deploy/kubernetes/headless-service.yaml",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "service:deploy/kubernetes/statefulset.yaml",
+      "target": "file:cmd/iedb/main.go",
+      "type": "deploys",
+      "direction": "forward",
+      "weight": 0.7
+    }
+  ]
+}

@@ -1,0 +1,1740 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/cluster/registry_test.go",
+      "type": "file",
+      "name": "registry_test.go",
+      "filePath": "internal/cluster/registry_test.go",
+      "summary": "Registry 的全面单元测试，覆盖节点注册、注销、按角色/状态查询、健康检查和隔离性验证",
+      "tags": [
+        "test",
+        "registry",
+        "cluster"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:newTestRegistryWithLocal",
+      "type": "function",
+      "name": "newTestRegistryWithLocal",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        15,
+        25
+      ],
+      "summary": "创建带本地节点的测试注册表",
+      "tags": [
+        "test",
+        "helper"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryRegisterAndGet",
+      "type": "function",
+      "name": "TestRegistryRegisterAndGet",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        27,
+        48
+      ],
+      "summary": "测试节点注册和查询",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryUnregister",
+      "type": "function",
+      "name": "TestRegistryUnregister",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        50,
+        71
+      ],
+      "summary": "测试节点注销",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryGetAll",
+      "type": "function",
+      "name": "TestRegistryGetAll",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        73,
+        90
+      ],
+      "summary": "测试获取所有节点",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryGetByRole",
+      "type": "function",
+      "name": "TestRegistryGetByRole",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        92,
+        125
+      ],
+      "summary": "测试按角色筛选节点",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryGetByState",
+      "type": "function",
+      "name": "TestRegistryGetByState",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        127,
+        148
+      ],
+      "summary": "测试按状态筛选节点",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryGetHealthy",
+      "type": "function",
+      "name": "TestRegistryGetHealthy",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        150,
+        170
+      ],
+      "summary": "测试获取健康节点",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryGetWritersReadersCompactors",
+      "type": "function",
+      "name": "TestRegistryGetWritersReadersCompactors",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        172,
+        208
+      ],
+      "summary": "测试按角色分类获取节点",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryLocal",
+      "type": "function",
+      "name": "TestRegistryLocal",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        210,
+        220
+      ],
+      "summary": "测试本地节点标识",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryCount",
+      "type": "function",
+      "name": "TestRegistryCount",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        222,
+        237
+      ],
+      "summary": "测试节点计数",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryCountByRole",
+      "type": "function",
+      "name": "TestRegistryCountByRole",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        239,
+        260
+      ],
+      "summary": "测试按角色计数",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryCountHealthy",
+      "type": "function",
+      "name": "TestRegistryCountHealthy",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        262,
+        281
+      ],
+      "summary": "测试健康节点计数",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistrySummary",
+      "type": "function",
+      "name": "TestRegistrySummary",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        283,
+        317
+      ],
+      "summary": "测试节点摘要报告",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryWithLocalNode",
+      "type": "function",
+      "name": "TestRegistryWithLocalNode",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        319,
+        334
+      ],
+      "summary": "测试带本地节点的注册表创建",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryGetAvailable",
+      "type": "function",
+      "name": "TestRegistryGetAvailable",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        336,
+        356
+      ],
+      "summary": "测试获取可用节点",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryMaxNodes",
+      "type": "function",
+      "name": "TestRegistryMaxNodes",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        358,
+        401
+      ],
+      "summary": "测试最大节点数限制",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestRegistryCloneIsolation",
+      "type": "function",
+      "name": "TestRegistryCloneIsolation",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        403,
+        424
+      ],
+      "summary": "测试节点列表快照的隔离性",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/registry_test.go:TestProcessHealthCheckResult",
+      "type": "function",
+      "name": "TestProcessHealthCheckResult",
+      "filePath": "internal/cluster/registry_test.go",
+      "lineRange": [
+        426,
+        464
+      ],
+      "summary": "测试健康检查结果处理",
+      "tags": [
+        "test",
+        "registry"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/cluster/replication/protocol.go",
+      "type": "file",
+      "name": "protocol.go",
+      "filePath": "internal/cluster/replication/protocol.go",
+      "summary": "WAL 复制协议的序列化/反序列化层，定义了写入节点到读取节点之间的消息类型和二进制编码格式",
+      "tags": [
+        "replication",
+        "protocol",
+        "serialization"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/protocol.go:WriteMessage",
+      "type": "function",
+      "name": "WriteMessage",
+      "filePath": "internal/cluster/replication/protocol.go",
+      "lineRange": [
+        108,
+        139
+      ],
+      "summary": "将复制消息序列化为二进制格式并写入网络连接",
+      "tags": [
+        "replication",
+        "serialization"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/protocol.go:ReadMessage",
+      "type": "function",
+      "name": "ReadMessage",
+      "filePath": "internal/cluster/replication/protocol.go",
+      "lineRange": [
+        143,
+        176
+      ],
+      "summary": "从网络连接读取并反序列化复制消息",
+      "tags": [
+        "replication",
+        "serialization"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/cluster/replication/protocol_test.go",
+      "type": "file",
+      "name": "protocol_test.go",
+      "filePath": "internal/cluster/replication/protocol_test.go",
+      "summary": "复制协议的序列化/反序列化往返测试，验证所有消息类型的编码解码正确性",
+      "tags": [
+        "test",
+        "replication",
+        "protocol"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/replication/protocol_test.go:TestWriteReadEntry",
+      "type": "function",
+      "name": "TestWriteReadEntry",
+      "filePath": "internal/cluster/replication/protocol_test.go",
+      "lineRange": [
+        11,
+        31
+      ],
+      "summary": "测试 ReplicateEntry 的写读往返",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/protocol_test.go:TestWriteReadAck",
+      "type": "function",
+      "name": "TestWriteReadAck",
+      "filePath": "internal/cluster/replication/protocol_test.go",
+      "lineRange": [
+        33,
+        51
+      ],
+      "summary": "测试 ReplicateAck 的写读往返",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/protocol_test.go:TestWriteReadSync",
+      "type": "function",
+      "name": "TestWriteReadSync",
+      "filePath": "internal/cluster/replication/protocol_test.go",
+      "lineRange": [
+        53,
+        71
+      ],
+      "summary": "测试 ReplicateSync 的写读往返",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/protocol_test.go:TestWriteReadSyncAck",
+      "type": "function",
+      "name": "TestWriteReadSyncAck",
+      "filePath": "internal/cluster/replication/protocol_test.go",
+      "lineRange": [
+        73,
+        91
+      ],
+      "summary": "测试 ReplicateSyncAck 的写读往返",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/protocol_test.go:TestWriteReadError",
+      "type": "function",
+      "name": "TestWriteReadError",
+      "filePath": "internal/cluster/replication/protocol_test.go",
+      "lineRange": [
+        93,
+        111
+      ],
+      "summary": "测试 ReplicateError 的写读往返",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/protocol_test.go:TestMessageTooLarge",
+      "type": "function",
+      "name": "TestMessageTooLarge",
+      "filePath": "internal/cluster/replication/protocol_test.go",
+      "lineRange": [
+        113,
+        127
+      ],
+      "summary": "测试过大消息的拒绝处理",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/replication/receiver.go",
+      "type": "file",
+      "name": "receiver.go",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "summary": "WAL 复制接收器，运行在读取节点上，从主写入节点接收 WAL 条目并应用到本地缓冲区，支持自动重连和确认机制",
+      "tags": [
+        "replication",
+        "receiver",
+        "wal"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go 协程架构: connectionLoop、receiveLoop、ackLoop 三个独立协程协同工作，通过 context 统一控制生命周期。"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:NewReceiver",
+      "type": "function",
+      "name": "NewReceiver",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        108,
+        120
+      ],
+      "summary": "创建新的 WAL 复制接收器实例",
+      "tags": [
+        "replication",
+        "init"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        123,
+        137
+      ],
+      "summary": "启动接收器的连接和接收协程",
+      "tags": [
+        "replication",
+        "lifecycle"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:Stop",
+      "type": "function",
+      "name": "Stop",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        140,
+        161
+      ],
+      "summary": "优雅停止接收器，关闭连接并等待协程结束",
+      "tags": [
+        "replication",
+        "lifecycle"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:connectionLoop",
+      "type": "function",
+      "name": "connectionLoop",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        164,
+        206
+      ],
+      "summary": "接收器连接主循环，处理自动重连和连接生命周期",
+      "tags": [
+        "replication",
+        "connection"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:connect",
+      "type": "function",
+      "name": "connect",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        209,
+        271
+      ],
+      "summary": "建立到主写入节点的复制连接，进行 TLS 握手和协议协商",
+      "tags": [
+        "replication",
+        "connection"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:receiveLoop",
+      "type": "function",
+      "name": "receiveLoop",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        274,
+        345
+      ],
+      "summary": "接收循环，读取 WAL 条目并写入本地 WAL 和应用到缓冲区",
+      "tags": [
+        "replication",
+        "data-flow"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:applyEntry",
+      "type": "function",
+      "name": "applyEntry",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        367,
+        401
+      ],
+      "summary": "将复制的 WAL 条目应用到本地 WAL 和缓冲区，处理 WAL 丢弃采样日志",
+      "tags": [
+        "replication",
+        "data-flow"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:ackLoop",
+      "type": "function",
+      "name": "ackLoop",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        404,
+        443
+      ],
+      "summary": "定期向写入节点发送确认消息，报告接收进度",
+      "tags": [
+        "replication",
+        "data-flow"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:Stats",
+      "type": "function",
+      "name": "Stats",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        456,
+        475
+      ],
+      "summary": "返回接收器统计信息（接收条目数、字节数、错误数等）",
+      "tags": [
+        "replication",
+        "metrics"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/receiver.go:ApplyReplicatedEntry",
+      "type": "function",
+      "name": "ApplyReplicatedEntry",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        485,
+        496
+      ],
+      "summary": "将复制条目通过 IngestHandler 应用到本地缓冲区",
+      "tags": [
+        "replication",
+        "ingestion"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/cluster/replication/receiver.go:Receiver",
+      "type": "class",
+      "name": "Receiver",
+      "filePath": "internal/cluster/replication/receiver.go",
+      "lineRange": [
+        67,
+        99
+      ],
+      "summary": "WAL 复制接收器，维护与主写入节点的网络连接并持续同步 WAL 数据",
+      "tags": [
+        "replication",
+        "receiver"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/cluster/replication/sender_test.go",
+      "type": "file",
+      "name": "sender_test.go",
+      "filePath": "internal/cluster/replication/sender_test.go",
+      "summary": "WAL 复制发送器的测试，验证发送器的启动停止、数据复制广播和统计报告功能",
+      "tags": [
+        "test",
+        "replication",
+        "sender"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/sender_test.go:TestSenderStartStop",
+      "type": "function",
+      "name": "TestSenderStartStop",
+      "filePath": "internal/cluster/replication/sender_test.go",
+      "lineRange": [
+        15,
+        32
+      ],
+      "summary": "测试发送器的启动和停止",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/replication/sender_test.go:TestSenderAcceptReader",
+      "type": "function",
+      "name": "TestSenderAcceptReader",
+      "filePath": "internal/cluster/replication/sender_test.go",
+      "lineRange": [
+        34,
+        77
+      ],
+      "summary": "测试接受读取节点连接",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/sender_test.go:TestSenderReplicate",
+      "type": "function",
+      "name": "TestSenderReplicate",
+      "filePath": "internal/cluster/replication/sender_test.go",
+      "lineRange": [
+        79,
+        128
+      ],
+      "summary": "测试向读取节点发送复制数据",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/sender_test.go:TestSenderBroadcastToMultipleReaders",
+      "type": "function",
+      "name": "TestSenderBroadcastToMultipleReaders",
+      "filePath": "internal/cluster/replication/sender_test.go",
+      "lineRange": [
+        130,
+        194
+      ],
+      "summary": "测试向多个读取节点广播 WAL 条目",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/cluster/replication/sender_test.go:TestSenderStats",
+      "type": "function",
+      "name": "TestSenderStats",
+      "filePath": "internal/cluster/replication/sender_test.go",
+      "lineRange": [
+        196,
+        214
+      ],
+      "summary": "测试发送器统计信息",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/replication/sender_test.go:TestSenderRemoveReader",
+      "type": "function",
+      "name": "TestSenderRemoveReader",
+      "filePath": "internal/cluster/replication/sender_test.go",
+      "lineRange": [
+        216,
+        251
+      ],
+      "summary": "测试移除读取节点连接",
+      "tags": [
+        "test",
+        "replication"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/cluster/role.go",
+      "type": "file",
+      "name": "role.go",
+      "filePath": "internal/cluster/role.go",
+      "summary": "集群节点角色定义和功能权限映射，定义了写入者、读取者、压缩器和独立四种角色的操作能力边界",
+      "tags": [
+        "role",
+        "authorization",
+        "cluster-config"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/role.go:GetCapabilities",
+      "type": "function",
+      "name": "GetCapabilities",
+      "filePath": "internal/cluster/role.go",
+      "lineRange": [
+        34,
+        68
+      ],
+      "summary": "返回指定角色的完整操作能力集合（摄取、查询、压缩、协调）",
+      "tags": [
+        "role",
+        "capabilities"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/role.go:ParseRole",
+      "type": "function",
+      "name": "ParseRole",
+      "filePath": "internal/cluster/role.go",
+      "lineRange": [
+        92,
+        101
+      ],
+      "summary": "将字符串解析为 NodeRole 类型，空字符串默认返回独立模式",
+      "tags": [
+        "role",
+        "parsing"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/cluster/role_test.go",
+      "type": "file",
+      "name": "role_test.go",
+      "filePath": "internal/cluster/role_test.go",
+      "summary": "角色定义和功能权限的单元测试，覆盖所有角色类型的验证、解析和能力映射",
+      "tags": [
+        "test",
+        "role",
+        "authorization"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/cluster/role_test.go:TestNodeRoleIsValid",
+      "type": "function",
+      "name": "TestNodeRoleIsValid",
+      "filePath": "internal/cluster/role_test.go",
+      "lineRange": [
+        7,
+        27
+      ],
+      "summary": "测试所有角色类型的合法性验证",
+      "tags": [
+        "test",
+        "role"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/role_test.go:TestValidRole",
+      "type": "function",
+      "name": "TestValidRole",
+      "filePath": "internal/cluster/role_test.go",
+      "lineRange": [
+        29,
+        50
+      ],
+      "summary": "测试 ValidRole 函数对字符串的验证",
+      "tags": [
+        "test",
+        "role"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/role_test.go:TestParseRole",
+      "type": "function",
+      "name": "TestParseRole",
+      "filePath": "internal/cluster/role_test.go",
+      "lineRange": [
+        52,
+        72
+      ],
+      "summary": "测试 ParseRole 对字符串的解析逻辑",
+      "tags": [
+        "test",
+        "role"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/role_test.go:TestRoleCapabilities",
+      "type": "function",
+      "name": "TestRoleCapabilities",
+      "filePath": "internal/cluster/role_test.go",
+      "lineRange": [
+        74,
+        106
+      ],
+      "summary": "测试每个角色对应的操作能力集合",
+      "tags": [
+        "test",
+        "role"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/role_test.go:TestAllRoles",
+      "type": "function",
+      "name": "TestAllRoles",
+      "filePath": "internal/cluster/role_test.go",
+      "lineRange": [
+        108,
+        132
+      ],
+      "summary": "测试 AllRoles 返回所有有效角色",
+      "tags": [
+        "test",
+        "role"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/cluster/role_test.go:TestNodeRoleString",
+      "type": "function",
+      "name": "TestNodeRoleString",
+      "filePath": "internal/cluster/role_test.go",
+      "lineRange": [
+        134,
+        152
+      ],
+      "summary": "测试角色类型的字符串表示",
+      "tags": [
+        "test",
+        "role"
+      ],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/protocol/codec_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/protocol/codec.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/protocol/messages.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/nonce_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/nonce_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/raft_stream.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/security/tls.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/wal/reader.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/wal/recovery.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/wal/wal_dropped_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/wal/wal_purge_inactive_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/wal/wal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/wal/wal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/sharding/failover.go",
+      "target": "file:internal/cluster/registry_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/sharding/failover.go",
+      "target": "file:internal/cluster/role_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/sharding/failover.go",
+      "target": "file:internal/cluster/role.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:newTestRegistryWithLocal",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryRegisterAndGet",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryUnregister",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetAll",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetByRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetByState",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetHealthy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetWritersReadersCompactors",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryLocal",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryCount",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryCountByRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryCountHealthy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistrySummary",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryWithLocalNode",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetAvailable",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryMaxNodes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryCloneIsolation",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestProcessHealthCheckResult",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol.go",
+      "target": "function:internal/cluster/replication/protocol.go:WriteMessage",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol.go",
+      "target": "function:internal/cluster/replication/protocol.go:ReadMessage",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadEntry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadAck",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadSync",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadSyncAck",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadError",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestMessageTooLarge",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:NewReceiver",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:Stop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:connectionLoop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:connect",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:receiveLoop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:applyEntry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:ackLoop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:Stats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:ApplyReplicatedEntry",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "class:internal/cluster/replication/receiver.go:Receiver",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderStartStop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderAcceptReader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderReplicate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderBroadcastToMultipleReaders",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderStats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderRemoveReader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/role.go",
+      "target": "function:internal/cluster/role.go:GetCapabilities",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/role.go",
+      "target": "function:internal/cluster/role.go:ParseRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestNodeRoleIsValid",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestValidRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestParseRole",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestRoleCapabilities",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestAllRoles",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestNodeRoleString",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryRegisterAndGet",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryUnregister",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetAll",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetByRole",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetByState",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetHealthy",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetWritersReadersCompactors",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryLocal",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryCount",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryCountByRole",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryCountHealthy",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistrySummary",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryWithLocalNode",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryGetAvailable",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryMaxNodes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestRegistryCloneIsolation",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry_test.go",
+      "target": "function:internal/cluster/registry_test.go:TestProcessHealthCheckResult",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol.go",
+      "target": "function:internal/cluster/replication/protocol.go:WriteMessage",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol.go",
+      "target": "function:internal/cluster/replication/protocol.go:ReadMessage",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadEntry",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadAck",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadSync",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadSyncAck",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestWriteReadError",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol_test.go",
+      "target": "function:internal/cluster/replication/protocol_test.go:TestMessageTooLarge",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:NewReceiver",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:Start",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:Stop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:Stats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "function:internal/cluster/replication/receiver.go:ApplyReplicatedEntry",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "class:internal/cluster/replication/receiver.go:Receiver",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderStartStop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderAcceptReader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderReplicate",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderBroadcastToMultipleReaders",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderStats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/replication/sender_test.go",
+      "target": "function:internal/cluster/replication/sender_test.go:TestSenderRemoveReader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/role.go",
+      "target": "function:internal/cluster/role.go:GetCapabilities",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/role.go",
+      "target": "function:internal/cluster/role.go:ParseRole",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestNodeRoleIsValid",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestValidRole",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestParseRole",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestRoleCapabilities",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestAllRoles",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/role_test.go",
+      "target": "function:internal/cluster/role_test.go:TestNodeRoleString",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/cluster/registry.go",
+      "target": "file:internal/cluster/registry_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/replication/protocol.go",
+      "target": "file:internal/cluster/replication/protocol_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/cluster/replication/sender_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/role.go",
+      "target": "file:internal/cluster/role_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/cluster/replication/receiver.go",
+      "target": "file:internal/wal/wal.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    }
+  ]
+}

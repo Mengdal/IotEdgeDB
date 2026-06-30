@@ -204,8 +204,8 @@ func (s *Subscription) SetDefaults() {
 	if s.ClientID == "" {
 		s.ClientID = generateClientID()
 	}
-	if s.QoS != 0 && s.QoS != 1 && s.QoS != 2 {
-		s.QoS = 1 // Default to at-least-once
+	if s.QoS != 1 && s.QoS != 2 {
+		s.QoS = 1 // Default to at-least-once (0 = at-most-once is not suitable for telemetry)
 	}
 	if s.KeepAliveSeconds == 0 {
 		s.KeepAliveSeconds = 60

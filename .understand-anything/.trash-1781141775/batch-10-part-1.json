@@ -1,0 +1,1262 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/compaction/scheduler_test.go",
+      "type": "file",
+      "name": "scheduler_test.go",
+      "filePath": "internal/compaction/scheduler_test.go",
+      "summary": "测试 Compaction Scheduler 的角色门控（role-gating）功能，包括基于集群角色允许/拒绝启动以及禁用的短路行为。",
+      "tags": [
+        "test",
+        "scheduler",
+        "compaction",
+        "role-gating"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/compaction/subprocess.go",
+      "type": "file",
+      "name": "subprocess.go",
+      "filePath": "internal/compaction/subprocess.go",
+      "summary": "提供在独立 OS 子进程中运行压缩任务的功能，包含子进程配置序列化、任务启动和错误分类。实现内存隔离以在子进程退出时释放 DuckDB 内存。",
+      "tags": [
+        "compaction",
+        "subprocess",
+        "memory-isolation",
+        "exec"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/compaction/subprocess_test.go",
+      "type": "file",
+      "name": "subprocess_test.go",
+      "filePath": "internal/compaction/subprocess_test.go",
+      "summary": "测试子进程压缩任务的错误分类逻辑，包括退出码匹配、信号处理和真实 exec.ExitError 场景。",
+      "tags": [
+        "test",
+        "compaction",
+        "subprocess",
+        "error-handling"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/compaction/tier.go",
+      "type": "file",
+      "name": "tier.go",
+      "filePath": "internal/compaction/tier.go",
+      "summary": "定义压缩层级接口（Tier）和基础结构（BaseTier），包含候选分区拆分、层级启用/禁用判断和文件后缀匹配的压缩判定逻辑。",
+      "tags": [
+        "compaction",
+        "tier",
+        "interface",
+        "abstraction"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/compaction/watcher.go",
+      "type": "file",
+      "name": "watcher.go",
+      "filePath": "internal/compaction/watcher.go",
+      "summary": "实现 CompletionWatcher，监控完成清单目录并将压缩后的文件注册到 Raft 状态机（Phase 4 集群模式），同时清理源文件。",
+      "tags": [
+        "compaction",
+        "watcher",
+        "raft",
+        "completion",
+        "manifest"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/compaction/watcher_test.go",
+      "type": "file",
+      "name": "watcher_test.go",
+      "filePath": "internal/compaction/watcher_test.go",
+      "summary": "全面测试 CompletionWatcher 的各种场景，包括正常路径、桥接错误、NotLeader 重试、批量操作、上下文取消等。",
+      "tags": [
+        "test",
+        "compaction",
+        "watcher",
+        "manifest",
+        "bridge"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/pruning/partition_pruner.go",
+      "type": "file",
+      "name": "partition_pruner.go",
+      "filePath": "internal/pruning/partition_pruner.go",
+      "summary": "提供分区剪枝引擎，解析 SQL 时间范围并映射到存储路径，通过缓存加速和多种存储后端（本地/远程）的路径过滤来优化查询计划。",
+      "tags": [
+        "pruning",
+        "partition",
+        "query-optimization",
+        "cache",
+        "time-range"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/reconciliation/integration_test.go",
+      "type": "file",
+      "name": "integration_test.go",
+      "filePath": "internal/reconciliation/integration_test.go",
+      "summary": "Reconciler 与真实本地后端的集成测试，验证清单与存储的对比检测和目录列出回退机制。",
+      "tags": [
+        "test",
+        "reconciliation",
+        "integration",
+        "local-storage"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/scheduler_test.go:TestScheduler_StartGatedWhenRoleRejects",
+      "type": "function",
+      "name": "TestScheduler_StartGatedWhenRoleRejects",
+      "filePath": "internal/compaction/scheduler_test.go",
+      "lineRange": [
+        21,
+        47
+      ],
+      "summary": "验证当角色拒绝时（CanCompact 返回 false），Scheduler.Start 应被禁止。",
+      "tags": [
+        "test",
+        "scheduler",
+        "role-gating"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/scheduler_test.go:TestScheduler_StartAllowedWhenRoleMatches",
+      "type": "function",
+      "name": "TestScheduler_StartAllowedWhenRoleMatches",
+      "filePath": "internal/compaction/scheduler_test.go",
+      "lineRange": [
+        49,
+        74
+      ],
+      "summary": "验证当角色匹配时（CanCompact 返回 true），Scheduler.Start 应正常启动。",
+      "tags": [
+        "test",
+        "scheduler",
+        "role-gating"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/scheduler_test.go:TestScheduler_StartNoGateMeansAllowed",
+      "type": "function",
+      "name": "TestScheduler_StartNoGateMeansAllowed",
+      "filePath": "internal/compaction/scheduler_test.go",
+      "lineRange": [
+        76,
+        101
+      ],
+      "summary": "验证无门控函数时默认允许启动。",
+      "tags": [
+        "test",
+        "scheduler",
+        "role-gating"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/scheduler_test.go:TestScheduler_TriggerNowRejectedWhenGated",
+      "type": "function",
+      "name": "TestScheduler_TriggerNowRejectedWhenGated",
+      "filePath": "internal/compaction/scheduler_test.go",
+      "lineRange": [
+        103,
+        123
+      ],
+      "summary": "验证当角色拒绝时，TriggerNow 也应被禁止。",
+      "tags": [
+        "test",
+        "scheduler",
+        "role-gating"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/scheduler_test.go:TestScheduler_DisabledShortCircuitsBeforeGate",
+      "type": "function",
+      "name": "TestScheduler_DisabledShortCircuitsBeforeGate",
+      "filePath": "internal/compaction/scheduler_test.go",
+      "lineRange": [
+        125,
+        152
+      ],
+      "summary": "验证调度器禁用时在门控检查之前短路返回。",
+      "tags": [
+        "test",
+        "scheduler",
+        "disabled",
+        "short-circuit"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/subprocess.go:SubprocessJobConfig",
+      "type": "class",
+      "name": "SubprocessJobConfig",
+      "filePath": "internal/compaction/subprocess.go",
+      "lineRange": [
+        28,
+        53
+      ],
+      "summary": "子进程压缩任务的序列化配置，包含数据库、测量、分区路径、文件列表和存储配置。",
+      "tags": [
+        "compaction",
+        "subprocess",
+        "config"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/subprocess.go:SubprocessJobResult",
+      "type": "class",
+      "name": "SubprocessJobResult",
+      "filePath": "internal/compaction/subprocess.go",
+      "lineRange": [
+        57,
+        64
+      ],
+      "summary": "子进程压缩任务的结果，包含成功标志、错误和压缩统计信息。",
+      "tags": [
+        "compaction",
+        "subprocess",
+        "result"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/subprocess.go:RunSubprocessJob",
+      "type": "function",
+      "name": "RunSubprocessJob",
+      "filePath": "internal/compaction/subprocess.go",
+      "lineRange": [
+        72,
+        168
+      ],
+      "summary": "在子进程中执行压缩任务，初始化 DuckDB、加载 Parquet 文件并执行合并。",
+      "tags": [
+        "compaction",
+        "subprocess",
+        "duckdb",
+        "parquet"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/subprocess.go:RunJobInSubprocess",
+      "type": "function",
+      "name": "RunJobInSubprocess",
+      "filePath": "internal/compaction/subprocess.go",
+      "lineRange": [
+        209,
+        280
+      ],
+      "summary": "将压缩作业作为独立 OS 子进程启动，传递 JSON 配置并等待完成。",
+      "tags": [
+        "compaction",
+        "subprocess",
+        "exec",
+        "isolation"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/subprocess.go:createStorageBackendFromConfig",
+      "type": "function",
+      "name": "createStorageBackendFromConfig",
+      "filePath": "internal/compaction/subprocess.go",
+      "lineRange": [
+        283,
+        336
+      ],
+      "summary": "从子进程配置中重建存储后端实例（本地或 S3）。",
+      "tags": [
+        "compaction",
+        "subprocess",
+        "storage",
+        "factory"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/subprocess.go:ClassifySubprocessError",
+      "type": "function",
+      "name": "ClassifySubprocessError",
+      "filePath": "internal/compaction/subprocess.go",
+      "lineRange": [
+        350,
+        398
+      ],
+      "summary": "将子进程退出错误分类为可见的错误类型，区分 OOM、信号终止和一般退出码。",
+      "tags": [
+        "compaction",
+        "error-classification",
+        "signal",
+        "oom"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/compaction/tier.go:Candidate",
+      "type": "class",
+      "name": "Candidate",
+      "filePath": "internal/compaction/tier.go",
+      "lineRange": [
+        20,
+        30
+      ],
+      "summary": "压缩候选分区，包含数据库、测量、分区路径、文件列表和批次信息。",
+      "tags": [
+        "compaction",
+        "candidate",
+        "partition"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/tier.go:SplitCandidateIntoBatches",
+      "type": "function",
+      "name": "SplitCandidateIntoBatches",
+      "filePath": "internal/compaction/tier.go",
+      "lineRange": [
+        35,
+        66
+      ],
+      "summary": "将大候选分区按文件数量拆分为多个批次以限制单次作业处理量。",
+      "tags": [
+        "compaction",
+        "batching",
+        "partition"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/tier.go:Tier",
+      "type": "class",
+      "name": "Tier",
+      "filePath": "internal/compaction/tier.go",
+      "lineRange": [
+        69,
+        90
+      ],
+      "summary": "压缩层级接口，定义层级名称、分区级别、候选发现和压缩判定方法。",
+      "tags": [
+        "compaction",
+        "tier",
+        "interface"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/tier.go:BaseTier",
+      "type": "class",
+      "name": "BaseTier",
+      "filePath": "internal/compaction/tier.go",
+      "lineRange": [
+        93,
+        107
+      ],
+      "summary": "Tier 接口的基础实现，提供通用逻辑如启用检查、统计收集和后缀匹配的压缩判定。",
+      "tags": [
+        "compaction",
+        "tier",
+        "base",
+        "implementation"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/tier.go:BaseTierConfig",
+      "type": "class",
+      "name": "BaseTierConfig",
+      "filePath": "internal/compaction/tier.go",
+      "lineRange": [
+        110,
+        117
+      ],
+      "summary": "基础层配置，包含存储后端、最小年龄、最小文件数和目标大小。",
+      "tags": [
+        "compaction",
+        "tier",
+        "config"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/tier.go:ShouldCompactByFileSuffix",
+      "type": "function",
+      "name": "ShouldCompactByFileSuffix",
+      "filePath": "internal/compaction/tier.go",
+      "lineRange": [
+        162,
+        198
+      ],
+      "summary": "通过检查文件是否包含已压缩后缀来决定是否需要继续压缩。",
+      "tags": [
+        "compaction",
+        "file-suffix",
+        "decision"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/compaction/watcher.go:CompactedFile",
+      "type": "class",
+      "name": "CompactedFile",
+      "filePath": "internal/compaction/watcher.go",
+      "lineRange": [
+        52,
+        61
+      ],
+      "summary": "已完成压缩文件的元数据，包含路径、哈希、大小和分区信息。",
+      "tags": [
+        "compaction",
+        "completion",
+        "manifest",
+        "metadata"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/watcher.go:DeleteSourceOp",
+      "type": "class",
+      "name": "DeleteSourceOp",
+      "filePath": "internal/compaction/watcher.go",
+      "lineRange": [
+        66,
+        69
+      ],
+      "summary": "待删除的源文件操作描述。",
+      "tags": [
+        "compaction",
+        "delete",
+        "operation"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/watcher.go:ManifestBridge",
+      "type": "class",
+      "name": "ManifestBridge",
+      "filePath": "internal/compaction/watcher.go",
+      "lineRange": [
+        84,
+        92
+      ],
+      "summary": "清单桥接接口，将压缩完成事件注册到 Raft 集群的清单中。",
+      "tags": [
+        "compaction",
+        "raft",
+        "bridge",
+        "interface"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/watcher.go:CompletionWatcherConfig",
+      "type": "class",
+      "name": "CompletionWatcherConfig",
+      "filePath": "internal/compaction/watcher.go",
+      "lineRange": [
+        96,
+        117
+      ],
+      "summary": "CompletionWatcher 的配置，包含轮询间隔、超时、桥接接口和日志记录器。",
+      "tags": [
+        "compaction",
+        "watcher",
+        "config"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/compaction/watcher.go:CompletionWatcher",
+      "type": "class",
+      "name": "CompletionWatcher",
+      "filePath": "internal/compaction/watcher.go",
+      "lineRange": [
+        131,
+        164
+      ],
+      "summary": "监控压缩完成清单目录，将输出文件注册到 Raft 清单并删除原始源文件的核心组件。",
+      "tags": [
+        "compaction",
+        "watcher",
+        "manifest",
+        "raft"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/compaction/watcher.go:NewCompletionWatcher",
+      "type": "function",
+      "name": "NewCompletionWatcher",
+      "filePath": "internal/compaction/watcher.go",
+      "lineRange": [
+        168,
+        186
+      ],
+      "summary": "创建并初始化 CompletionWatcher 实例，验证配置并设置默认值。",
+      "tags": [
+        "compaction",
+        "watcher",
+        "constructor"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/compaction/watcher.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/compaction/watcher.go",
+      "lineRange": [
+        190,
+        205
+      ],
+      "summary": "启动 CompletionWatcher 的后台轮询协程。",
+      "tags": [
+        "compaction",
+        "watcher",
+        "lifecycle"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/pruning/partition_pruner.go:PartitionPruner",
+      "type": "class",
+      "name": "PartitionPruner",
+      "filePath": "internal/pruning/partition_pruner.go",
+      "lineRange": [
+        264,
+        271
+      ],
+      "summary": "分区剪枝引擎，通过解析 SQL 时间范围并匹配已有存储路径来优化查询，减少不必要的文件扫描。",
+      "tags": [
+        "pruning",
+        "partition",
+        "query",
+        "optimization"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/pruning/partition_pruner.go:NewPartitionPruner",
+      "type": "function",
+      "name": "NewPartitionPruner",
+      "filePath": "internal/pruning/partition_pruner.go",
+      "lineRange": [
+        321,
+        329
+      ],
+      "summary": "创建分区剪枝器实例，初始化全局缓存和分区缓存。",
+      "tags": [
+        "pruning",
+        "constructor",
+        "initialization"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/pruning/partition_pruner.go:ExtractTimeRange",
+      "type": "function",
+      "name": "ExtractTimeRange",
+      "filePath": "internal/pruning/partition_pruner.go",
+      "lineRange": [
+        347,
+        460
+      ],
+      "summary": "从 SQL 中解析 WHERE 条件中的时间范围，支持多格式时间和相对时间表达式。",
+      "tags": [
+        "pruning",
+        "sql",
+        "time-range",
+        "parsing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/pruning/partition_pruner.go:GeneratePartitionPaths",
+      "type": "function",
+      "name": "GeneratePartitionPaths",
+      "filePath": "internal/pruning/partition_pruner.go",
+      "lineRange": [
+        466,
+        528
+      ],
+      "summary": "根据基础路径、数据库、测量和时间范围生成候选分区路径列表。",
+      "tags": [
+        "pruning",
+        "partition",
+        "path-generation"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/pruning/partition_pruner.go:OptimizeTablePath",
+      "type": "function",
+      "name": "OptimizeTablePath",
+      "filePath": "internal/pruning/partition_pruner.go",
+      "lineRange": [
+        533,
+        607
+      ],
+      "summary": "优化表路径，将时间范围与已有分区路径匹配，只保留可能包含数据的路径。",
+      "tags": [
+        "pruning",
+        "optimization",
+        "path-filtering"
+      ],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/compaction/scheduler_test.go",
+      "target": "function:internal/compaction/scheduler_test.go:TestScheduler_StartGatedWhenRoleRejects",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/scheduler_test.go",
+      "target": "function:internal/compaction/scheduler_test.go:TestScheduler_StartAllowedWhenRoleMatches",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/scheduler_test.go",
+      "target": "function:internal/compaction/scheduler_test.go:TestScheduler_StartNoGateMeansAllowed",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/scheduler_test.go",
+      "target": "function:internal/compaction/scheduler_test.go:TestScheduler_TriggerNowRejectedWhenGated",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/scheduler_test.go",
+      "target": "function:internal/compaction/scheduler_test.go:TestScheduler_DisabledShortCircuitsBeforeGate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "class:internal/compaction/subprocess.go:SubprocessJobConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "class:internal/compaction/subprocess.go:SubprocessJobResult",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "function:internal/compaction/subprocess.go:RunSubprocessJob",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "function:internal/compaction/subprocess.go:RunJobInSubprocess",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "function:internal/compaction/subprocess.go:createStorageBackendFromConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "function:internal/compaction/subprocess.go:ClassifySubprocessError",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "class:internal/compaction/subprocess.go:SubprocessJobConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "class:internal/compaction/subprocess.go:SubprocessJobResult",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "function:internal/compaction/subprocess.go:RunSubprocessJob",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "function:internal/compaction/subprocess.go:RunJobInSubprocess",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "function:internal/compaction/subprocess.go:ClassifySubprocessError",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "class:internal/compaction/tier.go:Candidate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "function:internal/compaction/tier.go:SplitCandidateIntoBatches",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "class:internal/compaction/tier.go:Tier",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "class:internal/compaction/tier.go:BaseTier",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "class:internal/compaction/tier.go:BaseTierConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "function:internal/compaction/tier.go:ShouldCompactByFileSuffix",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "class:internal/compaction/tier.go:Candidate",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "function:internal/compaction/tier.go:SplitCandidateIntoBatches",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "class:internal/compaction/tier.go:Tier",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "class:internal/compaction/tier.go:BaseTier",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "class:internal/compaction/tier.go:BaseTierConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "function:internal/compaction/tier.go:ShouldCompactByFileSuffix",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:CompactedFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:DeleteSourceOp",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:ManifestBridge",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:CompletionWatcherConfig",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:CompletionWatcher",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "function:internal/compaction/watcher.go:NewCompletionWatcher",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "function:internal/compaction/watcher.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:CompletionWatcher",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:CompactedFile",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:DeleteSourceOp",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:ManifestBridge",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:CompletionWatcherConfig",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/compaction/watcher.go:CompletionWatcher",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "function:internal/compaction/watcher.go:NewCompletionWatcher",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "class:internal/pruning/partition_pruner.go:PartitionPruner",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "function:internal/pruning/partition_pruner.go:NewPartitionPruner",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "function:internal/pruning/partition_pruner.go:ExtractTimeRange",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "function:internal/pruning/partition_pruner.go:GeneratePartitionPaths",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "function:internal/pruning/partition_pruner.go:OptimizeTablePath",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "class:internal/pruning/partition_pruner.go:PartitionPruner",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "file:internal/sql/mask.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/cluster/raft/errors.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/cluster/raft/fsm_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/cluster/raft/fsm.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/cluster/raft/logger.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/cluster/raft/node_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/reconciliation/integration_test.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/compaction/subprocess.go",
+      "target": "class:internal/storage/backend.go:Backend",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/compaction/tier.go",
+      "target": "class:internal/storage/backend.go:Backend",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/pruning/partition_pruner.go",
+      "target": "class:internal/storage/backend.go:Backend",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/compaction/watcher.go",
+      "target": "class:internal/storage/backend.go:Backend",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    }
+  ]
+}

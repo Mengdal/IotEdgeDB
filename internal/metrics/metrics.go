@@ -63,6 +63,14 @@ type Metrics struct {
 	hardLimitFlushTotal   atomic.Int64
 	ageExpiredFlushTotal  atomic.Int64
 
+	// Flush records distribution histogram (per trigger type)
+	// Buckets: 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000
+	flushRecDistSize    [9]atomic.Int64
+	flushRecDistAge     [9]atomic.Int64
+	flushRecDistHard    [9]atomic.Int64
+	flushRecDistManual  [9]atomic.Int64
+	flushRecDistPressure [9]atomic.Int64
+
 	// Storage metrics
 	storageWritesTotal     atomic.Int64
 	storageWriteBytesTotal atomic.Int64
@@ -232,6 +240,32 @@ func (m *Metrics) SetBufferEstimatedBytes(bytes int64)  { m.bufferEstimatedBytes
 func (m *Metrics) IncAdaptiveFlush()                   { m.adaptiveFlushTotal.Add(1) }
 func (m *Metrics) IncHardLimitFlush()                  { m.hardLimitFlushTotal.Add(1) }
 func (m *Metrics) IncAgeExpiredFlush()                 { m.ageExpiredFlushTotal.Add(1) }
+
+// RecordBufferFlushRecords records a flush record count into the distribution histogram.
+// trigger is one of: "size", "age", "hard_limit", "manual", "pressure".
+func (m *Metrics) RecordBufferFlushRecords(trigger string, recordCount int) {
+	buckets := []int{100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000}
+	var dst *[9]atomic.Int64
+	switch trigger {
+	case "age":
+		dst = &m.flushRecDistAge
+	case "hard_limit":
+		dst = &m.flushRecDistHard
+	case "manual":
+		dst = &m.flushRecDistManual
+	case "pressure":
+		dst = &m.flushRecDistPressure
+	default:
+		dst = &m.flushRecDistSize
+	}
+	for i, boundary := range buckets {
+		if recordCount <= boundary {
+			dst[i].Add(1)
+			break // stop at first matching bucket (cumulative computed at exposition time)
+		}
+	}
+}
+
 func (m *Metrics) SetBufferRecordsWritten(count int64)  { m.bufferRecordsWritten.Store(count) }
 func (m *Metrics) SetBufferFlushes(count int64)         { m.bufferFlushesTotal.Store(count) }
 func (m *Metrics) SetBufferErrors(count int64)          { m.bufferErrorsTotal.Store(count) }
@@ -375,6 +409,13 @@ func (m *Metrics) Snapshot() map[string]interface{} {
 		"buffer_errors_total":         m.bufferErrorsTotal.Load(),
 		"buffer_flush_failures_total": m.bufferFlushFailures.Load(),
 		"buffer_queue_depth":          m.bufferQueueDepth.Load(),
+
+		// Adaptive buffer
+		"memory_pressure_level":      m.memoryPressureLevel.Load(),
+		"buffer_estimated_bytes":     m.bufferEstimatedBytes.Load(),
+		"adaptive_flush_total":       m.adaptiveFlushTotal.Load(),
+		"hard_limit_flush_total":     m.hardLimitFlushTotal.Load(),
+		"age_expired_flush_total":    m.ageExpiredFlushTotal.Load(),
 
 		// Storage
 		"storage_writes_total":      m.storageWritesTotal.Load(),
@@ -582,6 +623,30 @@ func (m *Metrics) PrometheusFormat() string {
 	b = append(b, "# HELP iedb_buffer_queue_depth Current flush queue depth\n"...)
 	b = append(b, "# TYPE iedb_buffer_queue_depth gauge\n"...)
 	b = appendMetric(b, "iedb_buffer_queue_depth", float64(m.bufferQueueDepth.Load()))
+
+	// Adaptive buffer metrics
+	b = append(b, "# HELP iedb_memory_pressure_level Current memory pressure (0=green, 1=yellow, 2=red)\n"...)
+	b = append(b, "# TYPE iedb_memory_pressure_level gauge\n"...)
+	b = appendMetric(b, "iedb_memory_pressure_level", float64(m.memoryPressureLevel.Load()))
+
+	b = append(b, "# HELP iedb_buffer_estimated_bytes Total estimated bytes in buffer\n"...)
+	b = append(b, "# TYPE iedb_buffer_estimated_bytes gauge\n"...)
+	b = appendMetric(b, "iedb_buffer_estimated_bytes", float64(m.bufferEstimatedBytes.Load()))
+
+	b = append(b, "# HELP iedb_adaptive_flush_total Total adaptive flush count\n"...)
+	b = append(b, "# TYPE iedb_adaptive_flush_total counter\n"...)
+	b = appendMetric(b, "iedb_adaptive_flush_total", float64(m.adaptiveFlushTotal.Load()))
+
+	b = append(b, "# HELP iedb_hard_limit_flush_total Total hard limit flush count\n"...)
+	b = append(b, "# TYPE iedb_hard_limit_flush_total counter\n"...)
+	b = appendMetric(b, "iedb_hard_limit_flush_total", float64(m.hardLimitFlushTotal.Load()))
+
+	b = append(b, "# HELP iedb_age_expired_flush_total Total age-expired flush count\n"...)
+	b = append(b, "# TYPE iedb_age_expired_flush_total counter\n"...)
+	b = appendMetric(b, "iedb_age_expired_flush_total", float64(m.ageExpiredFlushTotal.Load()))
+
+	// Flush records distribution histogram
+	b = appendFlushRecDistHistogram(b, m, "iedb_buffer_flush_records_distribution")
 
 	// Storage metrics
 	b = append(b, "# HELP iedb_storage_writes_total Total storage writes\n"...)
@@ -807,4 +872,62 @@ func appendInt(b []byte, v int64) []byte {
 		v /= 10
 	}
 	return append(b, digits[i:]...)
+}
+
+// appendFlushRecDistHistogram appends a Prometheus histogram for buffer flush
+// record count distribution, broken down by trigger type.
+func appendFlushRecDistHistogram(b []byte, m *Metrics, name string) []byte {
+	buckets := []int{100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000}
+	triggers := []struct {
+		label string
+		data  *[9]atomic.Int64
+	}{
+		{"size", &m.flushRecDistSize},
+		{"age", &m.flushRecDistAge},
+		{"hard_limit", &m.flushRecDistHard},
+		{"manual", &m.flushRecDistManual},
+		{"pressure", &m.flushRecDistPressure},
+	}
+
+	b = append(b, "# HELP "...)
+	b = append(b, name...)
+	b = append(b, " Flush record count distribution\n"...)
+	b = append(b, "# TYPE "...)
+	b = append(b, name...)
+	b = append(b, " histogram\n"...)
+
+	for _, tr := range triggers {
+		var cumulative int64
+		for i, boundary := range buckets {
+			cumulative += tr.data[i].Load()
+			b = append(b, name...)
+			b = append(b, "_bucket{trigger=\""...)
+			b = append(b, tr.label...)
+			b = append(b, "\",le=\""...)
+			b = appendInt(b, int64(boundary))
+			b = append(b, "\"} "...)
+			b = appendFloat(b, float64(cumulative))
+			b = append(b, '\n')
+		}
+		// +Inf bucket
+		var total int64
+		for i := range buckets {
+			total += tr.data[i].Load()
+		}
+		b = append(b, name...)
+		b = append(b, "_bucket{trigger=\""...)
+		b = append(b, tr.label...)
+		b = append(b, "\",le=\"+Inf\"} "...)
+		b = appendFloat(b, float64(total))
+		b = append(b, '\n')
+
+		// _count
+		b = append(b, name...)
+		b = append(b, "_count{trigger=\""...)
+		b = append(b, tr.label...)
+		b = append(b, "\"} "...)
+		b = appendFloat(b, float64(total))
+		b = append(b, '\n')
+	}
+	return b
 }

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"fmt"
 	"iedb/internal/auth"
 	"sync"
@@ -339,14 +338,6 @@ localProcessing:
 	if err := h.arrowBuffer.Write(ctx, database, records); err != nil {
 		h.logger.Error().Err(err).Msg("Failed to write to Arrow buffer")
 		metrics.Get().IncIngestErrors()
-		// Schema-churn rejection is retryable — surface as 503 so
-		// upstream senders back off, mirroring the LP and TLE handlers.
-		// See ingest.ErrSchemaChurnExceeded.
-		if errors.Is(err, ingest.ErrSchemaChurnExceeded) {
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-				"error": "Write rejected (schema churn): " + err.Error(),
-			})
-		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to write records: " + err.Error(),
 		})

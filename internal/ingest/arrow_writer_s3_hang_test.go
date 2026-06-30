@@ -164,59 +164,6 @@ func TestFlushWorkers_BlockForever_WhenStorageHangs(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Test: periodic flush goroutine blocks when storage hangs
-// -----------------------------------------------------------------------------
-
-func TestPeriodicFlush_BlocksOnStorageHang(t *testing.T) {
-	logger := zerolog.Nop()
-	store := newHangingStorage(0, 0) // hang on ALL writes
-
-	cfg := &config.IngestConfig{
-		MaxBufferSize:   100000, // large — won't trigger size-based flush
-		MaxBufferAgeMS:  200,    // 200ms age threshold, ticker at 100ms
-		Compression:     "snappy",
-		UseDictionary:   true,
-		WriteStatistics: true,
-		DataPageVersion: "2.0",
-		FlushWorkers:    2,
-		FlushQueueSize:  10,
-		ShardCount:      4,
-	}
-
-	buf := NewArrowBuffer(cfg, store, logger)
-
-	// Write small batch — not enough for size flush, but periodic flush will pick it up
-	buf.WriteColumnarDirect(context.Background(), "db", "sensor", makeColumns(100))
-
-	// Wait for periodic flush to fire and get stuck on S3
-	time.Sleep(1 * time.Second)
-
-	if store.stuck.Load() == 0 {
-		t.Fatal("expected periodic flush to be stuck on storage write, got 0 stuck")
-	}
-
-	// The periodic flush goroutine is now blocked inside flushBufferLocked → storage.Write.
-	// Verify that it cannot flush OTHER buffers anymore.
-	buf.WriteColumnarDirect(context.Background(), "db", "other_measurement", makeColumns(100))
-	time.Sleep(1 * time.Second)
-
-	stats := buf.GetStats()
-	written, _ := stats["total_records_written"].(int64)
-	if written != 0 {
-		t.Fatalf("expected 0 records written (all flushes should be stuck), got %d", written)
-	}
-	t.Log("CONFIRMED: periodic flush stuck — no measurements can flush via age-based path")
-
-	closeDone := make(chan struct{})
-	go func() { buf.Close(); close(closeDone) }()
-	select {
-	case <-closeDone:
-	case <-time.After(3 * time.Second):
-		t.Log("CONFIRMED: Close() hangs — periodic flush goroutine stuck on storage.Write")
-	}
-}
-
-// -----------------------------------------------------------------------------
 // Test: all flush workers exhausted → queue fills → data dropped
 // -----------------------------------------------------------------------------
 

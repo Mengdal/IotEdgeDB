@@ -1,0 +1,173 @@
+{
+  "nodes": [
+    {
+      "id": "config:helm/iedb/templates/deployment.yaml",
+      "type": "config",
+      "name": "deployment.yaml",
+      "filePath": "helm/iedb/templates/deployment.yaml",
+      "summary": "Kubernetes Deployment 资源模板，定义 IotEdgeDB 服务的容器规格、环境变量、健康检查探针（/health 和 /ready）、资源限制以及持久化存储挂载。支持自动扩缩容禁用时的副本数配置、更新策略、节点选择器、亲和性和容忍度。",
+      "tags": ["helm-chart", "kubernetes", "deployment", "configuration"],
+      "complexity": "moderate",
+      "languageNotes": "Helm Go 模板语法，通过 include 调用 _helpers.tpl 中的命名模板实现标签和名称复用。"
+    },
+    {
+      "id": "config:helm/iedb/templates/ingress.yaml",
+      "type": "config",
+      "name": "ingress.yaml",
+      "filePath": "helm/iedb/templates/ingress.yaml",
+      "summary": "Kubernetes Ingress 资源模板，通过 values.yaml 的 ingress.enabled 开关控制是否启用，定义主机名、TLS 证书和路径规则将外部 HTTP/HTTPS 流量路由到 IotEdgeDB 服务。",
+      "tags": ["helm-chart", "kubernetes", "ingress", "configuration"],
+      "complexity": "moderate",
+      "languageNotes": "条件渲染块控制整个资源的创建，支持多主机多路径路由配置。"
+    },
+    {
+      "id": "config:helm/iedb/templates/persistentvolumeclaim.yaml",
+      "type": "config",
+      "name": "persistentvolumeclaim.yaml",
+      "filePath": "helm/iedb/templates/persistentvolumeclaim.yaml",
+      "summary": "Kubernetes PersistentVolumeClaim 资源模板，在 persistence.enabled 且未使用 existingClaim 时创建，根据 values.yaml 配置的访问模式、存储类和大小申请持久化存储卷。",
+      "tags": ["helm-chart", "kubernetes", "storage", "configuration"],
+      "complexity": "simple",
+      "languageNotes": "条件渲染块控制 PVC 创建，支持 storageClass 设置为空字符串以使用默认存储类。"
+    },
+    {
+      "id": "config:helm/iedb/templates/service.yaml",
+      "type": "config",
+      "name": "service.yaml",
+      "filePath": "helm/iedb/templates/service.yaml",
+      "summary": "Kubernetes Service 资源模板，通过 values.yaml 配置的服务类型和端口号暴露 IotEdgeDB Deployment 的 HTTP 端口（8000），供集群内部或外部负载均衡器访问。",
+      "tags": ["helm-chart", "kubernetes", "service", "configuration"],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:helm/iedb/templates/serviceaccount.yaml",
+      "type": "config",
+      "name": "serviceaccount.yaml",
+      "filePath": "helm/iedb/templates/serviceaccount.yaml",
+      "summary": "Kubernetes ServiceAccount 资源模板，在 serviceAccount.create 启用时创建，为 IotEdgeDB Pod 提供 Kubernetes API 身份标识，支持注解和自动挂载令牌配置。",
+      "tags": ["helm-chart", "kubernetes", "rbac", "configuration"],
+      "complexity": "simple"
+    }
+  ],
+  "edges": [
+    {
+      "source": "config:helm/iedb/templates/deployment.yaml",
+      "target": "config:helm/iedb/values.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/deployment.yaml",
+      "target": "config:helm/iedb/Chart.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/deployment.yaml",
+      "target": "config:helm/iedb/templates/_helpers.tpl",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/deployment.yaml",
+      "target": "file:cmd/iedb/main.go",
+      "type": "deploys",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "config:helm/iedb/templates/ingress.yaml",
+      "target": "config:helm/iedb/values.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/ingress.yaml",
+      "target": "config:helm/iedb/Chart.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/ingress.yaml",
+      "target": "config:helm/iedb/templates/service.yaml",
+      "type": "routes",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/persistentvolumeclaim.yaml",
+      "target": "config:helm/iedb/values.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/persistentvolumeclaim.yaml",
+      "target": "config:helm/iedb/Chart.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/persistentvolumeclaim.yaml",
+      "target": "config:helm/iedb/templates/deployment.yaml",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "config:helm/iedb/templates/service.yaml",
+      "target": "config:helm/iedb/values.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/service.yaml",
+      "target": "config:helm/iedb/Chart.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/service.yaml",
+      "target": "config:helm/iedb/templates/deployment.yaml",
+      "type": "serves",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "config:helm/iedb/templates/serviceaccount.yaml",
+      "target": "config:helm/iedb/values.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/serviceaccount.yaml",
+      "target": "config:helm/iedb/Chart.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/serviceaccount.yaml",
+      "target": "config:helm/iedb/templates/_helpers.tpl",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:helm/iedb/templates/serviceaccount.yaml",
+      "target": "config:helm/iedb/templates/deployment.yaml",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ]
+}

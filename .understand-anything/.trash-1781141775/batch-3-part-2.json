@@ -1,0 +1,1592 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/reconciliation/diff.go",
+      "type": "file",
+      "name": "diff.go",
+      "filePath": "internal/reconciliation/diff.go",
+      "summary": "存储清单与后端存储的集合差异比较算法，使用流式集合差集算法检测孤立的清单条目和存储文件。",
+      "tags": [
+        "diff-algorithm",
+        "reconciliation",
+        "storage"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 纯函数式差异计算，使用 map 跟踪清单可见性，支持宽限窗口保护和排序确定性输出。"
+    },
+    {
+      "id": "file:internal/reconciliation/diff_test.go",
+      "type": "file",
+      "name": "diff_test.go",
+      "filePath": "internal/reconciliation/diff_test.go",
+      "summary": "差异算法的单元测试，验证干净状态、孤立清单、孤立存储、宽限窗口和时钟偏移场景。",
+      "tags": [
+        "test",
+        "diff-algorithm",
+        "reconciliation"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/reconciliation/gate.go",
+      "type": "file",
+      "name": "gate.go",
+      "filePath": "internal/reconciliation/gate.go",
+      "summary": "协调器门控接口，判断本地节点是否可以执行存储扫描和清单清除操作，支持集群角色感知。",
+      "tags": [
+        "interface",
+        "gate",
+        "cluster",
+        "reconciliation"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/reconciliation/helpers.go",
+      "type": "file",
+      "name": "helpers.go",
+      "filePath": "internal/reconciliation/helpers.go",
+      "summary": "协调器通用工具函数集合，提供有界追加、采样和布尔值格式化等辅助功能。",
+      "tags": [
+        "utility",
+        "helper",
+        "reconciliation"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/reconciliation/scheduler.go",
+      "type": "file",
+      "name": "scheduler.go",
+      "filePath": "internal/reconciliation/scheduler.go",
+      "summary": "协调器定时调度器，封装 Reconciler 引擎与 cron 定时器和生命周期管理，支持触发立即执行。",
+      "tags": [
+        "scheduler",
+        "cron",
+        "reconciliation"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/reconciliation/scheduler.go:Scheduler",
+      "type": "class",
+      "name": "Scheduler",
+      "filePath": "internal/reconciliation/scheduler.go",
+      "summary": "协调调度器，使用 cron 定期触发协调任务，支持启用/禁用和查询状态。",
+      "tags": [
+        "scheduler",
+        "cron"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        31,
+        40
+      ]
+    },
+    {
+      "id": "function:internal/reconciliation/scheduler.go:NewScheduler",
+      "type": "function",
+      "name": "NewScheduler",
+      "filePath": "internal/reconciliation/scheduler.go",
+      "summary": "创建协调调度器，验证调度表达式和 Reconciler 参数。",
+      "tags": [
+        "factory",
+        "scheduler"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        57,
+        75
+      ]
+    },
+    {
+      "id": "function:internal/reconciliation/scheduler.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/reconciliation/scheduler.go",
+      "summary": "启动 cron 调度器开始执行协调任务。",
+      "tags": [
+        "lifecycle",
+        "scheduler"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        80,
+        106
+      ]
+    },
+    {
+      "id": "function:internal/reconciliation/scheduler.go:Stop",
+      "type": "function",
+      "name": "Stop",
+      "filePath": "internal/reconciliation/scheduler.go",
+      "summary": "停止调度器并清理 cron 资源。",
+      "tags": [
+        "lifecycle",
+        "scheduler"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        110,
+        122
+      ]
+    },
+    {
+      "id": "function:internal/reconciliation/scheduler.go:TriggerNow",
+      "type": "function",
+      "name": "TriggerNow",
+      "filePath": "internal/reconciliation/scheduler.go",
+      "summary": "立即触发一次协调执行，绕过 cron 调度。",
+      "tags": [
+        "manual-trigger",
+        "scheduler"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        168,
+        173
+      ]
+    },
+    {
+      "id": "file:internal/reconciliation/scheduler_test.go",
+      "type": "file",
+      "name": "scheduler_test.go",
+      "filePath": "internal/reconciliation/scheduler_test.go",
+      "summary": "协调调度器的测试套件，验证调度表达式验证、启动停止、手动触发和门控行为。",
+      "tags": [
+        "test",
+        "scheduler",
+        "reconciliation"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/scheduler/cq_scheduler.go",
+      "type": "file",
+      "name": "cq_scheduler.go",
+      "filePath": "internal/scheduler/cq_scheduler.go",
+      "summary": "连续查询（CQ）调度器，管理和调度连续查询的定时执行，支持许可证检查和集群角色门控。",
+      "tags": [
+        "continuous-query",
+        "scheduler",
+        "cron"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:internal/scheduler/cq_scheduler.go:CQScheduler",
+      "type": "class",
+      "name": "CQScheduler",
+      "filePath": "internal/scheduler/cq_scheduler.go",
+      "summary": "连续查询调度器，加载活跃 CQ 并启动定时任务管理器。",
+      "tags": [
+        "scheduler",
+        "continuous-query"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        19,
+        29
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/cq_scheduler.go:NewCQScheduler",
+      "type": "function",
+      "name": "NewCQScheduler",
+      "filePath": "internal/scheduler/cq_scheduler.go",
+      "summary": "创建 CQ 调度器实例。",
+      "tags": [
+        "factory",
+        "continuous-query"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        50,
+        62
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/cq_scheduler.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/scheduler/cq_scheduler.go",
+      "summary": "启动 CQ 调度器，检查许可证后加载活跃 CQ 并启动任务。",
+      "tags": [
+        "lifecycle",
+        "continuous-query"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        65,
+        104
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/cq_scheduler.go:Stop",
+      "type": "function",
+      "name": "Stop",
+      "filePath": "internal/scheduler/cq_scheduler.go",
+      "summary": "停止 CQ 调度器和所有运行中的 CQ 任务。",
+      "tags": [
+        "lifecycle",
+        "continuous-query"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        107,
+        126
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/cq_scheduler.go:ReloadCQ",
+      "type": "function",
+      "name": "ReloadCQ",
+      "filePath": "internal/scheduler/cq_scheduler.go",
+      "summary": "重新加载指定 CQ 配置。",
+      "tags": [
+        "lifecycle",
+        "continuous-query"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        145,
+        175
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/cq_scheduler.go:ReloadAll",
+      "type": "function",
+      "name": "ReloadAll",
+      "filePath": "internal/scheduler/cq_scheduler.go",
+      "summary": "重新加载所有活跃 CQ。",
+      "tags": [
+        "lifecycle",
+        "continuous-query"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        206,
+        258
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/cq_scheduler.go:Status",
+      "type": "function",
+      "name": "Status",
+      "filePath": "internal/scheduler/cq_scheduler.go",
+      "summary": "获取 CQ 调度器状态和运行中的任务信息。",
+      "tags": [
+        "status",
+        "continuous-query"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        370,
+        394
+      ]
+    },
+    {
+      "id": "file:internal/scheduler/cq_scheduler_test.go",
+      "type": "file",
+      "name": "cq_scheduler_test.go",
+      "filePath": "internal/scheduler/cq_scheduler_test.go",
+      "summary": "CQ 调度器的测试文件，覆盖创建、启动停止、作业计数和集群门控行为。",
+      "tags": [
+        "test",
+        "continuous-query",
+        "scheduler"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/scheduler/retention_scheduler.go",
+      "type": "file",
+      "name": "retention_scheduler.go",
+      "filePath": "internal/scheduler/retention_scheduler.go",
+      "summary": "数据保留策略定时调度器，按 cron 表达式自动执行保留策略清理，支持集群写角色门控。",
+      "tags": [
+        "retention",
+        "scheduler",
+        "cron",
+        "data-lifecycle"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:internal/scheduler/retention_scheduler.go:RetentionScheduler",
+      "type": "class",
+      "name": "RetentionScheduler",
+      "filePath": "internal/scheduler/retention_scheduler.go",
+      "summary": "保留策略执行调度器，管理保留任务的定时触发和状态跟踪。",
+      "tags": [
+        "scheduler",
+        "retention"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        35,
+        45
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/retention_scheduler.go:NewRetentionScheduler",
+      "type": "function",
+      "name": "NewRetentionScheduler",
+      "filePath": "internal/scheduler/retention_scheduler.go",
+      "summary": "创建保留策略调度器，默认每天凌晨 3 点执行。",
+      "tags": [
+        "factory",
+        "retention"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        57,
+        83
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/retention_scheduler.go:Start",
+      "type": "function",
+      "name": "Start",
+      "filePath": "internal/scheduler/retention_scheduler.go",
+      "summary": "启动保留调度器的 cron 定时任务。",
+      "tags": [
+        "lifecycle",
+        "retention"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        86,
+        126
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/retention_scheduler.go:Stop",
+      "type": "function",
+      "name": "Stop",
+      "filePath": "internal/scheduler/retention_scheduler.go",
+      "summary": "停止保留调度器。",
+      "tags": [
+        "lifecycle",
+        "retention"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        129,
+        145
+      ]
+    },
+    {
+      "id": "function:internal/scheduler/retention_scheduler.go:TriggerNow",
+      "type": "function",
+      "name": "TriggerNow",
+      "filePath": "internal/scheduler/retention_scheduler.go",
+      "summary": "立即触发保留策略执行。",
+      "tags": [
+        "manual-trigger",
+        "retention"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        239,
+        310
+      ]
+    },
+    {
+      "id": "file:internal/scheduler/retention_scheduler_test.go",
+      "type": "file",
+      "name": "retention_scheduler_test.go",
+      "filePath": "internal/scheduler/retention_scheduler_test.go",
+      "summary": "保留调度器的测试文件，验证创建配置、启动停止和调度表达式验证。",
+      "tags": [
+        "test",
+        "retention",
+        "scheduler"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/shutdown/shutdown.go",
+      "type": "file",
+      "name": "shutdown.go",
+      "filePath": "internal/shutdown/shutdown.go",
+      "summary": "优雅关闭协调器，管理各组件的优先级关闭顺序，支持信号等待和手动触发关闭。",
+      "tags": [
+        "shutdown",
+        "lifecycle",
+        "graceful"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "class:internal/shutdown/shutdown.go:Coordinator",
+      "type": "class",
+      "name": "Coordinator",
+      "filePath": "internal/shutdown/shutdown.go",
+      "summary": "关闭协调器，按优先级顺序管理组件和钩子的优雅关闭流程。",
+      "tags": [
+        "coordinator",
+        "lifecycle"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        23,
+        35
+      ]
+    },
+    {
+      "id": "function:internal/shutdown/shutdown.go:New",
+      "type": "function",
+      "name": "New",
+      "filePath": "internal/shutdown/shutdown.go",
+      "summary": "创建关闭协调器实例。",
+      "tags": [
+        "factory",
+        "lifecycle"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        50,
+        56
+      ]
+    },
+    {
+      "id": "function:internal/shutdown/shutdown.go:Register",
+      "type": "function",
+      "name": "Register",
+      "filePath": "internal/shutdown/shutdown.go",
+      "summary": "注册需优雅关闭的组件，指定关闭优先级。",
+      "tags": [
+        "lifecycle",
+        "registration"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        60,
+        74
+      ]
+    },
+    {
+      "id": "function:internal/shutdown/shutdown.go:RegisterHook",
+      "type": "function",
+      "name": "RegisterHook",
+      "filePath": "internal/shutdown/shutdown.go",
+      "summary": "注册关闭前的钩子函数。",
+      "tags": [
+        "lifecycle",
+        "registration"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        77,
+        91
+      ]
+    },
+    {
+      "id": "function:internal/shutdown/shutdown.go:WaitForSignal",
+      "type": "function",
+      "name": "WaitForSignal",
+      "filePath": "internal/shutdown/shutdown.go",
+      "summary": "等待操作系统关闭信号（SIGINT/SIGTERM）并触发关闭流程。",
+      "tags": [
+        "lifecycle",
+        "signal-handling"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        94,
+        107
+      ]
+    },
+    {
+      "id": "function:internal/shutdown/shutdown.go:Shutdown",
+      "type": "function",
+      "name": "Shutdown",
+      "filePath": "internal/shutdown/shutdown.go",
+      "summary": "执行所有注册组件的优雅关闭，按优先级顺序依次关闭。",
+      "tags": [
+        "lifecycle",
+        "graceful"
+      ],
+      "complexity": "complex",
+      "lineRange": [
+        110,
+        209
+      ]
+    },
+    {
+      "id": "function:internal/shutdown/shutdown.go:TriggerShutdown",
+      "type": "function",
+      "name": "TriggerShutdown",
+      "filePath": "internal/shutdown/shutdown.go",
+      "summary": "触发关闭流程（可由组件自身或外部事件发起）。",
+      "tags": [
+        "lifecycle",
+        "trigger"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        213,
+        218
+      ]
+    },
+    {
+      "id": "file:internal/shutdown/shutdown_test.go",
+      "type": "file",
+      "name": "shutdown_test.go",
+      "filePath": "internal/shutdown/shutdown_test.go",
+      "summary": "关闭协调器的测试文件，覆盖注册、优先级排序、超时和并发触发场景。",
+      "tags": [
+        "test",
+        "shutdown",
+        "lifecycle"
+      ],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "class:internal/reconciliation/scheduler.go:Scheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "class:internal/reconciliation/scheduler.go:Scheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "function:internal/reconciliation/scheduler.go:NewScheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "function:internal/reconciliation/scheduler.go:NewScheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "function:internal/reconciliation/scheduler.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "function:internal/reconciliation/scheduler.go:Start",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "function:internal/reconciliation/scheduler.go:Stop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "function:internal/reconciliation/scheduler.go:Stop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "function:internal/reconciliation/scheduler.go:TriggerNow",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "function:internal/reconciliation/scheduler.go:TriggerNow",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "class:internal/scheduler/cq_scheduler.go:CQScheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "class:internal/scheduler/cq_scheduler.go:CQScheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:NewCQScheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:NewCQScheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:Start",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:Stop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:Stop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:ReloadCQ",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:ReloadCQ",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:ReloadAll",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:ReloadAll",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:Status",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "function:internal/scheduler/cq_scheduler.go:Status",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/audit_routes.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/auth_middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/auth_routes.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/backup_routes.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/cluster.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/compaction.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/continuous_query.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/databases_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/databases.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/delete.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/governance.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/import_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/import.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/like_optimizer_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/like_optimizer.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/lineprotocol_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/lineprotocol.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/mcp.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/mqtt_subscriptions.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/mqtt.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/msgpack_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/msgpack.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/permissions.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/proxy.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query_arrow_json_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query_arrow_json.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query_arrow_stub.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query_arrow.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query_json_writer_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query_json_writer.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query_management_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query_management.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/query.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/rbac_routes.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/reconciliation.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/regex_rewriter_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/regex_rewriter.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/retention_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/retention.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/routing_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/routing.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/scheduler.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/server.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/tiering_policies.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/tiering.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/api/tle.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "class:internal/scheduler/retention_scheduler.go:RetentionScheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "class:internal/scheduler/retention_scheduler.go:RetentionScheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "function:internal/scheduler/retention_scheduler.go:NewRetentionScheduler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "function:internal/scheduler/retention_scheduler.go:NewRetentionScheduler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "function:internal/scheduler/retention_scheduler.go:Start",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "function:internal/scheduler/retention_scheduler.go:Start",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "function:internal/scheduler/retention_scheduler.go:Stop",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "function:internal/scheduler/retention_scheduler.go:Stop",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "function:internal/scheduler/retention_scheduler.go:TriggerNow",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "function:internal/scheduler/retention_scheduler.go:TriggerNow",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/audit_routes.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/auth_middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/auth_routes.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/backup_routes.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/cluster.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/compaction.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/continuous_query.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/databases_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/databases.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/delete.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/governance.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/import_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/import.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/like_optimizer_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/like_optimizer.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/lineprotocol_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/lineprotocol.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/mcp.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/mqtt_subscriptions.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/mqtt.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/msgpack_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/msgpack.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/permissions.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/proxy.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query_arrow_json_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query_arrow_json.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query_arrow_stub.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query_arrow.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query_json_writer_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query_json_writer.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query_management_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query_management.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/query.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/rbac_routes.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/reconciliation.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/regex_rewriter_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/regex_rewriter.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/retention_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/retention.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/routing_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/routing.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/scheduler.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/server.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/tiering_policies.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/tiering.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/api/tle.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "class:internal/shutdown/shutdown.go:Coordinator",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "class:internal/shutdown/shutdown.go:Coordinator",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:New",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:New",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:Register",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:Register",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:RegisterHook",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:RegisterHook",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:WaitForSignal",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:WaitForSignal",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:Shutdown",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:Shutdown",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:TriggerShutdown",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "function:internal/shutdown/shutdown.go:TriggerShutdown",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/reconciliation/diff.go",
+      "target": "file:internal/reconciliation/diff_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/reconciliation/scheduler.go",
+      "target": "file:internal/reconciliation/scheduler_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/scheduler/cq_scheduler.go",
+      "target": "file:internal/scheduler/cq_scheduler_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/scheduler/retention_scheduler.go",
+      "target": "file:internal/scheduler/retention_scheduler_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/shutdown/shutdown.go",
+      "target": "file:internal/shutdown/shutdown_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ]
+}

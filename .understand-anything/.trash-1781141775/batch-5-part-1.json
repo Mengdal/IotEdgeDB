@@ -1,0 +1,755 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "type": "file",
+      "name": "arrow_writer_flush_timing_test.go",
+      "filePath": "internal/ingest/arrow_writer_flush_timing_test.go",
+      "summary": "测试 ArrowBuffer 刷新时间控制及定时刷新机制在高负载下的行为。",
+      "tags": [
+        "test",
+        "ingestion",
+        "timing",
+        "concurrency"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "type": "file",
+      "name": "arrow_writer_high_load_test.go",
+      "filePath": "internal/ingest/arrow_writer_high_load_test.go",
+      "summary": "测试 ArrowBuffer 在高并发写入负载下刷新时序的稳定性和正确性。",
+      "tags": [
+        "test",
+        "ingestion",
+        "high-load",
+        "concurrency"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "type": "file",
+      "name": "arrow_writer_rowformat_test.go",
+      "filePath": "internal/ingest/arrow_writer_rowformat_test.go",
+      "summary": "测试 ArrowBuffer 通过直接 Record 写入和解码器写入两种行格式路径的正确性。",
+      "tags": [
+        "test",
+        "ingestion",
+        "row-format",
+        "e2e"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "type": "file",
+      "name": "arrow_writer_s3_hang_test.go",
+      "filePath": "internal/ingest/arrow_writer_s3_hang_test.go",
+      "summary": "测试当存储后端（S3）挂起时，刷新工作者线程的阻塞恢复和队列行为。",
+      "tags": [
+        "test",
+        "ingestion",
+        "s3",
+        "hang",
+        "resilience"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "type": "file",
+      "name": "arrow_writer_schema_churn_test.go",
+      "filePath": "internal/ingest/arrow_writer_schema_churn_test.go",
+      "summary": "测试 ArrowBuffer 在 schema 频繁变更超过限制时的错误合约行为。",
+      "tags": [
+        "test",
+        "ingestion",
+        "schema-churn",
+        "error-handling"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "type": "file",
+      "name": "arrow_writer_schema_evolution_test.go",
+      "filePath": "internal/ingest/arrow_writer_schema_evolution_test.go",
+      "summary": "测试并发写入时 schema 演进不会导致数据损坏。",
+      "tags": [
+        "test",
+        "ingestion",
+        "schema-evolution",
+        "concurrency"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/ingest/arrow_writer_test.go",
+      "type": "file",
+      "name": "arrow_writer_test.go",
+      "filePath": "internal/ingest/arrow_writer_test.go",
+      "summary": "ArrowBuffer 核心功能综合测试：行转列、Decimal128 写入、列签名、批合并与排序。",
+      "tags": [
+        "test",
+        "ingestion",
+        "arrow-writer",
+        "decimal128",
+        "benchmark"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:internal/ingest/lineprotocol.go",
+      "type": "file",
+      "name": "lineprotocol.go",
+      "filePath": "internal/ingest/lineprotocol.go",
+      "summary": "实现 InfluxDB Line Protocol 解析器，支持测量名、标签、字段值和时间戳的解析，并提供行记录转列式格式的功能。",
+      "tags": [
+        "ingestion",
+        "line-protocol",
+        "parser",
+        "serialization"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go 结构体方法接收器模式，无状态安全并发。批量解析支持精度参数和 UTF-8 验证。"
+    },
+    {
+      "id": "file:internal/ingest/lineprotocol_test.go",
+      "type": "file",
+      "name": "lineprotocol_test.go",
+      "filePath": "internal/ingest/lineprotocol_test.go",
+      "summary": "Line Protocol 解析器单元测试和基准测试，涵盖转义字符、字段类型、时间戳精度等场景。",
+      "tags": [
+        "test",
+        "line-protocol",
+        "parser",
+        "benchmark"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:internal/ingest/lineprotocol.go:LineProtocolParser",
+      "type": "class",
+      "name": "LineProtocolParser",
+      "filePath": "internal/ingest/lineprotocol.go",
+      "summary": "InfluxDB Line Protocol 解析器，无状态安全并发。解析测量名、标签、字段和时间戳。",
+      "tags": [
+        "parser",
+        "line-protocol",
+        "stateful-parser"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        28,
+        28
+      ]
+    },
+    {
+      "id": "function:internal/ingest/lineprotocol.go:ParseBatchWithPrecision",
+      "type": "function",
+      "name": "ParseBatchWithPrecision",
+      "filePath": "internal/ingest/lineprotocol.go",
+      "summary": "解析批量 Line Protocol 数据，支持自定义时间戳精度和 UTF-8 验证。",
+      "tags": [
+        "parser",
+        "batch",
+        "timestamp"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        70,
+        80
+      ]
+    },
+    {
+      "id": "function:internal/ingest/lineprotocol.go:ToFlatRecord",
+      "type": "function",
+      "name": "ToFlatRecord",
+      "filePath": "internal/ingest/lineprotocol.go",
+      "summary": "将单个 Record 转换为平坦化的扁平键值记录格式。",
+      "tags": [
+        "conversion",
+        "flatten"
+      ],
+      "complexity": "simple",
+      "lineRange": [
+        344,
+        367
+      ]
+    },
+    {
+      "id": "function:internal/ingest/lineprotocol.go:BatchToColumnar",
+      "type": "function",
+      "name": "BatchToColumnar",
+      "filePath": "internal/ingest/lineprotocol.go",
+      "summary": "将 Record 批量转换为列式 ColumnarRecord 格式，供 ArrowBuffer 直接消费。",
+      "tags": [
+        "conversion",
+        "columnar",
+        "batch"
+      ],
+      "complexity": "moderate",
+      "lineRange": [
+        371,
+        438
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "target": "file:pkg/models/record.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_test.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_test.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_test.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_test.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_test.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_test.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_test.go",
+      "target": "file:pkg/models/record.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "file:pkg/models/record.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "class:internal/ingest/lineprotocol.go:LineProtocolParser",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "function:internal/ingest/lineprotocol.go:ParseBatchWithPrecision",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "function:internal/ingest/lineprotocol.go:ToFlatRecord",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "function:internal/ingest/lineprotocol.go:BatchToColumnar",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "class:internal/ingest/lineprotocol.go:LineProtocolParser",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "function:internal/ingest/lineprotocol.go:ParseBatchWithPrecision",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "function:internal/ingest/lineprotocol.go:ToFlatRecord",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "function:internal/ingest/lineprotocol.go:BatchToColumnar",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "file:pkg/models/record.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer_test.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol_test.go",
+      "target": "file:internal/ingest/lineprotocol.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "function:internal/ingest/lineprotocol.go:BatchToColumnar",
+      "target": "class:pkg/models/record.go:ColumnarRecord",
+      "type": "calls",
+      "direction": "forward",
+      "weight": 0.8
+    }
+  ]
+}

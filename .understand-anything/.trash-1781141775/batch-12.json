@@ -1,0 +1,15 @@
+{
+  "nodes": [
+    {
+      "id": "pipeline:.github/workflows/release-build.yml",
+      "type": "pipeline",
+      "name": "release-build.yml",
+      "filePath": ".github/workflows/release-build.yml",
+      "summary": "GitHub Actions 发布流水线，在 release/* 分支推送或手动触发时，自动执行多架构 Docker 镜像构建、Go 二进制编译、Debian/RPM 打包、Helm Chart 打包、集成测试，并创建 GitHub Draft Release。",
+      "tags": ["ci-cd", "deployment", "release", "automation", "containerization"],
+      "complexity": "complex",
+      "languageNotes": "包含 11 个作业（jobs），支持 docker buildx 多架构构建（linux/amd64、linux/arm64）、QEMU 模拟、kind 集群 Helm 测试，以及带系统 systemd 服务的包构建。"
+    }
+  ],
+  "edges": []
+}

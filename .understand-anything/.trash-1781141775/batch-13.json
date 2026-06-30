@@ -1,0 +1,106 @@
+{
+  "nodes": [
+    {
+      "id": "pipeline:Makefile",
+      "type": "pipeline",
+      "name": "Makefile",
+      "filePath": "Makefile",
+      "summary": "定义项目的构建、测试、格式化、代码检查、Docker 镜像构建等自动化任务。包含 16 个 Make 目标，核心目标包括 build（以 duckdb_arrow 编译标签构建二进制）、test（带竞态检测和覆盖率）、bench（基准测试）、docker-build 和 docker-run。",
+      "tags": ["build-system", "automation", "infrastructure", "development"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "IotEdgeDB 项目的综合文档，介绍高性能时间序列数据库的背景、性能基准测试（写入 1860 万条记录/秒、Arrow IPC 查询 264 万行/秒）、快速开始指南、Docker 安装、配置说明、详细项目结构树和开发命令参考。",
+      "tags": ["documentation", "overview", "getting-started", "performance"],
+      "complexity": "moderate",
+      "languageNotes": "使用中文编写，包含详细的性能基准测试表格和 SQL 示例。"
+    },
+    {
+      "id": "config:go.mod",
+      "type": "config",
+      "name": "go.mod",
+      "filePath": "go.mod",
+      "summary": "Go 模块定义文件，声明模块路径为 iedb（Go 1.26），列出全部直接和间接依赖项，包括 DuckDB（duckdb/duckdb-go/v2）、Apache Arrow（apache/arrow-go/v18）、AWS S3 SDK、Azure Blob SDK、Fiber HTTP 框架、Hashicorp Raft 共识库等核心依赖。",
+      "tags": ["configuration", "dependencies", "go-module", "build-system"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:go.sum",
+      "type": "config",
+      "name": "go.sum",
+      "filePath": "go.sum",
+      "summary": "Go 模块校验和文件，包含所有直接和间接依赖包的哈希值记录，用于确保依赖完整性和安全性。由 Go 工具链自动维护。",
+      "tags": ["configuration", "checksum", "dependencies", "go-module"],
+      "complexity": "simple"
+    }
+  ],
+  "edges": [
+    {
+      "source": "pipeline:Makefile",
+      "target": "file:cmd/iedb/main.go",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "pipeline:Makefile",
+      "target": "config:go.mod",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "pipeline:Makefile",
+      "target": "file:Dockerfile",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:cmd/iedb/main.go",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "pipeline:Makefile",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:iedb.toml",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:Dockerfile",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "config:go.mod",
+      "target": "file:cmd/iedb/main.go",
+      "type": "configures",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:go.sum",
+      "target": "config:go.mod",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ]
+}

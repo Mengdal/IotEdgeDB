@@ -129,14 +129,20 @@ Config
 ├── DatabaseConfig       DuckDB 配置 (连接数/内存/线程/时区)
 ├── StorageConfig        存储后端选择 + S3/Azure/Local 凭据
 ├── IngestConfig         摄入缓冲配置
-│   ├── MaxBufferSize        缓冲区最大行数 (50000)
-│   ├── MaxBufferAgeMS       缓冲区最大存活毫秒 (5000)
-│   ├── FlushWorkers         Flush 工作线程数
-│   ├── FlushQueueSize       Flush 队列容量
-│   ├── ShardCount           Shard 分片数 (32)
+│   ├── MaxBufferSize        缓冲区最大记录数 (50000, ⚠️ 已废弃)
+│   ├── MaxBufferAgeMS       缓冲区最大存活毫秒 (5000, ⚠️ 已废弃)
+│   ├── MaxBufferAgeSeconds   缓冲区最大存活秒数 (默认 900, 推荐替代 MaxBufferAgeMS)
+│   ├── MaxBufferMemoryMB    缓冲区最大内存 (MB, 推荐替代 MaxBufferSize)
+│   ├── FlushWorkers         Flush 工作线程数 (默认 16)
+│   ├── FlushQueueSize       Flush 队列容量 (默认 100)
+│   ├── ShardCount           Shard 分片数 (默认 32)
 │   ├── Compression          压缩算法 (snappy/zstd/gzip)
-│   ├── SortKeys / DefaultSortKeys   排序键配置
-│   └── DecimalColumns       Decimal128 精度配置
+│   ├── SortKeys / DefaultSortKeys   排序键配置 (time 自动追加)
+│   ├── DecimalColumns       Decimal128 精度配置
+│   └── AdaptiveFlush        自适应刷盘配置 (替代固定 MaxBufferSize)
+│       ├── Enabled          是否启用
+│       ├── TargetMemoryMB   目标内存水位 (MB)
+│       └── CheckIntervalMS  检查间隔 (毫秒)
 ├── CompactionConfig     压缩调度配置
 │   ├── HourlyEnabled / DailyEnabled
 │   ├── HourlySchedule / DailySchedule  (cron 表达式)
@@ -328,13 +334,16 @@ ResilientBackend 包装原始 Backend
 
 ```
 internal/ingest/
-├── arrow_writer.go    ← ArrowBuffer (缓冲核心) + ArrowWriter (Parquet序列化)
-├── msgpack.go         ← MessagePack 解码器
-├── lineprotocol.go    ← Line Protocol 解析器 (InfluxDB 兼容)
-├── tle.go             ← TLE 流式解析器
-├── utf8.go            ← UTF-8 验证接口
-├── utf8_sanitize.go   ← 通用 UTF-8 净化
-└── utf8_simdutf.go    ← SIMD 加速 UTF-8 验证
+├── arrow_writer.go         ← ArrowBuffer (缓冲核心) + ArrowWriter (Parquet序列化)
+├── adaptive_flush.go       ← 自适应刷盘引擎 (内存压力驱动)
+├── memory_monitor.go       ← 内存监控 (buffer 溢出保护)
+├── notifier.go             ← 缓冲变更通知接口 (Arrow VIEW 增量刷新)
+├── msgpack.go              ← MessagePack 解码器
+├── lineprotocol.go         ← Line Protocol 解析器 (InfluxDB 兼容)
+├── tle.go                  ← TLE 流式解析器
+├── utf8.go                 ← UTF-8 验证接口
+├── utf8_sanitize.go        ← 通用 UTF-8 净化
+└── utf8_simdutf.go         ← SIMD 加速 UTF-8 验证
 ```
 
 #### 3.4.2 ArrowBuffer
@@ -346,37 +355,118 @@ type ArrowBuffer struct {
     writer          *ArrowWriter          // Parquet 序列化器
     wal             WALWriter             // 可选 WAL
     tieringManager  *tiering.Manager      // 可选: 分层存储元数据
-    fileRegistrar   FileRegistrar         // 可选: 集群文件清单
+    fileRegistrar   FileRegistrar         // 可选: 集群文件清单 (Enterprise)
+    notifier        BufferChangeNotifier  // 可选: 缓冲变更通知 (Arrow VIEW 增量刷新)
 
     // 锁分片
     shards     []*bufferShard             // 默认 32 个
     shardCount uint32
 
     // Worker Pool
-    flushQueue   chan flushTask           // 有界通道
-    flushWorkers int                      // 工作线程数
+    flushQueue   chan flushTask           // 有界通道 (默认 100)
+    flushWorkers int                      // 工作线程数 (默认 16)
 
-    // 时间触发 flush
+    // 自适应刷盘 (替代固定 MaxBufferSize)
+    adaptiveFlush atomic.Pointer[AdaptiveFlushEngine]
+
+    // 时间触发 flush (仅 adaptive flush 禁用时活跃)
     flushTimer    *time.Timer             // 自适应定时器
     flushDeadline time.Time               // 下次 flush 到期时间
     newBufferCh   chan struct{}           // 唤醒信号
 
+    // Buffer 溢出保护
+    hardLimit uint64                       // 硬限制字节数 (0 = 无限制)
+
+    // 优雅关闭
+    ctx     context.Context
+    cancel  context.CancelFunc
+    closing atomic.Bool                    // 关闭短路标志
+    wg      sync.WaitGroup
+
+    // 排序键 & Decimal 配置
+    sortKeysConfig  map[string][]string
+    decimalConfig   map[string]map[string]config.DecimalSpec
+
     // 原子计数器 (无锁指标)
-    totalRecordsBuffered / totalRecordsWritten / totalFlushes / totalErrors ...
+    totalRecordsBuffered / totalRecordsWritten / totalFlushes
+    totalErrors / totalWALErrors / totalWALDropped
+    totalSchemaChurnExceeded / queueDepth ...
 }
 ```
 
 **锁分片设计：**
 ```
 bufferShard (N = 32):
-├── buffers map[bufferKey][]interface{}        // "db/measurement" → 批次数列
-├── bufferStartTimes map[bufferKey]time.Time   // 每个 buffer 的创建时间
-├── bufferRecordCounts map[bufferKey]int       // 增量计数 (避免 O(n) 扫描)
-├── bufferSchemas map[bufferKey]string         // 列签名 ("col:i64,time:i64")
+├── buffers map[bufferKey]*bufferEntry   // "db/measurement#schemaHash" → 合并后的缓冲状态
 └── mu sync.RWMutex
+
+bufferEntry (6 个 map 合并为 1 个 struct):
+├── batches        []*TypedColumnBatch  // 不可变批次列表
+├── startTime      time.Time            // 首条记录到达时间 (用于 age flush)
+├── recordCount    int                  // 增量计数 (避免 O(n) 扫描)
+├── estimatedBytes uint64               // 估算内存占用
+├── schema         string               // 列签名 ("host:str,temp:f64,time:i64")
+└── refreshIndex   int                  // Arrow VIEW 增量刷新游标
 
 FNV-1a("database/measurement") % 32 → shard index
 ```
+
+**Schema-per-Buffer 隔离机制：**
+
+同一 measurement 的不同 schema 变体被隔离到独立的 buffer entry：
+
+```
+getColumnSignature(columns) → "host:str,region:str,temp:f64,time:i64"
+                              (列名排序 + Go 切片类型缩写: i64/f64/str/bool/dec)
+
+schemaHash(signature) → SHA256[:4]前8个hex → "a1b2c3d4"
+
+schemaKey(db, measurement, signature) → "db/cpu__a1b2c3d4"
+```
+
+Schema 签名用于三个关键决策：
+1. **缓存键** — 不同 schema 用不同 buffer entry，避免类型冲突列混入同一 Parquet
+2. **类型冲突检测** — `hasTypeConflict(oldSig, newSig)` 只检测同名字段类型变化（字段增删不冲突）
+3. **冲突时触发 flush** — `flushTypeConflicts()` 扫描所有 shard，将冲突的旧 buffer 先刷盘
+
+**类型冲突处理流程：**
+```
+writeColumnarInternal(record):
+  newSig = typedColumns.Signature
+  baseKey = "db/cpu"
+
+  flushTypeConflicts(baseKey, newSig):    ← 仅同名字段类型变化触发
+    遍历所有 shard
+    匹配 "db/cpu__*" 前缀
+    hasTypeConflict(existingSig, newSig) →
+      flushBufferLocked(oldEntry)          ← 先刷旧 schema → 独立 Parquet 文件
+                                            随后新 schema → 另一个 Parquet 文件
+                                            DuckDB 查询时 union_by_name 自动提升类型
+
+  新数据写入新 schemaKey 对应的 buffer
+```
+
+**Adaptive Flush Engine（自适应刷盘引擎）：**
+
+替换固定 `MaxBufferSize` 的基于内存压力的动态刷盘策略：
+
+```go
+type AdaptiveFlushEngine struct {
+    targetMemoryMB  uint64           // 目标内存水位
+    checkInterval   time.Duration    // 检查间隔
+    buffer          *ArrowBuffer
+    logger          zerolog.Logger
+}
+
+// Run() 后台循环:
+//   每 checkInterval 评估 TotalBufferedBytes()
+//   超过 targetMemoryMB → 选择最老的 bufferEntry 执行 flush
+//   启用后:
+//     - writeColumnarInternal 跳过固定 MaxBufferSize 检查
+//     - periodicFlush 让位 (检测到 adaptiveFlush 非 nil 直接 sleep)
+```
+
+注入方式：`ArrowBuffer.SetAdaptiveFlushEngine(engine)` → `StartAdaptiveFlush()`。
 
 **Flush Worker Pool 架构：**
 ```
@@ -393,12 +483,32 @@ FNV-1a("database/measurement") % 32 → shard index
                             ▼
                    flushRecordsAsync()
                     ├── mergeBatches()
+                    │     ├── 成功 → 继续
+                    │     └── 失败 → restoreBufferEntry() (回到 buffer，下次 retry)
                     ├── groupByHour()
                     ├── sortTypedColumnBatchByKeys()
                     ├── WriteParquetColumnar()
                     ├── sha256.Sum256()
                     ├── storage.Write()
-                    └── registerFileInTiering()
+                    ├── registerFileInTiering()
+                    │
+                    ├── 成功 → wal.AppendControl(FlushOK)    ← WAL 控制记录
+                    └── 失败 → wal.AppendControl(FlushFail)
+                               writeBackMergedData()          ← 数据回 buffer，不丢失
+```
+
+**Flush 失败恢复模式：**
+
+```
+flushPartitionedData() 失败:
+  → writeBackMergedData(): 将合并后的 TypedColumnBatch 转回 []interface{} 列
+    → WriteColumnarDirectNoWAL(): 重新摄入 buffer (skipWAL=true，数据已在 WAL)
+  → wal.AppendControl(FlushFail): 写入失败标记
+  → 数据留在 buffer 中，下次 flush 重试
+
+mergeBatches() 失败:
+  → restoreBufferEntry(): 恢复原始 batch 引用到 buffer (batch 未被 nil 清除)
+  → 下次 flush 重试
 ```
 
 #### 3.4.3 ArrowWriter
@@ -436,7 +546,51 @@ WriteParquetColumnar(measurement, columns, validity, tagColumns, decimalCols)
       └── → []byte (Parquet 字节)
 ```
 
-#### 3.4.4 MessagePack 解码器
+#### 3.4.4 TypedColumnBatch 与 Tag 处理
+
+`TypedColumnBatch` 是缓冲的基本单元，也是 Tag 信息在写入路径中的载体：
+
+```go
+type TypedColumnBatch struct {
+    Data       map[string]interface{} // 列名 → 类型化数组 ([]int64, []float64, []string, []bool)
+    Validity   map[string][]bool      // 空值位图 (false=null); nil entry = 全部有效
+    TagColumns []string               // 哪些列是 tag (写入 Parquet 元数据，启用 compaction 去重)
+    Signature  string                 // 列签名缓存，避免每次 flush 重复计算
+}
+```
+
+**Tag 在 Parquet 中的处理：**
+
+Tag 列在 Parquet 文件中同时以两种方式存在：
+1. **作为普通 string 列** — tag 值和其他 field 列一样，以 Arrow String 类型写入 Parquet
+2. **作为 Schema 元数据** — tag 列名写入 Parquet footer 的 `iedb:tags` 键（逗号分隔排序列表）
+
+```go
+// inferSchema() 中写入 metadata:
+metaKeys   = ["iedb:tags"]
+metaValues = ["host,region,sensor_id"]   // 排序后的 tag 列名
+```
+
+**Tag 在 Compaction 去重中的作用：**
+
+Compaction 时，`readTagColumnsFromParquetFiles()` 通过 DuckDB 的 `parquet_kv_metadata()` 读取 `iedb:tags` 元数据：
+- **有 tag** → 生成 `ROW_NUMBER() OVER (PARTITION BY "host", "region", ..., time)` 去重 SQL，相同 (tags, time) 只保留一行
+- **无 tag** → 标准 compaction（不去重），保留所有行（因为无法区分"同时间不同来源"和"真重复"）
+
+```
+有 tag:  sensor_id=TH1, time=1000 → 去重后保留 1 行
+无 tag:  time=1000 → 不去重，两个数据点都保留（可能来自不同传感器）
+```
+
+**Tag 名与 Field 名冲突处理：**
+```
+rowsToColumnar():
+  如果同一个 key 同时出现在 Tags 和 Fields:
+    Tag 列名保持不变 (如 "location")
+    Field 列名追加 "_value" 后缀 (如 "location_value")
+```
+
+#### 3.4.5 MessagePack 解码器
 
 ```
 MsgPackDecoder.Decode(data []byte)
@@ -459,7 +613,7 @@ MsgPackDecoder.Decode(data []byte)
       └── 逐元素递归 decodeMapPayload()
 ```
 
-#### 3.4.5 Line Protocol 解析器
+#### 3.4.6 Line Protocol 解析器
 
 与 MessagePack 不同，LP 解析器在解析时已知字段类型，直接构建预类型化的 `TypedColumnBatch`：
 
@@ -525,7 +679,7 @@ type WriterConfig struct {
     SyncMode     SyncMode        // fsync / fdatasync / async
     MaxSizeBytes int64           // 轮转大小 (默认 100MB)
     MaxAge       time.Duration   // 轮转时间 (默认 1h)
-    SyncInterval time.Duration   // 同步间隔 (默认 100ms)
+    SyncInterval time.Duration   // 同步间隔 (默认 1s)
     SyncBytes    int64           // 字节同步阈值 (默认 1MB)
     BufferSize   int             // 异步通道容量 (默认 10000)
 }
@@ -548,12 +702,48 @@ AppendRaw(data) / AppendRawWithMeta(db, data)
       rotate()                                  // 创建新 segment
 ```
 
-**Recovery 架构：**
+**Recovery 架构（FLUSH_OK 精确恢复）：**
+
+WAL 不仅存储数据记录，也存储控制记录，实现精确的崩溃恢复：
+
 ```go
+// 控制记录类型
+type ControlType uint8
+const (
+    FlushOK   ControlType = 1  // 数据已成功写入 Parquet
+    FlushFail ControlType = 2  // flush 失败，数据仍在 WAL
+)
+
 type Recovery struct {
     walDir string
 }
+```
 
+**FLUSH_OK 恢复算法：**
+```
+RecoverWithOptions() → RecoverExact():
+  1. 扫描所有 WAL segment 文件，按序号排序
+  2. 建立 FlushOK 索引:
+     遍历所有 segment，记录每个 (database, measurement) 最后一次 FLUSH_OK 的 position
+  3. 回放数据记录:
+     对每条数据 record:
+       record.position > lastFlushOK_position → 回放 (数据未在 Parquet 中)
+       record.position ≤ lastFlushOK_position → 跳过 (数据已在 Parquet 中)
+  4. FLUSH_FAIL 记录 → 始终回放 (标记了失败，数据可能未完整写入 Parquet)
+```
+
+**优势**：相比传统"恢复所有 WAL"方案，FLUSH_OK 恢复只回放真正需要的数据，恢复时间从 O(WAL_size) 降为 O(unflushed_data)。
+
+**Flush 路径控制记录写入：**
+```
+flushRecordsAsync():
+  mergeBatches() → flushPartitionedData() → storage.Write()
+  成功 → wal.AppendControl(FlushOK, database, measurement)
+  失败 → wal.AppendControl(FlushFail, database, measurement)
+        restoreBufferEntry() ← 数据回到 buffer，下次 retry
+```
+
+```go
 type RecoveryCallback func(ctx, records []map[string]interface{}) error
 
 type RecoveryOptions struct {
@@ -569,9 +759,16 @@ RecoverWithOptions(ctx, callback, opts):
      a. 验证 Magic + Version + ChecksumType
      b. 逐条读取 [Length][Timestamp][CRC32][Payload]
      c. CRC32 校验 → 失败则记录 corrupted
-     d. ColumnarCallback 或 RowCallback → 重新摄入 ArrowBuffer
-  4. 返回 RecoveryStats
+     d. 判断 entry 类型:
+        - 控制记录 (FlushOK/FlushFail) → 更新 lastFlushOK 索引
+        - 数据记录 → position > lastFlushOK → 回放
+     e. ColumnarCallback 或 RowCallback → 重新摄入 ArrowBuffer (WriteColumnarDirectNoWAL)
+  4. 返回 RecoveryStats (含跳过/回放/损坏数量)
 ```
+**WAL Backpressure 处理：**
+
+当 `asyncChan` 满时，`Append` 返回 `ErrWALDropped`。调用方不传播此错误——数据仍在内存 buffer 中，由下次 flush 写入 Parquet。系统通过采样日志（每秒最多 1 条 Warn）和 `totalWALDropped` 计数器暴露降级状态。
+
 
 ---
 
@@ -599,6 +796,34 @@ CompactionManager
 | 合并粒度 | 同小时 | 同天 |
 | 调度方式 | Cron (默认 "0 * * * *") | Cron (默认 "0 2 * * *") |
 | 目的 | 快速清理写入碎片 | 深度合并减少文件数 |
+
+**Tag 感知自动去重：**
+
+Compaction 时自动检测 Parquet 文件中的 `iedb:tags` 元数据来决定是否去重：
+
+```
+compactFiles():
+  1. readTagColumnsFromParquetFiles(files)
+     通过 DuckDB parquet_kv_metadata() 读取 iedb:tags
+     对多文件取并集 (处理 schema evolution 新增 tag)
+  
+  2. buildCompactionQuery(files, orderBy, outputFile, tagColumns)
+     
+     无 tag → 标准 compaction:
+       COPY (SELECT * FROM read_parquet([...], union_by_name=true) ORDER BY time)
+       TO 'output.parquet'
+     
+     有 tag → 去重 compaction:
+       SELECT * EXCLUDE (__dedup_rn) FROM (
+         SELECT *, ROW_NUMBER() OVER (
+           PARTITION BY "host", "region", "time"
+           ORDER BY "time" DESC
+         ) AS __dedup_rn
+         FROM read_parquet([...], union_by_name=true)
+       ) WHERE __dedup_rn = 1
+```
+
+去重策略：相同 (tag 值, time) 组合只保留一行。无 tag 时不去重 —— 因为无法区分"真重复"和"不同数据源同时间到达"。
 
 **子进程隔离模型：**
 ```
@@ -1537,11 +1762,13 @@ type MsgPackPayload struct {
 
 11. ingest.NewArrowBuffer(config, storage)
     ├── 初始化 shards / worker pool / periodic flush
-    └── arrowBuffer.SetWAL(walWriter) (如果启用)
+    ├── arrowBuffer.SetWAL(walWriter) (如果启用)
+    └── arrowBuffer.SetAdaptiveFlushEngine(engine) + StartAdaptiveFlush() (如果启用)
 
 12. WAL Recovery (如果启用)
     ├── 扫描 segment 文件
-    ├── CRC32 校验 → callback → WriteColumnarDirectNoWAL
+    ├── FLUSH_OK 精确恢复: 只回放 position > lastFlushOK 的数据
+    ├── CRC32 校验 → callback → WriteColumnarDirectNoWAL (skipWAL=true)
     └── 启动 Periodic WAL Maintenance goroutine
 
 13. MQTT SubscriptionManager (如果启用)
@@ -1585,17 +1812,27 @@ type MsgPackPayload struct {
 ### 写入路径交互
 
 ```
-HTTP → api/handler → ingest/ArrowBuffer → wal/Writer → storage/Backend
-                                                           │
-                                            tiering/Manager (元数据)
-                                            cluster/FileRegistrar (集群清单)
+HTTP → api/handler → ingest/ArrowBuffer → wal/Writer (Append)  ─┐
+                   │                      │                      │
+                   │                      ├── AppendControl(FlushOK/FlushFail)
+                   │                      │                      │
+                   │   schema-per-buffer  │                      │
+                   │   ┌──────────────────┘                      │
+                   │   │ (Flush Worker)                          │
+                   │   ▼                                         │
+                   │   storage/Backend (Write parquet)           │
+                   │   ├── tiering/Manager (RecordFile)          │
+                   │   └── cluster/FileRegistrar (RegisterFile)  │
+                   │                                             │
+                   └── database/ArrowViewManager (OnNewData) ────┘
 ```
 
 1. **API → ArrowBuffer**: 直接函数调用 `Write()`, `WriteColumnarDirect()`
-2. **ArrowBuffer → WAL**: 接口 `WALWriter` (非阻塞 Append)
-3. **ArrowBuffer → Storage**: 接口 `storage.Backend` (同步 Write)
+2. **ArrowBuffer → WAL**: 接口 `WALWriter` — 数据 `Append` (非阻塞) + 控制记录 `AppendControl(FlushOK/FlushFail)`
+3. **ArrowBuffer → Storage**: 接口 `storage.Backend.Write()` (同步)
 4. **ArrowBuffer → Tiering**: 直接调用 `tieringManager.RecordFile()`
 5. **ArrowBuffer → Cluster**: 接口 `FileRegistrar.RegisterFile()` (非阻塞)
+6. **ArrowBuffer → Database**: 接口 `BufferChangeNotifier` → `ArrowViewManager.OnNewData()` (增量 VIEW 刷新)
 
 ### 查询路径交互
 

@@ -1,0 +1,2362 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/api/continuous_query.go",
+      "type": "file",
+      "name": "continuous_query.go",
+      "filePath": "internal/api/continuous_query.go",
+      "summary": "Continuous Query (CQ) HTTP API handler - 管理连续查询的CRUD操作和调度执行,支持聚合函数的增量计算和定时触发.",
+      "tags": [
+        "api-handler",
+        "continuous-query",
+        "complex"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go语言实现,使用goroutine和channel实现并发缓冲区管理."
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:NewContinuousQueryHandler",
+      "type": "function",
+      "name": "NewContinuousQueryHandler",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        141,
+        171
+      ],
+      "summary": "创建 ContinuousQueryHandler 实例的构造函数",
+      "tags": [
+        "exported",
+        "constructor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:initTables",
+      "type": "function",
+      "name": "initTables",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        174,
+        221
+      ],
+      "summary": "初始化函数 - Tables",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:Close",
+      "type": "function",
+      "name": "Close",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        224,
+        226
+      ],
+      "summary": "函数 Close",
+      "tags": [
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:RegisterRoutes",
+      "type": "function",
+      "name": "RegisterRoutes",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        229,
+        241
+      ],
+      "summary": "注册HTTP路由到Fiber路由器",
+      "tags": [
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:handleCreate",
+      "type": "function",
+      "name": "handleCreate",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        244,
+        329
+      ],
+      "summary": "HTTP请求处理器 - Create",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:handleList",
+      "type": "function",
+      "name": "handleList",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        332,
+        345
+      ],
+      "summary": "HTTP请求处理器 - List",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:handleGet",
+      "type": "function",
+      "name": "handleGet",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        348,
+        360
+      ],
+      "summary": "HTTP请求处理器 - Get",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:handleUpdate",
+      "type": "function",
+      "name": "handleUpdate",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        363,
+        414
+      ],
+      "summary": "HTTP请求处理器 - Update",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:handleDelete",
+      "type": "function",
+      "name": "handleDelete",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        417,
+        443
+      ],
+      "summary": "HTTP请求处理器 - Delete",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:ExecuteCQ",
+      "type": "function",
+      "name": "ExecuteCQ",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        447,
+        527
+      ],
+      "summary": "函数 ExecuteCQ",
+      "tags": [
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:handleExecute",
+      "type": "function",
+      "name": "handleExecute",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        540,
+        678
+      ],
+      "summary": "HTTP请求处理器 - Execute",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:executeAggregation",
+      "type": "function",
+      "name": "executeAggregation",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        681,
+        812
+      ],
+      "summary": "函数 executeAggregation",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:handleGetExecutions",
+      "type": "function",
+      "name": "handleGetExecutions",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        815,
+        850
+      ],
+      "summary": "HTTP请求处理器 - GetExecutions",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:getQuery",
+      "type": "function",
+      "name": "getQuery",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        853,
+        881
+      ],
+      "summary": "函数 getQuery",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:getQueries",
+      "type": "function",
+      "name": "getQueries",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        884,
+        940
+      ],
+      "summary": "函数 getQueries",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:recordExecutionAndUpdateTime",
+      "type": "function",
+      "name": "recordExecutionAndUpdateTime",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        945,
+        969
+      ],
+      "summary": "函数 recordExecutionAndUpdateTime",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/continuous_query.go:recordExecution",
+      "type": "function",
+      "name": "recordExecution",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        972,
+        987
+      ],
+      "summary": "函数 recordExecution",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/continuous_query.go:CQSchedulerReloader",
+      "type": "class",
+      "name": "CQSchedulerReloader",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        27,
+        32
+      ],
+      "summary": "结构体 CQSchedulerReloader - 包含 2 个方法",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/continuous_query.go:CQCoordinator",
+      "type": "class",
+      "name": "CQCoordinator",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        36,
+        39
+      ],
+      "summary": "结构体 CQCoordinator - 包含 2 个方法",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/continuous_query.go:ContinuousQueryHandler",
+      "type": "class",
+      "name": "ContinuousQueryHandler",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        42,
+        52
+      ],
+      "summary": "结构体 ContinuousQueryHandler - 包含 21 个方法",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "class:internal/api/continuous_query.go:ContinuousQuery",
+      "type": "class",
+      "name": "ContinuousQuery",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        67,
+        85
+      ],
+      "summary": "数据模型 ContinuousQuery - 纯数据字段结构体",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/continuous_query.go:ContinuousQueryRequest",
+      "type": "class",
+      "name": "ContinuousQueryRequest",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        88,
+        99
+      ],
+      "summary": "数据模型 ContinuousQueryRequest - 纯数据字段结构体",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/continuous_query.go:ExecuteCQRequest",
+      "type": "class",
+      "name": "ExecuteCQRequest",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        102,
+        106
+      ],
+      "summary": "数据模型 ExecuteCQRequest - 纯数据字段结构体",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/continuous_query.go:ExecuteCQResponse",
+      "type": "class",
+      "name": "ExecuteCQResponse",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        109,
+        123
+      ],
+      "summary": "数据模型 ExecuteCQResponse - 纯数据字段结构体",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/continuous_query.go:CQExecution",
+      "type": "class",
+      "name": "CQExecution",
+      "filePath": "internal/api/continuous_query.go",
+      "lineRange": [
+        126,
+        138
+      ],
+      "summary": "数据模型 CQExecution - 纯数据字段结构体",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/api/decompress_bomb_test.go",
+      "type": "file",
+      "name": "decompress_bomb_test.go",
+      "filePath": "internal/api/decompress_bomb_test.go",
+      "summary": "压缩炸弹(zstd)安全防护回归测试 - 验证高压缩比恶意载荷被拒绝且不会导致OOM,以及消息解码的字符串安全拷贝.",
+      "tags": [
+        "test",
+        "unit-test",
+        "complex"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go语言实现,使用goroutine和channel实现并发缓冲区管理."
+    },
+    {
+      "id": "function:internal/api/decompress_bomb_test.go:TestDecompressZstdPooled_BombRejected_WithoutOOM",
+      "type": "function",
+      "name": "TestDecompressZstdPooled_BombRejected_WithoutOOM",
+      "filePath": "internal/api/decompress_bomb_test.go",
+      "lineRange": [
+        30,
+        56
+      ],
+      "summary": "测试用例 - DecompressZstdPooled_BombRejected_WithoutOOM",
+      "tags": [
+        "test"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/decompress_bomb_test.go:TestDecompressZstdPooled_RejectsBenignOversizedPayload",
+      "type": "function",
+      "name": "TestDecompressZstdPooled_RejectsBenignOversizedPayload",
+      "filePath": "internal/api/decompress_bomb_test.go",
+      "lineRange": [
+        62,
+        91
+      ],
+      "summary": "测试用例 - DecompressZstdPooled_RejectsBenignOversizedPayload",
+      "tags": [
+        "test"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/decompress_bomb_test.go:TestDecompressRequest_UncompressedRejectsOverCap",
+      "type": "function",
+      "name": "TestDecompressRequest_UncompressedRejectsOverCap",
+      "filePath": "internal/api/decompress_bomb_test.go",
+      "lineRange": [
+        99,
+        112
+      ],
+      "summary": "测试用例 - DecompressRequest_UncompressedRejectsOverCap",
+      "tags": [
+        "test"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/decompress_bomb_test.go:TestDecompressRequest_UncompressedAcceptsAtCap",
+      "type": "function",
+      "name": "TestDecompressRequest_UncompressedAcceptsAtCap",
+      "filePath": "internal/api/decompress_bomb_test.go",
+      "lineRange": [
+        116,
+        134
+      ],
+      "summary": "测试用例 - DecompressRequest_UncompressedAcceptsAtCap",
+      "tags": [
+        "test"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/decompress_bomb_test.go:TestDecompressZstdPooled_HappyPath_RoundTrip",
+      "type": "function",
+      "name": "TestDecompressZstdPooled_HappyPath_RoundTrip",
+      "filePath": "internal/api/decompress_bomb_test.go",
+      "lineRange": [
+        140,
+        160
+      ],
+      "summary": "测试用例 - DecompressZstdPooled_HappyPath_RoundTrip",
+      "tags": [
+        "test"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/decompress_bomb_test.go:TestMessagePackDecoder_CopiesStringFields_NoBodyAliasing",
+      "type": "function",
+      "name": "TestMessagePackDecoder_CopiesStringFields_NoBodyAliasing",
+      "filePath": "internal/api/decompress_bomb_test.go",
+      "lineRange": [
+        177,
+        231
+      ],
+      "summary": "测试用例 - MessagePackDecoder_CopiesStringFields_NoBodyAliasing",
+      "tags": [
+        "test"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:internal/api/import.go",
+      "type": "file",
+      "name": "import.go",
+      "filePath": "internal/api/import.go",
+      "summary": "批量数据导入HTTP处理器 - 支持CSV/Parquet/LineProtocol/TLE格式的导入路由,自动分区和存储路径生成.",
+      "tags": [
+        "api-handler",
+        "bulk-import",
+        "complex"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go语言实现,使用goroutine和channel实现并发缓冲区管理."
+    },
+    {
+      "id": "function:internal/api/import.go:NewImportHandler",
+      "type": "function",
+      "name": "NewImportHandler",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        76,
+        82
+      ],
+      "summary": "创建 ImportHandler 实例的构造函数",
+      "tags": [
+        "exported",
+        "constructor"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/import.go:RegisterRoutes",
+      "type": "function",
+      "name": "RegisterRoutes",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        100,
+        110
+      ],
+      "summary": "注册HTTP路由到Fiber路由器",
+      "tags": [
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/import.go:handleCSVImport",
+      "type": "function",
+      "name": "handleCSVImport",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        113,
+        123
+      ],
+      "summary": "HTTP请求处理器 - CSVImport",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/import.go:handleFileImport",
+      "type": "function",
+      "name": "handleFileImport",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        137,
+        239
+      ],
+      "summary": "HTTP请求处理器 - FileImport",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/api/import.go:handleLineProtocolImport",
+      "type": "function",
+      "name": "handleLineProtocolImport",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        243,
+        455
+      ],
+      "summary": "HTTP请求处理器 - LineProtocolImport",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/api/import.go:Error",
+      "type": "function",
+      "name": "Error",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        473,
+        478
+      ],
+      "summary": "函数 Error",
+      "tags": [
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/import.go:importFile",
+      "type": "function",
+      "name": "importFile",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        481,
+        686
+      ],
+      "summary": "函数 importFile",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/api/import.go:buildReadExpression",
+      "type": "function",
+      "name": "buildReadExpression",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        689,
+        708
+      ],
+      "summary": "函数 buildReadExpression",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/import.go:buildTimeCast",
+      "type": "function",
+      "name": "buildTimeCast",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        711,
+        726
+      ],
+      "summary": "函数 buildTimeCast",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/import.go:getColumns",
+      "type": "function",
+      "name": "getColumns",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        729,
+        746
+      ],
+      "summary": "函数 getColumns",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/import.go:generateStoragePath",
+      "type": "function",
+      "name": "generateStoragePath",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        750,
+        762
+      ],
+      "summary": "函数 generateStoragePath",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/import.go:importErrorResponse",
+      "type": "function",
+      "name": "importErrorResponse",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        765,
+        774
+      ],
+      "summary": "函数 importErrorResponse",
+      "tags": [
+        "internal"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/import.go:handleTLEImport",
+      "type": "function",
+      "name": "handleTLEImport",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        783,
+        950
+      ],
+      "summary": "HTTP请求处理器 - TLEImport",
+      "tags": [
+        "internal",
+        "handler"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:internal/api/import.go:Stats",
+      "type": "function",
+      "name": "Stats",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        953,
+        962
+      ],
+      "summary": "函数 Stats",
+      "tags": [
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/import.go:ImportResult",
+      "type": "class",
+      "name": "ImportResult",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        24,
+        33
+      ],
+      "summary": "数据模型 ImportResult - 纯数据字段结构体",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/import.go:LPImportResult",
+      "type": "class",
+      "name": "LPImportResult",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        36,
+        42
+      ],
+      "summary": "数据模型 LPImportResult - 纯数据字段结构体",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/import.go:TLEImportResult",
+      "type": "class",
+      "name": "TLEImportResult",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        45,
+        52
+      ],
+      "summary": "数据模型 TLEImportResult - 纯数据字段结构体",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/import.go:ImportHandler",
+      "type": "class",
+      "name": "ImportHandler",
+      "filePath": "internal/api/import.go",
+      "lineRange": [
+        55,
+        73
+      ],
+      "summary": "结构体 ImportHandler - 包含 14 个方法",
+      "tags": [
+        "struct",
+        "exported"
+      ],
+      "complexity": "complex"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:NewContinuousQueryHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:NewContinuousQueryHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:initTables",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:Close",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:Close",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:RegisterRoutes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:RegisterRoutes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:handleCreate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:handleList",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:handleGet",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:handleUpdate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:handleDelete",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:ExecuteCQ",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:ExecuteCQ",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:handleExecute",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:executeAggregation",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:handleGetExecutions",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:getQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:getQueries",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:recordExecutionAndUpdateTime",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "function:internal/api/continuous_query.go:recordExecution",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:CQSchedulerReloader",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:CQSchedulerReloader",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:CQCoordinator",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:CQCoordinator",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ContinuousQueryHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ContinuousQueryHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ContinuousQuery",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ContinuousQuery",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ContinuousQueryRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ContinuousQueryRequest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ExecuteCQRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ExecuteCQRequest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ExecuteCQResponse",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:ExecuteCQResponse",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:CQExecution",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "class:internal/api/continuous_query.go:CQExecution",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressZstdPooled_BombRejected_WithoutOOM",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressZstdPooled_BombRejected_WithoutOOM",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressZstdPooled_RejectsBenignOversizedPayload",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressZstdPooled_RejectsBenignOversizedPayload",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressRequest_UncompressedRejectsOverCap",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressRequest_UncompressedRejectsOverCap",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressRequest_UncompressedAcceptsAtCap",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressRequest_UncompressedAcceptsAtCap",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressZstdPooled_HappyPath_RoundTrip",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestDecompressZstdPooled_HappyPath_RoundTrip",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestMessagePackDecoder_CopiesStringFields_NoBodyAliasing",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "function:internal/api/decompress_bomb_test.go:TestMessagePackDecoder_CopiesStringFields_NoBodyAliasing",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:NewImportHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:NewImportHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:RegisterRoutes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:RegisterRoutes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:handleCSVImport",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:handleFileImport",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:handleLineProtocolImport",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:Error",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:Error",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:importFile",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:buildReadExpression",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:buildTimeCast",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:getColumns",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:generateStoragePath",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:importErrorResponse",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:handleTLEImport",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:Stats",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "function:internal/api/import.go:Stats",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "class:internal/api/import.go:ImportResult",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "class:internal/api/import.go:ImportResult",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "class:internal/api/import.go:LPImportResult",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "class:internal/api/import.go:LPImportResult",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "class:internal/api/import.go:TLEImportResult",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "class:internal/api/import.go:TLEImportResult",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "class:internal/api/import.go:ImportHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "class:internal/api/import.go:ImportHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/auth/auth_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/auth/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/auth/middleware_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/auth/middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/auth/rbac_manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/auth/rbac_models.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/auth/rbac_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/database/arrow_view_integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/database/arrow_view.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/database/duckdb_arrow.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/database/duckdb_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/database/duckdb.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/database/sql_transform_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/database/sql_transform_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/adaptive_flush_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/adaptive_flush.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_partition_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_benchmark_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_chaos_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_close_race_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_flush_failure_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/lineprotocol_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/lineprotocol.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/memory_monitor_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/memory_monitor.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/msgpack_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/msgpack.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/notifier.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/tle_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/tle.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/utf8_sanitize.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/utf8_simdutf.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/utf8_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/ingest/utf8.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/continuous_query.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/adaptive_flush_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/adaptive_flush.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_partition_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_benchmark_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_chaos_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_close_race_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_flush_failure_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/lineprotocol_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/lineprotocol.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/memory_monitor_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/memory_monitor.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/msgpack_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/msgpack.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/notifier.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/tle_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/tle.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/utf8_sanitize.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/utf8_simdutf.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/utf8_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:internal/ingest/utf8.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/decompress_bomb_test.go",
+      "target": "file:pkg/models/record.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/auth/auth_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/auth/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/auth/middleware_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/auth/middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/auth/rbac_manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/auth/rbac_models.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/auth/rbac_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/database/arrow_view_integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/database/arrow_view.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/database/duckdb_arrow.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/database/duckdb_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/database/duckdb.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/database/sql_transform_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/database/sql_transform_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/adaptive_flush_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/adaptive_flush.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_partition_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_benchmark_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_chaos_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_close_race_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_flush_failure_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_flush_timing_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_high_load_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_rowformat_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_s3_hang_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_schema_churn_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_schema_evolution_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/arrow_writer.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/lineprotocol_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/lineprotocol.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/memory_monitor_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/memory_monitor.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/msgpack_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/msgpack.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/notifier.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/tle_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/tle.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/utf8_sanitize.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/utf8_simdutf.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/utf8_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/ingest/utf8.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/import.go",
+      "target": "file:pkg/models/record.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/ingest/adaptive_flush.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/arrow_writer.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/memory_monitor.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/lineprotocol.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/msgpack.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:pkg/models/record.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/utf8_simdutf.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/notifier.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/utf8.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/tle.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:internal/ingest/utf8_sanitize.go",
+      "target": "file:internal/api/decompress_bomb_test.go",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ]
+}

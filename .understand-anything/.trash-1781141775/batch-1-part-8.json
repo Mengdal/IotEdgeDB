@@ -1,0 +1,1609 @@
+{
+  "nodes": [
+    {
+      "id": "file:internal/api/reconciliation.go",
+      "type": "file",
+      "name": "reconciliation.go",
+      "filePath": "internal/api/reconciliation.go",
+      "summary": "数据一致性协调 API 处理器，提供手动触发协调运行和查询协调状态的接口。",
+      "tags": [
+        "api-handler",
+        "reconciliation",
+        "data-integrity"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/reconciliation.go:NewReconciliationHandler",
+      "type": "function",
+      "name": "NewReconciliationHandler",
+      "filePath": "internal/api/reconciliation.go",
+      "lineRange": [
+        38,
+        50
+      ],
+      "summary": "函数 NewReconciliationHandler，参数：scheduler, licenseClient, authManager, logger。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/reconciliation.go:RegisterRoutes",
+      "type": "function",
+      "name": "RegisterRoutes",
+      "filePath": "internal/api/reconciliation.go",
+      "lineRange": [
+        82,
+        94
+      ],
+      "summary": "函数 RegisterRoutes，参数：app。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/reconciliation.go:handleTrigger",
+      "type": "function",
+      "name": "handleTrigger",
+      "filePath": "internal/api/reconciliation.go",
+      "lineRange": [
+        115,
+        177
+      ],
+      "summary": "函数 handleTrigger，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/reconciliation.go:handleGetRun",
+      "type": "function",
+      "name": "handleGetRun",
+      "filePath": "internal/api/reconciliation.go",
+      "lineRange": [
+        182,
+        196
+      ],
+      "summary": "函数 handleGetRun，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/reconciliation.go:ReconciliationSchedulerInterface",
+      "type": "class",
+      "name": "ReconciliationSchedulerInterface",
+      "filePath": "internal/api/reconciliation.go",
+      "lineRange": [
+        18,
+        23
+      ],
+      "summary": "类/结构体 ReconciliationSchedulerInterface，包含 4 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/reconciliation.go:ReconciliationHandler",
+      "type": "class",
+      "name": "ReconciliationHandler",
+      "filePath": "internal/api/reconciliation.go",
+      "lineRange": [
+        28,
+        33
+      ],
+      "summary": "HTTP 请求处理器结构体 ReconciliationHandler，处理相关 API 路由。",
+      "tags": [
+        "class",
+        "api-handler",
+        "exported"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Go 结构体作为 HTTP 处理器，通过 Fiber 框架注册路由处理函数。"
+    },
+    {
+      "id": "file:internal/api/regex_rewriter.go",
+      "type": "file",
+      "name": "regex_rewriter.go",
+      "filePath": "internal/api/regex_rewriter.go",
+      "summary": "正则表达式 SQL 重写器，将复杂正则操作转换为 DuckDB SQL 内置函数调用以提升性能。",
+      "tags": [
+        "utility",
+        "query-optimization",
+        "regex"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/regex_rewriter.go:RewriteRegexToStringFuncs",
+      "type": "function",
+      "name": "RewriteRegexToStringFuncs",
+      "filePath": "internal/api/regex_rewriter.go",
+      "lineRange": [
+        12,
+        27
+      ],
+      "summary": "函数 RewriteRegexToStringFuncs，参数：sql。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/regex_rewriter.go:rewriteURLDomainExtraction",
+      "type": "function",
+      "name": "rewriteURLDomainExtraction",
+      "filePath": "internal/api/regex_rewriter.go",
+      "lineRange": [
+        32,
+        66
+      ],
+      "summary": "函数 rewriteURLDomainExtraction，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/regex_rewriter.go:buildURLDomainCASE",
+      "type": "function",
+      "name": "buildURLDomainCASE",
+      "filePath": "internal/api/regex_rewriter.go",
+      "lineRange": [
+        73,
+        87
+      ],
+      "summary": "函数 buildURLDomainCASE，参数：column。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/regex_rewriter.go:rewriteURLDomainExtractionExtract",
+      "type": "function",
+      "name": "rewriteURLDomainExtractionExtract",
+      "filePath": "internal/api/regex_rewriter.go",
+      "lineRange": [
+        92,
+        125
+      ],
+      "summary": "函数 rewriteURLDomainExtractionExtract，参数：sql。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/api/regex_rewriter_test.go",
+      "type": "file",
+      "name": "regex_rewriter_test.go",
+      "filePath": "internal/api/regex_rewriter_test.go",
+      "summary": "正则表达式重写器的单元测试和基准测试。",
+      "tags": [
+        "test",
+        "regex",
+        "benchmark"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/regex_rewriter_test.go:TestRewriteRegexToStringFuncs",
+      "type": "function",
+      "name": "TestRewriteRegexToStringFuncs",
+      "filePath": "internal/api/regex_rewriter_test.go",
+      "lineRange": [
+        8,
+        72
+      ],
+      "summary": "测试函数 TestRewriteRegexToStringFuncs，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/regex_rewriter_test.go:TestBuildURLDomainCASE",
+      "type": "function",
+      "name": "TestBuildURLDomainCASE",
+      "filePath": "internal/api/regex_rewriter_test.go",
+      "lineRange": [
+        74,
+        98
+      ],
+      "summary": "测试函数 TestBuildURLDomainCASE，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/regex_rewriter_test.go:BenchmarkRewriteRegexToStringFuncs_NoRegex",
+      "type": "function",
+      "name": "BenchmarkRewriteRegexToStringFuncs_NoRegex",
+      "filePath": "internal/api/regex_rewriter_test.go",
+      "lineRange": [
+        100,
+        105
+      ],
+      "summary": "测试函数 BenchmarkRewriteRegexToStringFuncs_NoRegex，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/regex_rewriter_test.go:BenchmarkRewriteRegexToStringFuncs_WithRegex",
+      "type": "function",
+      "name": "BenchmarkRewriteRegexToStringFuncs_WithRegex",
+      "filePath": "internal/api/regex_rewriter_test.go",
+      "lineRange": [
+        107,
+        112
+      ],
+      "summary": "测试函数 BenchmarkRewriteRegexToStringFuncs_WithRegex，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/regex_rewriter_test.go:BenchmarkRewriteRegexToStringFuncs_WithRegexExtract",
+      "type": "function",
+      "name": "BenchmarkRewriteRegexToStringFuncs_WithRegexExtract",
+      "filePath": "internal/api/regex_rewriter_test.go",
+      "lineRange": [
+        114,
+        119
+      ],
+      "summary": "测试函数 BenchmarkRewriteRegexToStringFuncs_WithRegexExtract，验证相关功能正确性。",
+      "tags": [
+        "test-function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:internal/api/retention.go",
+      "type": "file",
+      "name": "retention.go",
+      "filePath": "internal/api/retention.go",
+      "summary": "数据保留策略 API 处理器，管理和执行基于时间的数据保留策略，自动删除过期数据。",
+      "tags": [
+        "api-handler",
+        "retention",
+        "data-lifecycle"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Go 函数使用首字母大小写控制可见性：大写首字母的函数为导出（public），小写为包内私有。"
+    },
+    {
+      "id": "function:internal/api/retention.go:NewRetentionHandler",
+      "type": "function",
+      "name": "NewRetentionHandler",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        107,
+        137
+      ],
+      "summary": "函数 NewRetentionHandler，参数：storage, duckdb, cfg, licenseClient, authManager, logger。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:SetCoordinator",
+      "type": "function",
+      "name": "SetCoordinator",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        141,
+        143
+      ],
+      "summary": "函数 SetCoordinator，参数：c。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:initTables",
+      "type": "function",
+      "name": "initTables",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        146,
+        185
+      ],
+      "summary": "函数 initTables。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:Close",
+      "type": "function",
+      "name": "Close",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        188,
+        190
+      ],
+      "summary": "函数 Close。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:RegisterRoutes",
+      "type": "function",
+      "name": "RegisterRoutes",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        193,
+        213
+      ],
+      "summary": "函数 RegisterRoutes，参数：app。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:handleCreate",
+      "type": "function",
+      "name": "handleCreate",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        216,
+        274
+      ],
+      "summary": "函数 handleCreate，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/retention.go:handleList",
+      "type": "function",
+      "name": "handleList",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        277,
+        287
+      ],
+      "summary": "函数 handleList，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:handleGet",
+      "type": "function",
+      "name": "handleGet",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        290,
+        302
+      ],
+      "summary": "函数 handleGet，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:handleUpdate",
+      "type": "function",
+      "name": "handleUpdate",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        305,
+        348
+      ],
+      "summary": "函数 handleUpdate，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:handleDelete",
+      "type": "function",
+      "name": "handleDelete",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        351,
+        377
+      ],
+      "summary": "函数 handleDelete，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:ExecutePolicy",
+      "type": "function",
+      "name": "ExecutePolicy",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        381,
+        465
+      ],
+      "summary": "函数 ExecutePolicy，参数：ctx, policyID。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/retention.go:GetActivePolicies",
+      "type": "function",
+      "name": "GetActivePolicies",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        468,
+        502
+      ],
+      "summary": "函数 GetActivePolicies。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:GetPolicy",
+      "type": "function",
+      "name": "GetPolicy",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        505,
+        507
+      ],
+      "summary": "函数 GetPolicy，参数：policyID。",
+      "tags": [
+        "function",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:handleExecute",
+      "type": "function",
+      "name": "handleExecute",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        510,
+        621
+      ],
+      "summary": "函数 handleExecute，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/retention.go:handleGetExecutions",
+      "type": "function",
+      "name": "handleGetExecutions",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        624,
+        659
+      ],
+      "summary": "函数 handleGetExecutions，参数：c。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:getPolicy",
+      "type": "function",
+      "name": "getPolicy",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        662,
+        688
+      ],
+      "summary": "函数 getPolicy，参数：policyID。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:getPolicies",
+      "type": "function",
+      "name": "getPolicies",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        691,
+        724
+      ],
+      "summary": "函数 getPolicies。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:getMeasurementsToProcess",
+      "type": "function",
+      "name": "getMeasurementsToProcess",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        728,
+        759
+      ],
+      "summary": "函数 getMeasurementsToProcess，参数：ctx, policy。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:deleteOldFiles",
+      "type": "function",
+      "name": "deleteOldFiles",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        763,
+        886
+      ],
+      "summary": "函数 deleteOldFiles，参数：ctx, database, measurement, cutoffDate, dryRun, reason。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:internal/api/retention.go:getFileMaxTimeAndRowCount",
+      "type": "function",
+      "name": "getFileMaxTimeAndRowCount",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        889,
+        906
+      ],
+      "summary": "函数 getFileMaxTimeAndRowCount，参数：ctx, filePath。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:recordExecutionStart",
+      "type": "function",
+      "name": "recordExecutionStart",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        909,
+        920
+      ],
+      "summary": "函数 recordExecutionStart，参数：policyID, cutoffDate。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:buildParquetPath",
+      "type": "function",
+      "name": "buildParquetPath",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        936,
+        947
+      ],
+      "summary": "函数 buildParquetPath，参数：relativePath。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:cleanupEmptyDirectories",
+      "type": "function",
+      "name": "cleanupEmptyDirectories",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        951,
+        977
+      ],
+      "summary": "函数 cleanupEmptyDirectories，参数：ctx, deletedFiles。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:internal/api/retention.go:removeDirectoryTree",
+      "type": "function",
+      "name": "removeDirectoryTree",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        981,
+        996
+      ],
+      "summary": "函数 removeDirectoryTree，参数：ctx, remover, dir。",
+      "tags": [
+        "function"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/retention.go:RetentionCoordinator",
+      "type": "class",
+      "name": "RetentionCoordinator",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        29,
+        36
+      ],
+      "summary": "类/结构体 RetentionCoordinator，包含 3 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/retention.go:RetentionHandler",
+      "type": "class",
+      "name": "RetentionHandler",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        39,
+        48
+      ],
+      "summary": "HTTP 请求处理器结构体 RetentionHandler，处理相关 API 路由。",
+      "tags": [
+        "class",
+        "api-handler",
+        "exported"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Go 结构体作为 HTTP 处理器，通过 Fiber 框架注册路由处理函数。"
+    },
+    {
+      "id": "class:internal/api/retention.go:RetentionPolicy",
+      "type": "class",
+      "name": "RetentionPolicy",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        51,
+        64
+      ],
+      "summary": "类/结构体 RetentionPolicy，包含 0 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/retention.go:RetentionPolicyRequest",
+      "type": "class",
+      "name": "RetentionPolicyRequest",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        67,
+        74
+      ],
+      "summary": "请求结构体 RetentionPolicyRequest，定义 API 请求参数格式。",
+      "tags": [
+        "class",
+        "request-model",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/retention.go:ExecuteRetentionRequest",
+      "type": "class",
+      "name": "ExecuteRetentionRequest",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        77,
+        80
+      ],
+      "summary": "请求结构体 ExecuteRetentionRequest，定义 API 请求参数格式。",
+      "tags": [
+        "class",
+        "request-model",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/retention.go:ExecuteRetentionResponse",
+      "type": "class",
+      "name": "ExecuteRetentionResponse",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        83,
+        92
+      ],
+      "summary": "响应结构体 ExecuteRetentionResponse，定义 API 响应数据格式。",
+      "tags": [
+        "class",
+        "response-model",
+        "exported"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "class:internal/api/retention.go:RetentionExecution",
+      "type": "class",
+      "name": "RetentionExecution",
+      "filePath": "internal/api/retention.go",
+      "lineRange": [
+        95,
+        104
+      ],
+      "summary": "类/结构体 RetentionExecution，包含 0 个方法。",
+      "tags": [
+        "class",
+        "exported"
+      ],
+      "complexity": "simple"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/auth/auth_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/auth/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/auth/middleware_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/auth/middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/auth/rbac_manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/auth/rbac_models.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/auth/rbac_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/diff_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/diff.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/gate.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/helpers.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/reconciler_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/reconciler.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/scheduler_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/scheduler.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/sweep_manifest.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/sweep_storage.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "file:internal/reconciliation/walk.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "function:internal/api/reconciliation.go:NewReconciliationHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "function:internal/api/reconciliation.go:NewReconciliationHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "function:internal/api/reconciliation.go:RegisterRoutes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "function:internal/api/reconciliation.go:RegisterRoutes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "function:internal/api/reconciliation.go:handleTrigger",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "function:internal/api/reconciliation.go:handleGetRun",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "class:internal/api/reconciliation.go:ReconciliationSchedulerInterface",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "class:internal/api/reconciliation.go:ReconciliationSchedulerInterface",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "class:internal/api/reconciliation.go:ReconciliationHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/reconciliation.go",
+      "target": "class:internal/api/reconciliation.go:ReconciliationHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/regex_rewriter.go",
+      "target": "function:internal/api/regex_rewriter.go:RewriteRegexToStringFuncs",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/regex_rewriter.go",
+      "target": "function:internal/api/regex_rewriter.go:RewriteRegexToStringFuncs",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/regex_rewriter.go",
+      "target": "function:internal/api/regex_rewriter.go:rewriteURLDomainExtraction",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/regex_rewriter.go",
+      "target": "function:internal/api/regex_rewriter.go:buildURLDomainCASE",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/regex_rewriter.go",
+      "target": "function:internal/api/regex_rewriter.go:rewriteURLDomainExtractionExtract",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/regex_rewriter_test.go",
+      "target": "function:internal/api/regex_rewriter_test.go:TestRewriteRegexToStringFuncs",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/regex_rewriter_test.go",
+      "target": "function:internal/api/regex_rewriter_test.go:TestBuildURLDomainCASE",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/regex_rewriter_test.go",
+      "target": "function:internal/api/regex_rewriter_test.go:BenchmarkRewriteRegexToStringFuncs_NoRegex",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/regex_rewriter_test.go",
+      "target": "function:internal/api/regex_rewriter_test.go:BenchmarkRewriteRegexToStringFuncs_WithRegex",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/regex_rewriter_test.go",
+      "target": "function:internal/api/regex_rewriter_test.go:BenchmarkRewriteRegexToStringFuncs_WithRegexExtract",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/auth/auth_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/auth/auth.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/auth/middleware_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/auth/middleware.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/auth/rbac_manager.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/auth/rbac_models.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/auth/rbac_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/cluster/raft/errors.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/cluster/raft/fsm_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/cluster/raft/fsm.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/cluster/raft/logger.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/cluster/raft/node_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/cluster/raft/node.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/config/config_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/config/config.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/config/decimal_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/config/decimal.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/config/sort_keys_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/config/sort_keys.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/database/arrow_view_integration_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/database/arrow_view.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/database/duckdb_arrow.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/database/duckdb_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/database/duckdb.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/database/sql_transform_cache_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/database/sql_transform_cache.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/storage/azure.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/storage/backend_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/storage/backend.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/storage/local.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/storage/resilient.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/storage/s3_prefix_test.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/storage/s3.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "file:internal/storage/util.go",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:NewRetentionHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:NewRetentionHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:SetCoordinator",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:SetCoordinator",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:initTables",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:Close",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:Close",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:RegisterRoutes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:RegisterRoutes",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:handleCreate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:handleList",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:handleGet",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:handleUpdate",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:handleDelete",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:ExecutePolicy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:ExecutePolicy",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:GetActivePolicies",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:GetActivePolicies",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:GetPolicy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:GetPolicy",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:handleExecute",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:handleGetExecutions",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:getPolicy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:getPolicies",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:getMeasurementsToProcess",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:deleteOldFiles",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:getFileMaxTimeAndRowCount",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:recordExecutionStart",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:buildParquetPath",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:cleanupEmptyDirectories",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "function:internal/api/retention.go:removeDirectoryTree",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionCoordinator",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionCoordinator",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionHandler",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionHandler",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionPolicy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionPolicy",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionPolicyRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionPolicyRequest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:ExecuteRetentionRequest",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:ExecuteRetentionRequest",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:ExecuteRetentionResponse",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:ExecuteRetentionResponse",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionExecution",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:internal/api/retention.go",
+      "target": "class:internal/api/retention.go:RetentionExecution",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    }
+  ]
+}

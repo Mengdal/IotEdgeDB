@@ -36,6 +36,7 @@ type Entry struct {
 	TimestampUS  uint64                   // Microseconds since epoch
 	Records      []map[string]interface{} // Row format (from Append path)
 	ColumnarData *ColumnarEntry           // Columnar format (from AppendRaw path)
+	Control      *ControlRecord           // Control record (FLUSH_OK / FLUSH_FAIL)
 }
 
 // ColumnarEntry represents a columnar WAL entry written via the zero-copy path
@@ -139,7 +140,30 @@ func (r *Reader) readEntry(f *os.File) (*Entry, error) {
 		return nil, fmt.Errorf("checksum mismatch: expected %d, got %d", expectedChecksum, actualChecksum)
 	}
 
-	// Parse envelope to extract database name and inner msgpack payload
+	// Dispatch on payload marker byte
+	if len(payload) == 0 {
+		return nil, fmt.Errorf("empty WAL entry payload")
+	}
+
+	// Control records: FLUSH_OK (0x00) or FLUSH_FAIL (0x02).
+	// NOTE: Rolling back to a pre-FLUSH_OK binary will see these as
+	// "corrupted entries" since 0x00 and 0x02 are not valid msgpack.
+	// This is harmless — the entries are skipped and the counter is
+	// informational. Upgrade path: run the new binary to recover, then
+	// the control records are properly parsed.
+	if payload[0] == WALFlushOK || payload[0] == WALFlushFail {
+		db, meas := parseControlPayload(payload)
+		return &Entry{
+			TimestampUS: timestampUS,
+			Control: &ControlRecord{
+				Type:        ControlType(payload[0]),
+				Database:    db,
+				Measurement: meas,
+			},
+		}, nil
+	}
+
+	// Data entries: try ParseEnvelope (handles 0x01 marker), then msgpack deserialization
 	database, msgpackData := ParseEnvelope(payload, "")
 
 	// Try row format first (array of maps from Append path)
