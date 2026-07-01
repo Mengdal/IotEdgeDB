@@ -54,11 +54,11 @@ type Manager struct {
 	cycleID      atomic.Int64
 
 	// Metrics
-	TotalJobsCompleted  int
-	TotalJobsFailed     int
-	TotalFilesCompacted int
-	TotalBytesSaved     int64
-	TotalManifestsRecov int // Number of manifests recovered
+	totalJobsCompleted  int
+	totalJobsFailed     int
+	totalFilesCompacted int
+	totalBytesSaved     int64
+	totalManifestsRecov int // Number of manifests recovered
 
 	// Callback invoked after a successful compaction job (in parent process).
 	// Used to invalidate DuckDB and query caches after files are deleted.
@@ -156,7 +156,12 @@ func NewManager(cfg *ManagerConfig) *Manager {
 // SetOnCompactionComplete sets the callback invoked after each successful compaction job.
 // This is used to invalidate DuckDB and query caches in the parent process after
 // the compaction subprocess deletes old parquet files.
+// Safe to call concurrently with running compaction jobs (the setter takes
+// m.mu): main.go wires this callback after the schedulers have already
+// started, so a job may complete concurrently.
 func (m *Manager) SetOnCompactionComplete(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.onCompactionComplete = fn
 }
 
@@ -294,11 +299,11 @@ func (m *Manager) CompactPartition(ctx context.Context, candidate Candidate) err
 
 	m.mu.Lock()
 	if shouldInvalidateCache {
-		m.TotalJobsCompleted++
-		m.TotalFilesCompacted += result.FilesCompacted
-		m.TotalBytesSaved += (result.BytesBefore - result.BytesAfter)
+		m.totalJobsCompleted++
+		m.totalFilesCompacted += result.FilesCompacted
+		m.totalBytesSaved += (result.BytesBefore - result.BytesAfter)
 	} else {
-		m.TotalJobsFailed++
+		m.totalJobsFailed++
 	}
 
 	// Build job stats for history
@@ -332,14 +337,17 @@ func (m *Manager) CompactPartition(ctx context.Context, candidate Candidate) err
 	if len(m.jobHistory) > 100 {
 		m.jobHistory = m.jobHistory[len(m.jobHistory)-100:]
 	}
+	// Copy the callback while still holding the lock — main.go wires it via
+	// SetOnCompactionComplete after the schedulers have started.
+	onComplete := m.onCompactionComplete
 	m.mu.Unlock()
 
 	// Invalidate caches outside the lock — the callback performs IO (DuckDB Exec)
 	// and should not block stat reads or other concurrent compaction goroutines.
 	// The subprocess deleted old parquet files from storage, but DuckDB's
 	// cache_httpfs and parquet_metadata_cache still reference them.
-	if shouldInvalidateCache && m.onCompactionComplete != nil {
-		m.onCompactionComplete()
+	if shouldInvalidateCache && onComplete != nil {
+		onComplete()
 	}
 
 	// Return error if subprocess failed
@@ -535,7 +543,7 @@ func (m *Manager) runCycleInternal(ctx context.Context, filterDatabases []string
 		}
 		if recovered > 0 {
 			m.mu.Lock()
-			m.TotalManifestsRecov += recovered
+			m.totalManifestsRecov += recovered
 			m.mu.Unlock()
 			m.logger.Info().Int("recovered", recovered).Msg("Recovered orphaned compaction manifests")
 		}
@@ -898,12 +906,12 @@ func (m *Manager) Stats() map[string]interface{} {
 	defer m.mu.Unlock()
 
 	stats := map[string]interface{}{
-		"total_jobs_completed":    m.TotalJobsCompleted,
-		"total_jobs_failed":       m.TotalJobsFailed,
-		"total_files_compacted":   m.TotalFilesCompacted,
-		"total_bytes_saved":       m.TotalBytesSaved,
-		"total_bytes_saved_mb":    float64(m.TotalBytesSaved) / 1024 / 1024,
-		"total_manifests_recover": m.TotalManifestsRecov,
+		"total_jobs_completed":    m.totalJobsCompleted,
+		"total_jobs_failed":       m.totalJobsFailed,
+		"total_files_compacted":   m.totalFilesCompacted,
+		"total_bytes_saved":       m.totalBytesSaved,
+		"total_bytes_saved_mb":    float64(m.totalBytesSaved) / 1024 / 1024,
+		"total_manifests_recover": m.totalManifestsRecov,
 		"cycle_running":           m.cycleRunning.Load(),
 		"current_cycle_id":        m.cycleID.Load(),
 	}

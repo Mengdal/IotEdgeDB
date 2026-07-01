@@ -1,27 +1,60 @@
 package auth
 
 import (
+	"context"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"iedb/internal/metrics"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"iedb/internal/metrics"
-
-	"github.com/rs/zerolog"
-	"golang.org/x/crypto/bcrypt"
-
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/rs/zerolog"
 )
+
+// PermissionsNone is the explicit sentinel a caller passes to CreateToken /
+// CreateTokenWithValue to request a token with NO OSS-level permissions (an
+// RBAC-only token, whose access comes solely from team/role grants).
+//
+// It exists because the permissions parameter is overloaded: an empty string
+// ("") means "use the default read,write" — a contract relied on by bootstrap
+// and existing callers (see TestCreateTokenWithValue "default permissions are
+// read,write when empty"). Without a distinct sentinel there is no way to
+// express "deliberately empty", so requests for a least-privilege RBAC-only
+// token were silently upgraded to read,write — a privilege-escalation-shaped
+// bug (a token meant to be scoped to one database via RBAC instead got
+// wildcard read,write). The sentinel is normalised to a stored empty string
+// by storePermissions; the verify path already maps stored-empty to an empty
+// permission set (RBAC-only).
+const PermissionsNone = "\x00none"
+
+// storePermissions resolves the overloaded permissions argument into the exact
+// string persisted in api_tokens.permissions:
+//   - ""              => "read,write" (default contract, unchanged)
+//   - PermissionsNone => ""           (deliberate RBAC-only, no OSS perms)
+//   - anything else   => as-is
+func storePermissions(permissions string) string {
+	switch permissions {
+	case "":
+		return "read,write"
+	case PermissionsNone:
+		return ""
+	default:
+		return permissions
+	}
+}
 
 // TokenInfo represents token metadata returned by verify
 type TokenInfo struct {
@@ -56,6 +89,20 @@ type AuthManager struct {
 
 	cleanupDone chan struct{}
 	logger      zerolog.Logger
+	// proposer is the Raft seam for cluster-wide auth state replication.
+	// When non-nil (Enterprise cluster mode), every write method routes
+	// through here so the change applies on every node via the FSM. When
+	// nil (OSS / standalone), the write methods fall through to the
+	// existing direct-SQLite path — runtime behavior unchanged for OSS.
+	// Set via SetRaftProposer, typically once at startup from
+	// cmd/iedb/main.go after both AuthManager and the cluster coordinator
+	// are constructed. Phase A: Cluster Auth Convergence.
+	//
+	// proposerMu guards reads of `proposer` against the rare reconfigure
+	// case (Stop() unsetting it during shutdown). All hot-path writes
+	// take it for read.
+	proposer   RaftProposer
+	proposerMu sync.RWMutex
 }
 
 // Logger returns the auth component logger.
@@ -65,12 +112,32 @@ func (am *AuthManager) Logger() zerolog.Logger {
 
 // NewAuthManager creates a new authentication manager
 func NewAuthManager(dbPath string, cacheTTL time.Duration, maxCacheSize int, logger zerolog.Logger) (*AuthManager, error) {
-	// Ensure directory exists
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create db directory: %w", err)
-	}
+	// dbPath is a bare filesystem path by contract (e.g. "./data/iedb.db" — see
+	// the auth.db_path default in internal/config). The sql.Open call below
+	// appends "?_journal_mode=WAL&..." unconditionally, so dbPath must NOT
+	// already be a file: URI or carry query parameters. ":memory:" (and the
+	// "file::memory:" shared-cache form) are the only non-filesystem inputs,
+	// used by tests; they have no on-disk footprint, so skip all file ops.
+	isInMemory := dbPath == ":memory:" || strings.HasPrefix(dbPath, "file::memory:")
 
+	if !isInMemory {
+		// Ensure the parent directory exists.
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
+			return nil, fmt.Errorf("failed to create db directory: %w", err)
+		}
+
+		// Pre-create the SQLite file with owner-only permissions (0600) so
+		// there is no window where the file exists with the default umask
+		// (typically 0644, world-readable) before the Chmod below runs. The
+		// auth DB holds token hashes; it must never be world-readable. If the
+		// file already exists, OpenFile leaves its permissions unchanged, which
+		// the explicit Chmod after Ping then tightens.
+		f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0600)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create auth DB file: %w", err)
+		}
+		f.Close()
+	}
 	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=ON")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open auth database: %w", err)
@@ -81,6 +148,21 @@ func NewAuthManager(dbPath string, cacheTTL time.Duration, maxCacheSize int, log
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(time.Hour)
 
+	// Force a connection so the SQLite file is initialized on disk
+	// (sql.Open validates the DSN but defers file creation to first use).
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping auth database: %w", err)
+	}
+
+	if !isInMemory {
+		// Tighten to 0600 even if the file pre-existed with looser permissions
+		// from an earlier deployment.
+		if err := os.Chmod(dbPath, 0600); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to set auth DB permissions: %w", err)
+		}
+	}
 	am := &AuthManager{
 		db:           db,
 		dbPath:       dbPath,
@@ -96,10 +178,47 @@ func NewAuthManager(dbPath string, cacheTTL time.Duration, maxCacheSize int, log
 		return nil, err
 	}
 
+	if !isInMemory {
+		// SQLite in WAL mode creates -wal and -shm files alongside the main
+		// database on first write (initDB above). Apply 0600 to these as well —
+		// they're created with the process umask (typically 0644) and can
+		// contain recently-committed token hashes. We run this after initDB
+		// so the files are guaranteed to exist on a fresh install; on
+		// pre-existing deployments this tightens permissions that were set
+		// by an earlier version.
+		//
+		// Chmod directly and ignore not-exist errors — avoids the TOCTOU
+		// race between Stat+Chmod. On a fresh install with no -wal yet
+		// (unlikely after initDB, but possible), the not-exist is harmless.
+		//
+		// Resolve symlinks first: SQLite creates -wal/-shm beside the DB's
+		// real path, so if dbPath is a symlink (e.g. /etc/iedb/auth.db ->
+		// /var/lib/iedb/auth.db), "dbPath+ext" points at a non-existent
+		// sibling of the link and the Chmod would silently no-op, leaving
+		// the real WAL/SHM at the process umask. EvalSymlinks gives the
+		// canonical path; fall back to dbPath if it can't be resolved.
+		walBase := dbPath
+		if resolved, err := filepath.EvalSymlinks(dbPath); err == nil {
+			walBase = resolved
+		} else {
+			// Fall back to dbPath, but surface it: if dbPath is in fact a
+			// symlink, the WAL/SHM chmod below targets the wrong (link-side)
+			// paths and silently no-ops, leaving the real files at the umask.
+			am.logger.Warn().Err(err).Str("db_path", dbPath).
+				Msg("Could not resolve auth DB symlinks; WAL/SHM permissions may not be hardened if the path is a symlink")
+		}
+		for _, ext := range []string{"-wal", "-shm"} {
+			p := walBase + ext
+			if err := os.Chmod(p, 0600); err != nil && !os.IsNotExist(err) {
+				db.Close()
+				return nil, fmt.Errorf("failed to set auth DB %s permissions: %w", ext, err)
+			}
+		}
+	}
 	// Start background cleanup
 	go am.cleanupLoop()
 
-	am.logger.Info().
+	am.logger.Debug().
 		Str("db_path", dbPath).
 		Dur("cache_ttl", cacheTTL).
 		Int("max_cache_size", maxCacheSize).
@@ -329,26 +448,124 @@ func (am *AuthManager) cleanupExpiredCache() {
 	}
 }
 
-// hashToken generates a bcrypt hash of the token for storage
+// pbkdf2Prefix marks a token hash produced by hashToken (PBKDF2-HMAC-SHA256).
+// Format: $pbkdf2-sha256$<iter>$<saltB64>$<hashB64> (base64 std, no padding
+// concerns since we encode/decode with the same codec).
+const pbkdf2Prefix = "$pbkdf2-sha256$"
+
+// pbkdf2Iterations is the PBKDF2 work factor. API tokens are 256-bit random
+// values (see generateToken), so this is defense-in-depth rather than the sole
+// barrier against guessing; 600k matches current OWASP guidance for
+// PBKDF2-HMAC-SHA256 and keeps verify latency acceptable for the auth cache
+// miss path.
+const pbkdf2Iterations = 600_000
+
+// pbkdf2MaxIterations bounds the iteration count accepted at verify time. A
+// value above this can only come from a corrupted or hostile hash (verifying
+// it would be a CPU-DoS vector — e.g. a rogue cluster node proposing a
+// TokenEntry with a huge iter). The ceiling is well above pbkdf2Iterations so
+// raising the minting cost later still verifies.
+const pbkdf2MaxIterations = 10_000_000
+
+// pbkdf2KeyLen is the derived-key length in bytes (256-bit).
+const pbkdf2KeyLen = 32
+
+// pbkdf2SaltLen is the per-token random salt length in bytes.
+const pbkdf2SaltLen = 16
+
+// pbkdf2MaxEncodedLen bounds the total length of a $pbkdf2-sha256$ encoded hash
+// accepted at verify time. A well-formed hash is ~80 bytes; 128 is generous
+// headroom. This is a cheap O(1) guard applied before any Atoi/base64 decode so
+// an oversized hostile hash cannot force large allocations or scans.
+const pbkdf2MaxEncodedLen = 128
+
+// hashToken generates a PBKDF2-HMAC-SHA256 hash of the token for storage.
+//
+// PBKDF2 is a FIPS 140-3-approved KDF (SP 800-132) implemented in the stdlib
+// crypto/pbkdf2 (Go 1.24+), which is inside the FIPS module boundary. IEDB
+// previously used bcrypt (golang.org/x/crypto/bcrypt), which is NOT
+// FIPS-approved and sits OUTSIDE the module boundary — and crucially is NOT
+// rejected by GODEBUG=fips140=only because it is not stdlib crypto. New tokens
+// are therefore always PBKDF2 in BOTH build variants; verifyTokenHash handles
+// verifying any pre-existing bcrypt/sha256 hashes (see verifyLegacyTokenHash,
+// which fails closed in the fips build).
 func (am *AuthManager) hashToken(token string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
+	salt := make([]byte, pbkdf2SaltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return "", fmt.Errorf("generate token salt: %w", err)
 	}
-	return string(hash), nil
+	dk, err := pbkdf2.Key(sha256.New, token, salt, pbkdf2Iterations, pbkdf2KeyLen)
+	if err != nil {
+		return "", fmt.Errorf("derive token hash: %w", err)
+	}
+	return fmt.Sprintf("%s%d$%s$%s",
+		pbkdf2Prefix,
+		pbkdf2Iterations,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(dk),
+	), nil
 }
 
-// verifyTokenHash checks if a token matches a stored hash
+// verifyTokenHash checks if a token matches a stored hash.
+//
+// PBKDF2 hashes (the format hashToken now emits) verify in both build
+// variants. Legacy bcrypt ($2…) and sha256 hashes are delegated to
+// verifyLegacyTokenHash, which is build-tag-specific: the default build
+// verifies them as before (backward compatibility); the fips build fails
+// closed and logs a "rotate this token" warning, because verifying a legacy
+// hash would call a non-FIPS-approved algorithm (bcrypt) or a bare unsalted
+// SHA-256.
 func (am *AuthManager) verifyTokenHash(token, hash string) bool {
-	// Bcrypt hash (secure, used for all new tokens since v26)
-	if strings.HasPrefix(hash, "$2") {
-		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(token)) == nil
+	if strings.HasPrefix(hash, pbkdf2Prefix) {
+		return verifyPBKDF2TokenHash(token, hash)
 	}
-	// SHA256 hash (legacy compatibility for pre-v26 tokens)
-	// New tokens always use bcrypt. This path only verifies existing old tokens.
-	// #nosec G401 -- Legacy compatibility only, not used for new token storage
-	h := sha256.Sum256([]byte(token))
-	return hash == hex.EncodeToString(h[:])
+	return am.verifyLegacyTokenHash(token, hash)
+}
+
+// verifyPBKDF2TokenHash parses and verifies a $pbkdf2-sha256$ encoded hash in
+// constant time. A malformed encoding returns false (fail closed).
+func verifyPBKDF2TokenHash(token, hash string) bool {
+	// Cheap length guard FIRST, before any Atoi/base64 decode. A well-formed
+	// hash is ~80 bytes (10-digit iter + 24-char b64 salt + 48-char b64 key +
+	// separators). Rejecting oversized input up front prevents an attacker-
+	// supplied hash (e.g. a rogue cluster-proposed TokenEntry persisted to
+	// SQLite) from forcing a multi-megabyte base64 decode or Atoi scan on every
+	// matching auth attempt — the allocation/CPU happens BEFORE the semantic
+	// length checks below would reject it.
+	if len(hash) > pbkdf2MaxEncodedLen {
+		return false
+	}
+	rest := strings.TrimPrefix(hash, pbkdf2Prefix)
+	parts := strings.Split(rest, "$")
+	if len(parts) != 3 {
+		return false
+	}
+	// Bound the iteration count. hashToken always writes pbkdf2Iterations, so a
+	// value far above that can only come from a corrupted or hostile hash
+	// (e.g. a rogue cluster node proposing a TokenEntry with a huge iter).
+	// Verifying it would burn CPU — cap it to bound the work. The ceiling is
+	// generous (well above pbkdf2Iterations) so a future increase to the
+	// minting cost still verifies.
+	iter, err := strconv.Atoi(parts[0])
+	if err != nil || iter <= 0 || iter > pbkdf2MaxIterations {
+		return false
+	}
+	// Pin salt and key lengths to what hashToken emits. This rejects malformed
+	// hashes early and prevents a hostile hash from forcing oversized
+	// allocations / derivations.
+	salt, err := base64.RawStdEncoding.DecodeString(parts[1])
+	if err != nil || len(salt) != pbkdf2SaltLen {
+		return false
+	}
+	want, err := base64.RawStdEncoding.DecodeString(parts[2])
+	if err != nil || len(want) != pbkdf2KeyLen {
+		return false
+	}
+	got, err := pbkdf2.Key(sha256.New, token, salt, iter, len(want))
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
 // cacheKey generates a cache key for in-memory token lookup.
@@ -380,11 +597,10 @@ func generateToken() (string, error) {
 
 // insertToken inserts a pre-hashed token into the database.
 // It is the shared implementation used by CreateToken and CreateTokenWithValue.
+// The permissions argument MUST already be resolved (via storePermissions) by
+// the caller — insertToken persists it verbatim and does not re-default, so the
+// sentinel is never double-resolved.
 func (am *AuthManager) insertToken(hash, prefix, name, description, permissions string, expiresAt *time.Time) error {
-
-	if permissions == "" {
-		permissions = "read,write"
-	}
 
 	var expiresAtVal interface{}
 	if expiresAt != nil {
@@ -405,8 +621,15 @@ func (am *AuthManager) insertToken(hash, prefix, name, description, permissions 
 	return nil
 }
 
-// CreateToken creates a new API token
-func (am *AuthManager) CreateToken(name, description, permissions string, expiresAt *time.Time) (string, error) {
+// CreateToken creates a new API token.
+//
+// In cluster mode, this proposes a CreateToken command through Raft and
+// waits up to proposeTimeout for the apply to land. The context bounds
+// that wait so a client disconnect or higher-level timeout cancels the
+// proposal cleanly. In OSS / standalone mode the context is currently
+// unused (the SQLite write is a single statement) but the signature is
+// kept consistent across both paths for callers
+func (am *AuthManager) CreateToken(ctx context.Context, name, description, permissions string, expiresAt *time.Time) (string, error) {
 	token, err := generateToken()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate token: %w", err)
@@ -415,8 +638,55 @@ func (am *AuthManager) CreateToken(name, description, permissions string, expire
 	if err != nil {
 		return "", fmt.Errorf("failed to hash token: %w", err)
 	}
+	prefix := tokenPrefix(token)
 
-	if err := am.insertToken(hash, tokenPrefix(token), name, description, permissions, expiresAt); err != nil {
+	// Resolve permissions to the exact stored value once, here, so both the
+	// cluster-propose path and the direct-SQLite insertToken path persist the
+	// same string (insertToken does NOT re-resolve). "" => read,write default;
+	// PermissionsNone => "" (deliberate RBAC-only).
+	permissions = storePermissions(permissions)
+
+	// Cluster mode: propose via Raft, which runs ApplyCreateToken on every
+	// node (including this one) and writes to local SQLite via the apply
+	// callback. The plaintext token value never lands in the Raft log —
+	// only the bcrypt hash and prefix. Returned to the caller out of band.
+	if am.getProposer() != nil {
+		var expiresAtNano int64
+		if expiresAt != nil {
+			expiresAtNano = expiresAt.UnixNano()
+		}
+		// Use clusterTokenEntryWire mirroring fsm.go's TokenEntry. The
+		// proposer wraps this payload struct in a raft.Command envelope.
+		payload := struct {
+			Token clusterTokenEntryWire `json:"token"`
+		}{
+			Token: clusterTokenEntryWire{
+				Name:              name,
+				Description:       description,
+				Permissions:       permissions,
+				TokenHash:         hash,
+				TokenPrefix:       prefix,
+				CreatedAtUnixNano: time.Now().UnixNano(),
+				ExpiresAtUnixNano: expiresAtNano,
+				Enabled:           true,
+			},
+		}
+		if err := am.proposeCommand(ctx, ProposalCommandCreateToken, payload); err != nil {
+			return "", fmt.Errorf("create token: %w", err)
+		}
+		am.logger.Info().
+			Str("name", name).
+			Str("permissions", permissions).
+			Msg("Created API token via Raft")
+		return token, nil
+	}
+
+	// Standalone / OSS: direct SQLite write, unchanged from pre-Phase-A
+	// behaviour. ctx is accepted for signature consistency but unused on
+	// this path — a single SQLite INSERT can't observe cancellation
+	// without re-plumbing the entire database/sql layer.
+	_ = ctx
+	if err := am.insertToken(hash, prefix, name, description, permissions, expiresAt); err != nil {
 		return "", err
 	}
 
@@ -663,8 +933,52 @@ func (am *AuthManager) GetTokenByID(id int64) (*TokenInfo, error) {
 	return info, nil
 }
 
-// UpdateToken updates token metadata
-func (am *AuthManager) UpdateToken(id int64, name, description, permissions *string, expiresAt *time.Time) error {
+// UpdateToken updates token metadata.
+//
+// The context bounds the cluster-mode Raft proposal wait. In OSS mode
+// it's currently unused (single SQLite UPDATE statement)
+// round-3 review.
+func (am *AuthManager) UpdateToken(ctx context.Context, id int64, name, description, permissions *string, expiresAt *time.Time) error {
+	// Cluster mode: propose via Raft with a ChangedFields list so the FSM
+	// applier knows which fields are "leave alone" vs "set to empty".
+	if am.getProposer() != nil {
+		var changed []string
+		payload := struct {
+			ID                int64    `json:"id"`
+			Name              string   `json:"name,omitempty"`
+			Description       string   `json:"description,omitempty"`
+			Permissions       string   `json:"permissions,omitempty"`
+			ExpiresAtUnixNano int64    `json:"expires_at_unix_nano,omitempty"`
+			ChangedFields     []string `json:"changed_fields"`
+		}{ID: id}
+		if name != nil {
+			payload.Name = *name
+			changed = append(changed, "name")
+		}
+		if description != nil {
+			payload.Description = *description
+			changed = append(changed, "description")
+		}
+		if permissions != nil {
+			payload.Permissions = *permissions
+			changed = append(changed, "permissions")
+		}
+		if expiresAt != nil {
+			payload.ExpiresAtUnixNano = expiresAt.UnixNano()
+			changed = append(changed, "expires_at")
+		}
+		if len(changed) == 0 {
+			return nil
+		}
+		payload.ChangedFields = changed
+		if err := am.proposeCommand(ctx, ProposalCommandUpdateToken, payload); err != nil {
+			return fmt.Errorf("update token: %w", err)
+		}
+		return nil
+	}
+	_ = ctx
+
+	// Standalone / OSS: direct SQLite.
 	var updates []string
 	var args []interface{}
 
@@ -706,8 +1020,20 @@ func (am *AuthManager) UpdateToken(id int64, name, description, permissions *str
 	return nil
 }
 
-// DeleteToken deletes a token by ID
-func (am *AuthManager) DeleteToken(id int64) error {
+// DeleteToken deletes a token by ID. The context bounds the cluster-mode
+// Raft proposal wait.
+func (am *AuthManager) DeleteToken(ctx context.Context, id int64) error {
+	if am.getProposer() != nil {
+		payload := struct {
+			ID int64 `json:"id"`
+		}{ID: id}
+		if err := am.proposeCommand(ctx, ProposalCommandDeleteToken, payload); err != nil {
+			return fmt.Errorf("delete token: %w", err)
+		}
+		am.logger.Info().Int64("token_id", id).Msg("Deleted API token via Raft")
+		return nil
+	}
+	_ = ctx
 	result, err := am.db.Exec("DELETE FROM api_tokens WHERE id = ?", id)
 	if err != nil {
 		return err
@@ -723,8 +1049,20 @@ func (am *AuthManager) DeleteToken(id int64) error {
 	return nil
 }
 
-// RevokeToken disables a token
-func (am *AuthManager) RevokeToken(id int64) error {
+// RevokeToken disables a token. The context bounds the cluster-mode
+// Raft proposal wait.
+func (am *AuthManager) RevokeToken(ctx context.Context, id int64) error {
+	if am.getProposer() != nil {
+		payload := struct {
+			ID int64 `json:"id"`
+		}{ID: id}
+		if err := am.proposeCommand(ctx, ProposalCommandRevokeToken, payload); err != nil {
+			return fmt.Errorf("revoke token: %w", err)
+		}
+		am.logger.Info().Int64("token_id", id).Msg("Revoked API token via Raft")
+		return nil
+	}
+	_ = ctx
 	result, err := am.db.Exec("UPDATE api_tokens SET enabled = 0 WHERE id = ?", id)
 	if err != nil {
 		return err
@@ -740,8 +1078,10 @@ func (am *AuthManager) RevokeToken(id int64) error {
 	return nil
 }
 
-// RotateToken generates a new token value while keeping metadata
-func (am *AuthManager) RotateToken(id int64) (string, error) {
+// RotateToken generates a new token value while keeping metadata. The
+// context bounds the cluster-mode Raft proposal wait
+// round-3 review.
+func (am *AuthManager) RotateToken(ctx context.Context, id int64) (string, error) {
 	token, err := generateToken()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate token: %w", err)
@@ -755,6 +1095,21 @@ func (am *AuthManager) RotateToken(id int64) (string, error) {
 	// Generate new prefix for O(1) lookup optimization
 	prefix := tokenPrefix(token)
 
+	// Cluster mode: propose via Raft. The plaintext token is returned to
+	// the caller out of band — only hash + prefix go through the log.
+	if am.getProposer() != nil {
+		payload := struct {
+			ID        int64  `json:"id"`
+			NewHash   string `json:"new_hash"`
+			NewPrefix string `json:"new_prefix"`
+		}{ID: id, NewHash: hash, NewPrefix: prefix}
+		if err := am.proposeCommand(ctx, ProposalCommandRotateToken, payload); err != nil {
+			return "", fmt.Errorf("rotate token: %w", err)
+		}
+		am.logger.Info().Int64("token_id", id).Msg("Rotated API token via Raft")
+		return token, nil
+	}
+	_ = ctx
 	result, err := am.db.Exec("UPDATE api_tokens SET token_hash = ?, token_prefix = ? WHERE id = ?", hash, prefix, id)
 	if err != nil {
 		return "", err
@@ -773,19 +1128,82 @@ func (am *AuthManager) RotateToken(id int64) (string, error) {
 // ensureFirstToken is the shared implementation for EnsureInitialToken and EnsureInitialTokenWithValue.
 // It uses INSERT OR IGNORE to atomically create a token only when none exist, avoiding a TOCTOU race.
 // Returns the token value if a new token was created, or empty string if one already existed.
-func (am *AuthManager) ensureFirstToken(tokenValue, description string) (string, error) {
+//
+// In cluster mode this routes through Raft: every node calls ensureFirstToken
+// with its own (random) tokenValue on boot, but only one Raft proposal can
+// succeed cluster-wide. The FSM applier rejects subsequent CreateToken
+// commands whose Name = "admin" with a "token name already exists" error;
+// non-winning nodes get that back from proposeCommand and treat it as
+// "already initialised" (empty string return — same shape as the SQLite
+// path's "rows == 0" check). The plaintext is only known to the proposer
+// and only the winning leader prints the banner.
+func (am *AuthManager) ensureFirstToken(ctx context.Context, tokenValue, description string) (string, error) {
 	hash, err := am.hashToken(tokenValue)
 	if err != nil {
 		return "", fmt.Errorf("failed to hash token: %w", err)
 	}
+	prefix := tokenPrefix(tokenValue)
 
+	if am.getProposer() != nil {
+		payload := struct {
+			Token clusterTokenEntryWire `json:"token"`
+		}{
+			Token: clusterTokenEntryWire{
+				Name:              "admin",
+				Description:       description,
+				Permissions:       "read,write,delete,admin",
+				TokenHash:         hash,
+				TokenPrefix:       prefix,
+				CreatedAtUnixNano: time.Now().UnixNano(),
+				Enabled:           true,
+			},
+		}
+		// Cluster bootstrap can race a Raft leader-flap window: WaitForLeader
+		// in main.go observed an election, but by the time we ship the
+		// proposal the leader may have stepped down. A bounded retry with
+		// exponential backoff for ErrLeaderUnknown lets us ride out a
+		// re-election without surfacing a scary error to the operator.
+		// "Already exists" is still an immediate empty-return (the leader
+		// applied a peer's proposal before ours).
+		//
+		// The backoff respects ctx so a shutdown signal during a
+		// pathological no-leader window doesn't block process exit (Gemini
+		// .
+		const maxAttempts = 4
+		backoff := 250 * time.Millisecond
+		var err error
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			err = am.proposeCommand(ctx, ProposalCommandCreateToken, payload)
+			if err == nil {
+				return tokenValue, nil
+			}
+			if strings.Contains(err.Error(), "already exists") {
+				return "", nil
+			}
+			if !errors.Is(err, ErrLeaderUnknown) {
+				break
+			}
+			if attempt == maxAttempts-1 {
+				break // don't sleep after the last attempt
+			}
+			select {
+			case <-time.After(backoff):
+				backoff *= 2 // exponential: 250ms, 500ms, 1s
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		return "", err
+	}
+
+	// Standalone / OSS: direct SQLite path.
 	// Use a single atomic statement: INSERT only if the table is empty.
 	// This eliminates the COUNT→INSERT race when multiple nodes start simultaneously.
 	result, err := am.db.Exec(`
 		INSERT OR IGNORE INTO api_tokens (name, token_hash, token_prefix, description, permissions)
 		SELECT 'admin', ?, ?, ?, 'read,write,delete,admin'
 		WHERE NOT EXISTS (SELECT 1 FROM api_tokens)
-	`, hash, tokenPrefix(tokenValue), description)
+	`, hash, prefix, description)
 	if err != nil {
 		return "", fmt.Errorf("failed to create initial token: %w", err)
 	}
@@ -798,14 +1216,20 @@ func (am *AuthManager) ensureFirstToken(tokenValue, description string) (string,
 	return tokenValue, nil
 }
 
-// EnsureInitialToken creates an admin token if no tokens exist
-func (am *AuthManager) EnsureInitialToken() (string, error) {
+// EnsureInitialToken creates an admin token if no tokens exist.
+//
+// The context bounds the cluster-mode retry loop (in OSS / no-proposer
+// mode it's ignored, since the underlying SQLite INSERT is a single
+// statement). Pass a shutdown-aware context if you want bootstrap to
+// abort cleanly when the process is being torn down — relevant when
+// the Raft cluster never achieves leader election.
+func (am *AuthManager) EnsureInitialToken(ctx context.Context) (string, error) {
 	token, err := generateToken()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate token: %w", err)
 	}
 
-	result, err := am.ensureFirstToken(token, "Initial admin token (auto-generated on first run)")
+	result, err := am.ensureFirstToken(ctx, token, "Initial admin token (auto-generated on first run)")
 	if err != nil {
 		return "", err
 	}
@@ -818,7 +1242,9 @@ func (am *AuthManager) EnsureInitialToken() (string, error) {
 
 // CreateTokenWithValue creates a new API token using a caller-provided token value instead of generating one.
 // The value must be at least 32 characters long to ensure adequate entropy.
-func (am *AuthManager) CreateTokenWithValue(tokenValue, name, description, permissions string, expiresAt *time.Time) (string, error) {
+// The context bounds the cluster-mode Raft proposal wait
+// round-3 review.
+func (am *AuthManager) CreateTokenWithValue(ctx context.Context, tokenValue, name, description, permissions string, expiresAt *time.Time) (string, error) {
 	if len(tokenValue) < 32 {
 		return "", fmt.Errorf("bootstrap token must be at least 32 characters long")
 	}
@@ -827,8 +1253,42 @@ func (am *AuthManager) CreateTokenWithValue(tokenValue, name, description, permi
 	if err != nil {
 		return "", fmt.Errorf("failed to hash token: %w", err)
 	}
+	prefix := tokenPrefix(tokenValue)
+	// Resolve once (see CreateToken): "" => read,write; PermissionsNone => "".
+	permissions = storePermissions(permissions)
 
-	if err := am.insertToken(hash, tokenPrefix(tokenValue), name, description, permissions, expiresAt); err != nil {
+	// Cluster mode: propose via Raft — same shape as CreateToken.
+	if am.getProposer() != nil {
+		var expiresAtNano int64
+		if expiresAt != nil {
+			expiresAtNano = expiresAt.UnixNano()
+		}
+		payload := struct {
+			Token clusterTokenEntryWire `json:"token"`
+		}{
+			Token: clusterTokenEntryWire{
+				Name:              name,
+				Description:       description,
+				Permissions:       permissions,
+				TokenHash:         hash,
+				TokenPrefix:       prefix,
+				CreatedAtUnixNano: time.Now().UnixNano(),
+				ExpiresAtUnixNano: expiresAtNano,
+				Enabled:           true,
+			},
+		}
+		if err := am.proposeCommand(ctx, ProposalCommandCreateToken, payload); err != nil {
+			return "", fmt.Errorf("create token with value: %w", err)
+		}
+		am.logger.Info().
+			Str("name", name).
+			Str("permissions", permissions).
+			Msg("Created API token with provided value via Raft")
+		return tokenValue, nil
+	}
+	_ = ctx
+
+	if err := am.insertToken(hash, prefix, name, description, permissions, expiresAt); err != nil {
 		return "", err
 	}
 
@@ -842,12 +1302,15 @@ func (am *AuthManager) CreateTokenWithValue(tokenValue, name, description, permi
 
 // EnsureInitialTokenWithValue creates the initial admin token using a caller-provided value.
 // If tokens already exist, this is a no-op (returns empty string).
-func (am *AuthManager) EnsureInitialTokenWithValue(tokenValue string) (string, error) {
+//
+// The context bounds the cluster-mode retry loop. See EnsureInitialToken
+// for the contract.
+func (am *AuthManager) EnsureInitialTokenWithValue(ctx context.Context, tokenValue string) (string, error) {
 	if len(tokenValue) < 32 {
 		return "", fmt.Errorf("bootstrap token must be at least 32 characters long")
 	}
 
-	result, err := am.ensureFirstToken(tokenValue, "Initial admin token (set via IEDB_AUTH_BOOTSTRAP_TOKEN)")
+	result, err := am.ensureFirstToken(ctx, tokenValue, "Initial admin token (set via IEDB_AUTH_BOOTSTRAP_TOKEN)")
 	if err != nil {
 		return "", err
 	}
@@ -863,14 +1326,14 @@ func (am *AuthManager) EnsureInitialTokenWithValue(tokenValue string) (string, e
 // This is a recovery path for when the admin token has been lost. Requires IEDB_AUTH_FORCE_BOOTSTRAP=true.
 // Existing tokens are preserved so that legitimate admins can still revoke the recovery token if it was
 // injected by a bad actor.
-func (am *AuthManager) ForceAddRecoveryToken(tokenValue string) (string, error) {
+func (am *AuthManager) ForceAddRecoveryToken(ctx context.Context, tokenValue string) (string, error) {
 	if len(tokenValue) < 32 {
 		return "", fmt.Errorf("bootstrap token must be at least 32 characters long")
 	}
 
 	am.logger.Warn().Msg("IEDB_AUTH_FORCE_BOOTSTRAP=true: adding recovery admin token (existing tokens preserved)")
 
-	token, err := am.CreateTokenWithValue(tokenValue, "iedb-recovery", "Recovery admin token added via IEDB_AUTH_FORCE_BOOTSTRAP", "read,write,delete,admin", nil)
+	token, err := am.CreateTokenWithValue(ctx, tokenValue, "iedb-recovery", "Recovery admin token added via IEDB_AUTH_FORCE_BOOTSTRAP", "read,write,delete,admin", nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			// Recovery token already exists from a previous restart — no-op, the caller

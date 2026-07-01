@@ -658,22 +658,52 @@ func (j *Job) compactFiles(ctx context.Context, files []downloadedFile, tempDir 
 		}
 	}
 
-	// Build and execute compaction query (with dedup if tag metadata found)
-	query := buildCompactionQuery(fileListSQL, orderByClause, outputFile, tagColumns)
+	// Build and execute compaction statement(s) (with dedup if tag metadata found).
+	// The dedup path returns two statements (CREATE OR REPLACE TEMP TABLE + COPY).
+	// A DuckDB TEMP table is connection-local, and database/sql does NOT guarantee
+	// two sequential ExecContext calls share a pooled connection — so the COPY
+	// could land on a different connection and fail to see the staged table. We
+	// pin both statements to a single dedicated connection via db.Conn. Closing it
+	// also deterministically drops the temp table (no leak on partial failure).
+	dedupBranch := len(tagColumns) > 0
+	stmts := buildCompactionQuery(fileListSQL, orderByClause, outputFile, tagColumns)
 
 	// When dedup is active, count rows before compaction using parquet metadata (no data scan)
 	var rowsBefore int64
-	if len(tagColumns) > 0 {
+	if dedupBranch {
 		rowsBefore, _ = countParquetRows(ctx, db, fileListSQL)
 	}
 
-	_, err := db.ExecContext(ctx, query)
+	conn, err := db.Conn(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to execute compaction query: %w", err)
+		return "", fmt.Errorf("failed to acquire compaction connection: %w", err)
+	}
+	// conn.Close() returns the connection to the pool, NOT destroyed — and the
+	// DuckDB driver implements no session reset, so a TEMP table created here
+	// would persist on the pooled connection (retained memory on any reused *sql.DB).
+	// Drop it explicitly so the connection returns clean. DROP runs on the same
+	// pinned conn; ignore its error (best-effort cleanup, the real error is the
+	// statement error). defer Close guards against an early return leaking the conn.
+	defer func() {
+		if dedupBranch {
+			// Use a detached context: if the job's ctx was cancelled/timed out,
+			// running the DROP on ctx would skip it and leave the temp table on
+			// the pooled connection (the driver does no session reset). A short
+			// independent timeout guarantees the cleanup runs.
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = conn.ExecContext(cleanupCtx, "DROP TABLE IF EXISTS "+dedupStagingTable)
+		}
+		conn.Close()
+	}()
+	for _, stmt := range stmts {
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			return "", fmt.Errorf("failed to execute compaction query: %w", err)
+		}
 	}
 
 	// Log dedup metrics when rows were removed
-	if len(tagColumns) > 0 && rowsBefore > 0 {
+	if dedupBranch && rowsBefore > 0 {
 		escapedOutput := escapeSQLPath(outputFile)
 		rowsAfter, _ := countParquetRows(ctx, db, fmt.Sprintf("['%s']", escapedOutput))
 		if rowsAfter > 0 && rowsAfter < rowsBefore {
@@ -713,12 +743,33 @@ func (j *Job) uploadFile(ctx context.Context, localPath, key string) error {
 
 // deleteOldFiles removes only the files that were actually compacted from storage.
 // This ensures we don't delete files that were skipped due to corruption or other issues.
+// Prefers batch delete (BatchDeleter interface) when the backend supports it
+// (S3 DeleteObjects, Azure BlobBatch) to reduce API call overhead.
+// Does NOT fall back to per-file delete on batch failure — a failing batch
+// (e.g. auth error, rate limit) means individual calls will also fail, and
+// the per-file loop would cause severe latency spikes. The next compaction
+// cycle will retry.
 func (j *Job) deleteOldFiles(ctx context.Context) error {
 	if len(j.compactedFiles) == 0 {
 		j.logger.Debug().Msg("No files to delete (none were compacted)")
 		return nil
 	}
 
+	// Prefer batch delete when the backend supports it (S3, Azure).
+	if bd, ok := j.StorageBackend.(storage.BatchDeleter); ok {
+		if err := bd.DeleteBatch(ctx, j.compactedFiles); err != nil {
+			j.logger.Error().Err(err).
+				Int("total", len(j.compactedFiles)).
+				Msg("Batch delete failed; files will retry on next compaction cycle")
+			return fmt.Errorf("batch delete failed: %w", err)
+		}
+		j.logger.Info().
+			Int("total", len(j.compactedFiles)).
+			Msg("Completed batch deletion of old files")
+		return nil
+	}
+
+	// Per-file delete (local storage, or any backend without BatchDeleter).
 	var lastErr error
 	var deleted, failed int
 	for _, fileKey := range j.compactedFiles {

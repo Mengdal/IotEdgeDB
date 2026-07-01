@@ -31,7 +31,7 @@ type FetchClient struct {
 	// refuse to construct a FetchClient without it.
 	SharedSecret string
 	// TLSConfig wraps the outbound dial in TLS when non-nil. Reuses the
-	// cluster TLS config (PR #382) so inter-node traffic is end-to-end
+	// cluster TLS config so inter-node traffic is end-to-end
 	// encrypted under the cluster PKI, independent of the public API cert.
 	TLSConfig *tls.Config
 	// DialTimeout is the maximum time to establish the TCP (+TLS) connection.

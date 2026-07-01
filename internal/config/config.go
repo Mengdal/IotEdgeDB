@@ -60,7 +60,12 @@ type DatabaseConfig struct {
 	MemoryLimit    string
 	ThreadCount    int
 	EnableWAL      bool
-	TimeZone       string // DuckDB timezone (e.g., "Asia/Shanghai", "UTC")
+	// TempDirectory is where DuckDB writes query spill files (HASH_GROUP_BY
+	// overflow, large sorts, joins). Should be on local fast storage. Files
+	// here are NOT durable state; orphans from a crashed previous run are
+	// swept at startup. Empty leaves DuckDB's default behavior (CWD-relative).
+	TempDirectory string
+	TimeZone      string // DuckDB timezone (e.g., "Asia/Shanghai", "UTC")
 }
 
 type StorageConfig struct {
@@ -249,6 +254,8 @@ type TieredStorageConfig struct {
 	// Single threshold: data older than this moves from hot to cold
 	DefaultHotMaxAgeDays int // Data older than this migrates to cold (default: 30)
 
+	// Migration history cleanup
+	MigrationHistoryRetentionDays int // How long to keep migration history (default: 90)
 	// Cold tier configuration (remote S3/Azure storage)
 	Cold ColdTierConfig
 }
@@ -379,6 +386,14 @@ type ClusterConfig struct {
 	ReplicationCatchUpEnabled          bool    // Master switch for the catch-up walker. Emergency off-switch for pathologically large manifests. (default: true)
 	ReplicationCatchUpBarrierTimeoutMs int     // Raft barrier timeout before walking the manifest — ensures the local FSM has applied every committed entry. (default: 10000)
 	ReplicationCatchUpQueueHighWater   float64 // Queue-depth fraction above which the walker pauses enqueueing. Keeps the walker from racing workers on large manifests. (default: 0.8)
+	// Hard query gating during catch-up. When true, the query path
+	// rejects reads with 503 until Coordinator.ReplicationReady() is true
+	// (catch-up walker done AND puller queue empty AND no inflight pulls).
+	// Closes the silent-partial-results window where a reader serves queries
+	// before background replication has caught up. Off by default — operators
+	// who want correctness over availability flip it on. OSS / standalone
+	// deployments are unaffected (no puller → always ready). (default: false)
+	QueryGateOnCatchup bool
 	// Sharding configuration (Phase 4)
 	ShardingEnabled           bool   // Enable sharding for horizontal write scaling (default: false)
 	ShardingNumShards         int    // Number of shards (default: 3)
@@ -396,6 +411,45 @@ type ClusterConfig struct {
 	TLSCertFile  string // Path to TLS certificate file (PEM format)
 	TLSKeyFile   string // Path to TLS private key file (PEM format)
 	TLSCAFile    string // Optional: CA certificate for verifying peer certificates
+	// RBAC cascade-on-delete soft cap (Enterprise, Phase A.2 Item 2).
+	// DeleteOrganization / DeleteTeam in cluster mode pre-check the
+	// descendant count (teams + roles + measurement_permissions +
+	// token_memberships) before proposing the Raft command. If the count
+	// exceeds this cap, the API returns 409 Conflict with a clear
+	// operator-facing error telling them to delete sub-resources first.
+	// Default 50000 sized to fit a comfortable apply duration on IEDB
+	// Enterprise's slowest target hardware; a pathological cascade past
+	// this threshold can block the single-threaded runFSM goroutine long
+	// enough to miss a Raft heartbeat (~5s default) and lose leadership
+	// mid-apply.
+	//
+	// Set to 0 to disable the cap entirely (escape hatch for operators
+	// who know their workload). DeleteRole's cascade is 1-level (only
+	// measurement_permissions) and is not capped.
+	RBACMaxCascadeDescendants int // (default: 50000; 0 = disabled)
+
+	// SharedStorageMode enables Pattern 2 multi-writer deployments —
+	// multiple RoleWriter nodes sharing a single object-storage backend
+	// (S3, Azure Blob, MinIO) behind a load balancer. When true:
+	//   - Writer-failover health-check loop is suppressed (no
+	//     primary/standby distinction; LB does failover via retry).
+	//   - IsPrimaryWriter() returns "is Raft leader" instead of
+	//     singleton-writer semantics, so singleton background tasks
+	//     (retention, CQ, delete, reconciliation) run on whichever
+	//     node currently holds the cluster Raft leadership.
+	//   - WAL replays un-flushed entries on writer restart for crash
+	//     recovery (S3 PUTs are durable; only in-memory buffer is at
+	//     risk on a writer crash).
+	//   - Startup refuses if storage backend is local-filesystem;
+	//     refuses if licenseClient.CanUseSharedStorageMultiWriter()
+	//     is false. Requires FeatureSharedStorageMultiWriter license.
+	//
+	// Default false: today's single-writer-per-cluster behavior. Single
+	// writer pointed at S3 continues to work unchanged with this flag
+	// false (the flag only matters for N>1 writers).
+	//
+	// See docs/progress/2026-05-26-multi-writer-pattern2.md.
+	SharedStorageMode bool
 }
 
 // Load loads configuration from environment and config file
@@ -456,10 +510,15 @@ func Load() (*Config, error) {
 			MemoryLimit:    v.GetString("database.memory_limit"),
 			ThreadCount:    v.GetInt("database.thread_count"),
 			EnableWAL:      v.GetBool("database.enable_wal"),
+			TempDirectory:  v.GetString("database.temp_directory"),
 			TimeZone:       v.GetString("database.timezone"),
 		},
 		Storage: StorageConfig{
-			Backend:     v.GetString("storage.backend"),
+			// Normalize once at load so the backend switch, the DuckDB
+			// primary-S3 signal, and the tiering cold.Backend checks all key off
+			// one canonical value ("s3"/"minio"/"local"); an operator writing
+			// "S3" or " s3 " must not silently behave differently across sites.
+			Backend:     strings.ToLower(strings.TrimSpace(v.GetString("storage.backend"))),
 			LocalPath:   v.GetString("storage.local_path"),
 			S3Bucket:    v.GetString("storage.s3_bucket"),
 			S3Region:    v.GetString("storage.s3_region"),
@@ -632,6 +691,8 @@ func Load() (*Config, error) {
 			ReplicationCatchUpEnabled:          v.GetBool("cluster.replication_catchup_enabled"),
 			ReplicationCatchUpBarrierTimeoutMs: v.GetInt("cluster.replication_catchup_barrier_timeout_ms"),
 			ReplicationCatchUpQueueHighWater:   v.GetFloat64("cluster.replication_catchup_queue_high_water"),
+			// Hard query gating during catch-up
+			QueryGateOnCatchup: v.GetBool("cluster.query_gate_on_catchup"),
 			// Sharding configuration (Phase 4)
 			ShardingEnabled:           v.GetBool("cluster.sharding_enabled"),
 			ShardingNumShards:         v.GetInt("cluster.sharding_num_shards"),
@@ -648,16 +709,24 @@ func Load() (*Config, error) {
 			TLSCertFile:  v.GetString("cluster.tls_cert_file"),
 			TLSKeyFile:   v.GetString("cluster.tls_key_file"),
 			TLSCAFile:    v.GetString("cluster.tls_ca_file"),
+			// RBAC cascade-on-delete soft cap (Phase A.2 Item 2)
+			RBACMaxCascadeDescendants: v.GetInt("cluster.rbac.max_cascade_descendants"),
+
+			// Pattern 2 multi-writer (Phase A PR 1)
+			SharedStorageMode: v.GetBool("cluster.shared_storage_mode"),
 		},
 		TieredStorage: TieredStorageConfig{
-			Enabled:                v.GetBool("tiered_storage.enabled"),
-			MigrationSchedule:      v.GetString("tiered_storage.migration_schedule"),
-			MigrationMaxConcurrent: v.GetInt("tiered_storage.migration_max_concurrent"),
-			MigrationBatchSize:     v.GetInt("tiered_storage.migration_batch_size"),
-			DefaultHotMaxAgeDays:   v.GetInt("tiered_storage.default_hot_max_age_days"),
+			Enabled:                       v.GetBool("tiered_storage.enabled"),
+			MigrationSchedule:             v.GetString("tiered_storage.migration_schedule"),
+			MigrationMaxConcurrent:        v.GetInt("tiered_storage.migration_max_concurrent"),
+			MigrationBatchSize:            v.GetInt("tiered_storage.migration_batch_size"),
+			DefaultHotMaxAgeDays:          v.GetInt("tiered_storage.default_hot_max_age_days"),
+			MigrationHistoryRetentionDays: v.GetInt("tiered_storage.migration_history_retention_days"),
 			Cold: ColdTierConfig{
-				Enabled:                 v.GetBool("tiered_storage.cold.enabled"),
-				Backend:                 v.GetString("tiered_storage.cold.backend"),
+				Enabled: v.GetBool("tiered_storage.cold.enabled"),
+				// Normalized like storage.backend so cold.Backend == "s3"/"azure"
+				// checks key off one canonical value.
+				Backend:                 strings.ToLower(strings.TrimSpace(v.GetString("tiered_storage.cold.backend"))),
 				S3Bucket:                v.GetString("tiered_storage.cold.s3_bucket"),
 				S3Region:                v.GetString("tiered_storage.cold.s3_region"),
 				S3Endpoint:              v.GetString("tiered_storage.cold.s3_endpoint"),
@@ -700,6 +769,97 @@ func Load() (*Config, error) {
 	if cfg.Database.MemoryLimit != "" && !memoryLimitRe.MatchString(cfg.Database.MemoryLimit) {
 		return nil, fmt.Errorf("invalid database.memory_limit value: %q", cfg.Database.MemoryLimit)
 	}
+	// Trim storage identifiers in-place before validating. These build DuckDB
+	// secret SCOPEs and sandbox allowlist URIs (s3://bucket/prefix/,
+	// azure://container/) and feed cloud-client config; stray copy-paste
+	// whitespace would pass an emptiness check but then produce opaque
+	// connection/auth failures downstream. Endpoint/region are trimmed too: the
+	// S3 endpoint is additionally scheme-stripped inside buildS3SecretSQL, but
+	// the value handed to the Go storage client is otherwise raw, so trim here.
+	cfg.Storage.S3Bucket = strings.TrimSpace(cfg.Storage.S3Bucket)
+	cfg.Storage.S3Prefix = strings.TrimSpace(cfg.Storage.S3Prefix)
+	cfg.Storage.S3Region = strings.TrimSpace(cfg.Storage.S3Region)
+	cfg.Storage.S3Endpoint = strings.TrimSpace(cfg.Storage.S3Endpoint)
+	cfg.Storage.AzureConnectionString = strings.TrimSpace(cfg.Storage.AzureConnectionString)
+	cfg.Storage.AzureAccountName = strings.TrimSpace(cfg.Storage.AzureAccountName)
+	cfg.Storage.AzureContainer = strings.TrimSpace(cfg.Storage.AzureContainer)
+	cfg.Storage.AzureEndpoint = strings.TrimSpace(cfg.Storage.AzureEndpoint)
+
+	// Validate the primary storage backend against the supported set and check
+	// its required fields — fail fast at load rather than late in main.go's
+	// backend switch. The supported set must match that switch
+	// (cmd/iedb/main.go): local / s3 / minio / azure / azblob.
+	switch cfg.Storage.Backend {
+	case "local":
+		// No object-storage fields to validate.
+	case "s3", "minio":
+		// An S3-compatible primary backend with no bucket would build an
+		// unscoped DuckDB credential-chain secret AND an empty sandbox s3://
+		// allowlist, so every query read fails with an opaque DuckDB permission
+		// error.
+		if cfg.Storage.S3Bucket == "" {
+			return nil, fmt.Errorf("storage.backend is %q but storage.s3_bucket is empty; set storage.s3_bucket", cfg.Storage.Backend)
+		}
+	case "azure", "azblob":
+		// An empty container yields an empty sandbox allowlist entry and opaque
+		// query-time errors. An empty account name is worse: configureAzureAccess
+		// gates on AzureAccountName != "", so an empty name silently creates NO
+		// primary secret (and buildAzureSecretSQL would reject it anyway).
+		// Account name is required UNLESS a connection string is supplied — the
+		// connection string embeds the account identity, and the Go backend's
+		// first auth case (internal/storage/azure_blob.go) authenticates from it
+		// with AzureAccountName empty. Requiring the name unconditionally would
+		// falsely reject a valid connection-string deployment.
+		if cfg.Storage.AzureConnectionString == "" && cfg.Storage.AzureAccountName == "" {
+			return nil, fmt.Errorf("storage.backend is %q but neither storage.azure_account_name nor storage.azure_connection_string is set; provide one", cfg.Storage.Backend)
+		}
+		if cfg.Storage.AzureContainer == "" {
+			return nil, fmt.Errorf("storage.backend is %q but storage.azure_container is empty; set storage.azure_container", cfg.Storage.Backend)
+		}
+	default:
+		return nil, fmt.Errorf("storage.backend %q is invalid; must be \"local\", \"s3\", \"minio\", \"azure\", or \"azblob\"", cfg.Storage.Backend)
+	}
+
+	// Cold tier (Enterprise tiered storage). Validate its backend and required
+	// fields at startup — same rationale as the primary guards above: a missing
+	// bucket/container surfaces only as an opaque tiering / query-time error
+	// otherwise. The cold runtime switch (cmd/iedb/main.go) handles exactly "s3"
+	// and "azure"; reject anything else loudly. Backend is normalized at load.
+	// cold is a POINTER so the in-place trims persist to the real config struct,
+	// not a copy.
+	//
+	// Gate on TieredStorage.Enabled AND Cold.Enabled to match the runtime: the
+	// cold-tier path at cmd/iedb/main.go is entered only under
+	// `if cfg.TieredStorage.Enabled` (then a license check, then cold.Enabled).
+	// Validating cold config when the parent tier is disabled would reject a
+	// config the runtime ignores entirely — including OSS/unlicensed deploys with
+	// a leftover cold.enabled=true — a false-positive boot failure.
+	if cfg.TieredStorage.Enabled && cfg.TieredStorage.Cold.Enabled {
+		cold := &cfg.TieredStorage.Cold
+		cold.S3Bucket = strings.TrimSpace(cold.S3Bucket)
+		cold.S3Prefix = strings.TrimSpace(cold.S3Prefix)
+		cold.S3Region = strings.TrimSpace(cold.S3Region)
+		cold.S3Endpoint = strings.TrimSpace(cold.S3Endpoint)
+		cold.AzureConnectionString = strings.TrimSpace(cold.AzureConnectionString)
+		cold.AzureAccountName = strings.TrimSpace(cold.AzureAccountName)
+		cold.AzureContainer = strings.TrimSpace(cold.AzureContainer)
+		cold.AzureEndpoint = strings.TrimSpace(cold.AzureEndpoint)
+		switch cold.Backend {
+		case "s3":
+			if cold.S3Bucket == "" {
+				return nil, fmt.Errorf("tiered_storage.cold.enabled is true and backend is \"s3\" but tiered_storage.cold.s3_bucket is empty; set tiered_storage.cold.s3_bucket")
+			}
+		case "azure":
+			if cold.AzureConnectionString == "" && cold.AzureAccountName == "" {
+				return nil, fmt.Errorf("tiered_storage.cold.enabled is true and backend is \"azure\" but neither tiered_storage.cold.azure_account_name nor tiered_storage.cold.azure_connection_string is set; provide one")
+			}
+			if cold.AzureContainer == "" {
+				return nil, fmt.Errorf("tiered_storage.cold.enabled is true and backend is \"azure\" but tiered_storage.cold.azure_container is empty; set tiered_storage.cold.azure_container")
+			}
+		default:
+			return nil, fmt.Errorf("tiered_storage.cold.enabled is true but tiered_storage.cold.backend %q is invalid; must be \"s3\" or \"azure\"", cold.Backend)
+		}
+	}
 	return cfg, nil
 }
 
@@ -723,6 +883,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.memory_limit", getDefaultMemoryLimit())
 	v.SetDefault("database.thread_count", getDefaultThreadCount())
 	v.SetDefault("database.enable_wal", true)
+	v.SetDefault("database.temp_directory", "./.tmp") // DuckDB query spill files (overflow, sort, join). Orphans swept at startup.
 
 	// Storage defaults
 	v.SetDefault("storage.backend", "local")
@@ -900,6 +1061,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cluster.replication_catchup_enabled", true)             // Walk the manifest on startup to reconcile missing files
 	v.SetDefault("cluster.replication_catchup_barrier_timeout_ms", 10000) // 10s Raft barrier before walking
 	v.SetDefault("cluster.replication_catchup_queue_high_water", 0.8)     // Pause walker when queue is >80% full
+	v.SetDefault("cluster.query_gate_on_catchup", false)                  // Off by default; opt-in correctness gate
 
 	// Sharding defaults (Phase 4)
 	v.SetDefault("cluster.sharding_enabled", false)        // Disabled by default
@@ -919,13 +1081,25 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cluster.tls_cert_file", "")
 	v.SetDefault("cluster.tls_key_file", "")
 	v.SetDefault("cluster.tls_ca_file", "")
+	// RBAC cascade-on-delete soft cap (Phase A.2 Item 2).
+	// Default 50000 covers typical mid-enterprise tenants while keeping
+	// the runFSM apply duration well clear of the Raft heartbeat
+	// margin. Set to 0 to disable.
+	v.SetDefault("cluster.rbac.max_cascade_descendants", 50000)
+
+	// Pattern 2 multi-writer (Phase A PR 1). Default false: single-writer
+	// behavior. Flip to true to allow N RoleWriter nodes sharing one
+	// object-storage backend. See ClusterConfig.SharedStorageMode for
+	// the full semantic change.
+	v.SetDefault("cluster.shared_storage_mode", false)
 	// Tiered storage defaults (Enterprise feature)
 	// Simple 2-tier system: Hot (local) -> Cold (S3/Azure archive)
-	v.SetDefault("tiered_storage.enabled", false)                  // Disabled by default
-	v.SetDefault("tiered_storage.migration_schedule", "0 2 * * *") // 2am daily
-	v.SetDefault("tiered_storage.migration_max_concurrent", 4)     // 4 concurrent migrations
-	v.SetDefault("tiered_storage.migration_batch_size", 100)       // 100 files per batch
-	v.SetDefault("tiered_storage.default_hot_max_age_days", 30)    // 30 days in hot tier before archiving
+	v.SetDefault("tiered_storage.enabled", false)                       // Disabled by default
+	v.SetDefault("tiered_storage.migration_schedule", "0 2 * * *")      // 2am daily
+	v.SetDefault("tiered_storage.migration_max_concurrent", 4)          // 4 concurrent migrations
+	v.SetDefault("tiered_storage.migration_batch_size", 100)            // 100 files per batch
+	v.SetDefault("tiered_storage.default_hot_max_age_days", 30)         // 30 days in hot tier before archiving
+	v.SetDefault("tiered_storage.migration_history_retention_days", 90) // 90 days migration history
 
 	// Cold tier defaults (S3/Azure archive storage)
 	v.SetDefault("tiered_storage.cold.enabled", false)              // Disabled by default

@@ -92,9 +92,27 @@ func (m MessageType) String() string {
 }
 
 // ReplicateSync is sent by a reader node to request WAL replication.
+//
+// The five auth fields (Nonce / Timestamp / HMAC / ClusterName / and
+// the existing ReaderID acting as senderID) carry the application-layer
+// HMAC over the handshake. Computed by security.ComputeReplicateSyncHMAC
+// at the reader, validated by security.ValidateReplicateSyncHMAC at
+// the writer before the connection is accepted. See GHSA-wfgr-8x84-22q7
+// / CVE-2026-48106.
+//
+// The auth fields are required when cluster.shared_secret is configured;
+// when it's empty the receiver refuses every request (refuse-when-
+// unconfigured posture, same as cache-invalidate).
 type ReplicateSync struct {
 	ReaderID          string `json:"reader_id"`
 	LastKnownSequence uint64 `json:"last_known_seq"`
+	// Application-layer authentication fields (GHSA-wfgr-8x84-22q7).
+	// Validated against cluster.shared_secret by the writer before
+	// the connection is accepted into the replication sender.
+	Nonce       string `json:"nonce,omitempty"`
+	ClusterName string `json:"cluster_name,omitempty"`
+	Timestamp   int64  `json:"timestamp,omitempty"`
+	HMAC        string `json:"hmac,omitempty"`
 }
 
 // ReplicateSyncAck is sent by the writer in response to a sync request.
@@ -157,6 +175,13 @@ type Heartbeat struct {
 	State     string    `json:"state"`
 	IsLeader  bool      `json:"is_leader"`
 	Timestamp time.Time `json:"timestamp"`
+	// Authentication (present when shared_secret configured). A heartbeat
+	// mutates the sender's recorded liveness/state in the registry, so it is
+	// authenticated like join/leave to prevent a network attacker from
+	// spoofing a node's health (GHSA-p378-jp5r-gpgw).
+	AuthNonce     string `json:"auth_nonce,omitempty"`
+	AuthTimestamp int64  `json:"auth_timestamp,omitempty"`
+	AuthHMAC      string `json:"auth_hmac,omitempty"`
 }
 
 // HeartbeatAck acknowledges a heartbeat.

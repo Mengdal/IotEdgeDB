@@ -31,11 +31,14 @@ func setupTestRetentionHandler(t *testing.T) (*RetentionHandler, string) {
 		t.Fatalf("failed to create LocalBackend: %v", err)
 	}
 
-	// Create a DuckDB instance for tests
+	// Create a DuckDB instance for tests. LocalStorageRoot is needed since
+	// the sandbox active in New() restricts file reads/writes to allowlisted
+	// directories — the test fixtures live under tmpDir.
 	duckdb, err := database.New(&database.Config{
-		MemoryLimit:    "256MB",
-		ThreadCount:    2,
-		MaxConnections: 2,
+		MemoryLimit:      "256MB",
+		ThreadCount:      2,
+		MaxConnections:   2,
+		LocalStorageRoot: tmpDir,
 	}, logger)
 	if err != nil {
 		os.RemoveAll(tmpDir)
@@ -90,9 +93,10 @@ func TestBuildParquetPath_S3Backend(t *testing.T) {
 	}
 
 	duckdb, err := database.New(&database.Config{
-		MemoryLimit:    "256MB",
-		ThreadCount:    2,
-		MaxConnections: 2,
+		MemoryLimit:      "256MB",
+		ThreadCount:      2,
+		MaxConnections:   2,
+		LocalStorageRoot: tmpDir,
 	}, logger)
 	if err != nil {
 		t.Fatalf("failed to create DuckDB: %v", err)

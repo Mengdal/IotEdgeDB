@@ -3,7 +3,6 @@ package replication
 import (
 	"context"
 	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -12,11 +11,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Pinned values for sender tests. The exact strings don't matter — they
+// just have to be non-empty so AcceptReader doesn't take the
+// refuse-when-unconfigured path.
+const (
+	testSenderSecret = "test-replication-shared-secret"
+	testSenderNonce  = "00000000000000000000000000000001"
+)
+
 func TestSenderStartStop(t *testing.T) {
 	sender := NewSender(&SenderConfig{
 		BufferSize:   100,
 		WriteTimeout: time.Second,
 		Logger:       zerolog.Nop(),
+		SharedSecret: testSenderSecret,
+		ClusterName:  "test-cluster",
+		LocalNodeID:  "writer-1",
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -36,6 +46,9 @@ func TestSenderAcceptReader(t *testing.T) {
 		BufferSize:   100,
 		WriteTimeout: time.Second,
 		Logger:       zerolog.Nop(),
+		SharedSecret: testSenderSecret,
+		ClusterName:  "test-cluster",
+		LocalNodeID:  "writer-1",
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -50,29 +63,16 @@ func TestSenderAcceptReader(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 
-	// Accept reader in goroutine (it will write sync ack)
-	var acceptErr error
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		acceptErr = sender.AcceptReader(serverConn, "reader-1", 0)
-	}()
+	// AcceptReader no longer writes the sync ack — the coordinator
+	// now owns that wire framing (it sends a protocol-format ack
+	// instead of the replication-format ack). The test just verifies
+	// that AcceptReader returns success and the reader is registered.
+	require.NoError(t, sender.AcceptReader(serverConn, "reader-1", testSenderNonce, 0))
 
-	// Read sync ack from client side
-	clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	msgType, payload, err := ReadMessage(clientConn)
-	require.NoError(t, err)
-	assert.Equal(t, MsgReplicateSyncAck, msgType)
+	currentSeq, canResume := sender.CurrentSequenceAndCanResume(0)
+	assert.Equal(t, uint64(0), currentSeq)
+	assert.True(t, canResume)
 
-	syncAck, err := ParseSyncAck(payload)
-	require.NoError(t, err)
-	assert.True(t, syncAck.CanResume)
-
-	wg.Wait()
-	require.NoError(t, acceptErr)
-
-	// Check reader count
 	assert.Equal(t, 1, sender.ReaderCount())
 }
 
@@ -81,6 +81,9 @@ func TestSenderReplicate(t *testing.T) {
 		BufferSize:   100,
 		WriteTimeout: time.Second,
 		Logger:       zerolog.Nop(),
+		SharedSecret: testSenderSecret,
+		ClusterName:  "test-cluster",
+		LocalNodeID:  "writer-1",
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -95,18 +98,8 @@ func TestSenderReplicate(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 
-	// Accept reader
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sender.AcceptReader(serverConn, "reader-1", 0)
-	}()
-
-	// Read sync ack
-	clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	ReadMessage(clientConn) // Consume sync ack
-	wg.Wait()
+	// Accept reader (no sync ack drain — coordinator owns that now).
+	require.NoError(t, sender.AcceptReader(serverConn, "reader-1", testSenderNonce, 0))
 
 	// Send entry through sender
 	testPayload := []byte(`{"test": "data"}`)
@@ -132,6 +125,9 @@ func TestSenderBroadcastToMultipleReaders(t *testing.T) {
 		BufferSize:   100,
 		WriteTimeout: time.Second,
 		Logger:       zerolog.Nop(),
+		SharedSecret: testSenderSecret,
+		ClusterName:  "test-cluster",
+		LocalNodeID:  "writer-1",
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -150,24 +146,24 @@ func TestSenderBroadcastToMultipleReaders(t *testing.T) {
 	defer serverConn2.Close()
 	defer clientConn2.Close()
 
-	// Accept readers sequentially to avoid deadlock on mutex
-	// First reader
-	go func() {
-		sender.AcceptReader(serverConn1, "reader-1", 0)
-	}()
-	clientConn1.SetReadDeadline(time.Now().Add(2 * time.Second))
-	ReadMessage(clientConn1) // Consume sync ack
-	time.Sleep(10 * time.Millisecond)
-
-	// Second reader
-	go func() {
-		sender.AcceptReader(serverConn2, "reader-2", 0)
-	}()
-	clientConn2.SetReadDeadline(time.Now().Add(2 * time.Second))
-	ReadMessage(clientConn2) // Consume sync ack
-	time.Sleep(10 * time.Millisecond)
+	// Accept readers sequentially. AcceptReader no longer writes a
+	// sync ack — coordinator owns that — so we just call it directly.
+	require.NoError(t, sender.AcceptReader(serverConn1, "reader-1", testSenderNonce, 0))
+	// Distinct nonce per connection so each derives a distinct
+	// session key (HKDF is deterministic given the same inputs).
+	require.NoError(t, sender.AcceptReader(serverConn2, "reader-2", testSenderNonce+"-2", 0))
 
 	assert.Equal(t, 2, sender.ReaderCount())
+
+	// Set read deadlines BEFORE Replicate so both conns are ready to drain
+	// the broadcast as soon as the writes start. Broadcast iterates readers
+	// in map order (non-deterministic); if we drain serially we head-of-
+	// line-block whichever conn the broadcast picks second, the
+	// distributionLoop's per-reader WriteTimeout (1s) trips, and that
+	// reader gets removed via RemoveReader → conn.Close, leaving the test
+	// to read EOF from the now-closed pipe. Drain both in parallel.
+	clientConn1.SetReadDeadline(time.Now().Add(2 * time.Second))
+	clientConn2.SetReadDeadline(time.Now().Add(2 * time.Second))
 
 	// Send entry
 	testPayload := []byte(`{"test": "broadcast"}`)
@@ -176,20 +172,35 @@ func TestSenderBroadcastToMultipleReaders(t *testing.T) {
 		Payload:     testPayload,
 	})
 
-	// Both readers should receive the entry
-	clientConn1.SetReadDeadline(time.Now().Add(2 * time.Second))
-	clientConn2.SetReadDeadline(time.Now().Add(2 * time.Second))
+	// Read both conns concurrently to avoid head-of-line blocking the
+	// broadcast loop.
+	type readResult struct {
+		msgType byte
+		payload []byte
+		err     error
+	}
+	read := func(conn net.Conn) <-chan readResult {
+		ch := make(chan readResult, 1)
+		go func() {
+			msgType, payload, err := ReadMessage(conn)
+			ch <- readResult{msgType, payload, err}
+		}()
+		return ch
+	}
 
-	msgType1, payload1, err1 := ReadMessage(clientConn1)
-	require.NoError(t, err1)
-	assert.Equal(t, MsgReplicateEntry, msgType1)
-	entry1, _ := ParseEntry(payload1)
+	r1 := read(clientConn1)
+	r2 := read(clientConn2)
+
+	res1 := <-r1
+	require.NoError(t, res1.err)
+	assert.Equal(t, MsgReplicateEntry, res1.msgType)
+	entry1, _ := ParseEntry(res1.payload)
 	assert.Equal(t, testPayload, entry1.Payload)
 
-	msgType2, payload2, err2 := ReadMessage(clientConn2)
-	require.NoError(t, err2)
-	assert.Equal(t, MsgReplicateEntry, msgType2)
-	entry2, _ := ParseEntry(payload2)
+	res2 := <-r2
+	require.NoError(t, res2.err)
+	assert.Equal(t, MsgReplicateEntry, res2.msgType)
+	entry2, _ := ParseEntry(res2.payload)
 	assert.Equal(t, testPayload, entry2.Payload)
 }
 
@@ -198,6 +209,9 @@ func TestSenderStats(t *testing.T) {
 		BufferSize:   100,
 		WriteTimeout: time.Second,
 		Logger:       zerolog.Nop(),
+		SharedSecret: testSenderSecret,
+		ClusterName:  "test-cluster",
+		LocalNodeID:  "writer-1",
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -218,6 +232,9 @@ func TestSenderRemoveReader(t *testing.T) {
 		BufferSize:   100,
 		WriteTimeout: time.Second,
 		Logger:       zerolog.Nop(),
+		SharedSecret: testSenderSecret,
+		ClusterName:  "test-cluster",
+		LocalNodeID:  "writer-1",
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -231,17 +248,7 @@ func TestSenderRemoveReader(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sender.AcceptReader(serverConn, "reader-1", 0)
-	}()
-
-	// Consume sync ack
-	clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	ReadMessage(clientConn)
-	wg.Wait()
+	require.NoError(t, sender.AcceptReader(serverConn, "reader-1", testSenderNonce, 0))
 
 	assert.Equal(t, 1, sender.ReaderCount())
 

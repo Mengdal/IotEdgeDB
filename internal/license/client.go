@@ -15,6 +15,12 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// maxLicenseResponseBytes caps the response-body size we'll read on
+// the activation/verify path. A signed RSA-2048 license_file is
+// ~800 bytes after base64; 1 MiB is generous headroom that still
+// shuts down a hostile proxy attempting to OOM us by streaming an
+// unbounded body.
+const maxLicenseResponseBytes = 1 << 20
 const (
 	// LicenseServerURL is the hardcoded enterprise license server URL
 	LicenseServerURL = "http://113.250.188.137:8080"
@@ -393,6 +399,17 @@ func (c *Client) CanUseQueryManagement() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.license != nil && c.license.CanUseQueryManagement()
+}
+
+// CanUseSharedStorageMultiWriter returns true if Pattern 2 multi-writer
+// (N RoleWriter nodes sharing one object-storage backend) is allowed.
+// Read at process startup before opening the ingest gate; if false +
+// cluster.shared_storage_mode=true, IEDB refuses to start with a clear
+// error pointing operators at the license documentation.
+func (c *Client) CanUseSharedStorageMultiWriter() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.license != nil && c.license.CanUseSharedStorageMultiWriter()
 }
 
 // GetFingerprint returns the machine fingerprint

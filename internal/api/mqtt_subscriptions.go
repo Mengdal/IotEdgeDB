@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog"
 
@@ -24,7 +26,11 @@ func NewMQTTSubscriptionHandler(manager mqtt.Manager, authManager *auth.AuthMana
 	}
 }
 
-// RegisterRoutes registers the MQTT subscription API routes
+// RegisterRoutes registers the MQTT subscription API routes.
+//
+// The requireEnabled middleware is applied to the route group so every current
+// and future endpoint is automatically guarded against a nil manager. This is
+// the project policy for MQTT API surfaces — see also MQTTHandler in mqtt.go.
 func (h *MQTTSubscriptionHandler) RegisterRoutes(app *fiber.App) {
 	subs := app.Group("/api/v1/mqtt/subscriptions")
 
@@ -33,6 +39,10 @@ func (h *MQTTSubscriptionHandler) RegisterRoutes(app *fiber.App) {
 		subs.Use(auth.RequireAdmin(h.authManager))
 	}
 
+	// Short-circuit with 503 when MQTT is disabled at wiring time. Applied as
+	// middleware so future handlers are protected automatically, no per-handler
+	// boilerplate required.
+	subs.Use(h.requireEnabled)
 	// CRUD endpoints
 	subs.Post("/", h.handleCreate)
 	subs.Get("/", h.handleList)
@@ -48,6 +58,21 @@ func (h *MQTTSubscriptionHandler) RegisterRoutes(app *fiber.App) {
 
 	// Stats endpoint
 	subs.Get("/:id/stats", h.handleStats)
+}
+
+// requireEnabled is Fiber middleware that short-circuits the request chain with
+// 503 + "MQTT subsystem disabled" body when the manager is nil. When MQTT is
+// enabled it calls c.Next() so the actual handler runs. Mirrors the
+// MQTTHandler nil-guard policy so all MQTT API endpoints share one consistent
+// disabled-response shape. Regression coverage in mqtt_subscriptions_test.go.
+func (h *MQTTSubscriptionHandler) requireEnabled(c *fiber.Ctx) error {
+	if h.manager == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"success": false,
+			"error":   "MQTT subsystem disabled",
+		})
+	}
+	return c.Next()
 }
 
 // handleCreate creates a new subscription
@@ -69,6 +94,12 @@ func (h *MQTTSubscriptionHandler) handleCreate(c *fiber.Ctx) error {
 	sub, err := h.manager.Create(c.Context(), &req, body.Password)
 	if err != nil {
 		h.logger.Error().Err(err).Str("name", req.Name).Msg("Failed to create subscription")
+		if errors.Is(err, mqtt.ErrSubscriptionUniqueConstraint) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"success": false,
+				"error":   err.Error(),
+			})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
 			"error":   "Failed to create subscription",
@@ -137,7 +168,7 @@ func (h *MQTTSubscriptionHandler) handleUpdate(c *fiber.Ctx) error {
 		h.logger.Error().Err(err).Str("id", id).Msg("Failed to update subscription")
 
 		// Check for specific errors
-		if err.Error() == "cannot update running subscription - stop it first" {
+		if errors.Is(err, mqtt.ErrSubscriptionRunningCantUpdate) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 				"success": false,
 				"error":   err.Error(),
@@ -185,7 +216,7 @@ func (h *MQTTSubscriptionHandler) handleStart(c *fiber.Ctx) error {
 	if err := h.manager.StartSubscription(c.Context(), id); err != nil {
 		h.logger.Error().Err(err).Str("id", id).Msg("Failed to start subscription")
 
-		if err.Error() == "subscription already running" {
+		if errors.Is(err, mqtt.ErrSubscriptionAlreadyRunning) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 				"success": false,
 				"error":   err.Error(),
@@ -213,7 +244,7 @@ func (h *MQTTSubscriptionHandler) handleStop(c *fiber.Ctx) error {
 	if err := h.manager.StopSubscription(c.Context(), id); err != nil {
 		h.logger.Error().Err(err).Str("id", id).Msg("Failed to stop subscription")
 
-		if err.Error() == "subscription not running" {
+		if errors.Is(err, mqtt.ErrSubscriptionNotRunning) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 				"success": false,
 				"error":   err.Error(),
@@ -241,7 +272,7 @@ func (h *MQTTSubscriptionHandler) handlePause(c *fiber.Ctx) error {
 	if err := h.manager.PauseSubscription(c.Context(), id); err != nil {
 		h.logger.Error().Err(err).Str("id", id).Msg("Failed to pause subscription")
 
-		if err.Error() == "subscription not running" {
+		if errors.Is(err, mqtt.ErrSubscriptionNotRunning) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 				"success": false,
 				"error":   err.Error(),
