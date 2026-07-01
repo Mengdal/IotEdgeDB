@@ -20,6 +20,7 @@ import (
 	"iedb/internal/config"
 	"iedb/internal/database"
 	"iedb/internal/storage"
+	"iedb/internal/tiering"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog"
@@ -65,30 +66,45 @@ func fileMetadata(path string) (sizeBytes int64, sha256hex string, err error) {
 	return n, fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-// lastFreeOSMemoryNano is the last time freeOSMemoryThrottled fired, used to debounce GC calls.
-var lastFreeOSMemoryNano atomic.Int64
+// freeOSMemoryProcessStart anchors the throttle to the monotonic clock so wall
+// clock adjustments (NTP steps, manual `date` changes) cannot misbehave.
+var freeOSMemoryProcessStart = time.Now()
+
+// lastFreeOSMemoryNanos is the time freeOSMemoryThrottled last fired, stored
+// as nanoseconds since freeOSMemoryProcessStart (monotonic).
+var lastFreeOSMemoryNanos atomic.Int64
 
 // freeOSMemoryThrottled fires debug.FreeOSMemory in a goroutine at most once every 30 seconds.
 // This prevents GC storms when multiple concurrent delete/retention requests complete together.
 func freeOSMemoryThrottled() {
-	now := time.Now().UnixNano()
-	last := lastFreeOSMemoryNano.Load()
-	if now-last < int64(30*time.Second) {
+	now := time.Since(freeOSMemoryProcessStart).Nanoseconds()
+	last := lastFreeOSMemoryNanos.Load()
+	// last==0 means "never fired" — first call always proceeds.
+	if last != 0 && now-last < int64(30*time.Second) {
 		return
 	}
-	if lastFreeOSMemoryNano.CompareAndSwap(last, now) {
+	if lastFreeOSMemoryNanos.CompareAndSwap(last, now) {
 		go debug.FreeOSMemory()
 	}
 }
 
 // DeleteHandler handles delete operations using file rewrite strategy
 type DeleteHandler struct {
-	db          *database.DuckDB
-	storage     storage.Backend
-	config      *config.DeleteConfig
-	authManager *auth.AuthManager
-	coordinator DeleteCoordinator // nil in standalone mode
-	logger      zerolog.Logger
+	db             *database.DuckDB
+	storage        storage.Backend
+	config         *config.DeleteConfig
+	authManager    *auth.AuthManager
+	coordinator    DeleteCoordinator // nil in standalone mode
+	tieringManager *tiering.Manager   // nil when tiering is disabled or unlicensed
+	// tempDir is the absolute, sandbox-allowlisted directory used by
+	// rewriteS3File to stage the COPY-rewritten parquet locally before
+	// uploading. MUST match one of the prefixes added to DuckDB's
+	// allowed_directories in cmd/iedb/main.go, otherwise the COPY ... TO
+	// fails with a permission error and DELETE on S3 backends silently
+	// breaks. main.go passes the same path as the import handler's upload
+	// dir; the two flows have identical sandbox requirements.
+	tempDir string
+	logger  zerolog.Logger
 }
 
 // DeleteRequest represents a delete operation request
@@ -146,14 +162,23 @@ var dangerousPrefixPatterns = []string{
 	"sp_",
 }
 
-// NewDeleteHandler creates a new delete handler
-func NewDeleteHandler(db *database.DuckDB, storage storage.Backend, cfg *config.DeleteConfig, authManager *auth.AuthManager, logger zerolog.Logger) *DeleteHandler {
+// NewDeleteHandler creates a new delete handler. tempDir MUST be the same
+// path cmd/iedb/main.go added to the DuckDB sandbox's allowed_directories,
+// otherwise the COPY ... TO inside rewriteS3File fails on S3-backed
+// deployments. Logs a Warn on empty tempDir so misconfigured deployments
+// surface the issue at startup rather than at the first DELETE.
+func NewDeleteHandler(db *database.DuckDB, storage storage.Backend, cfg *config.DeleteConfig, authManager *auth.AuthManager, tempDir string, logger zerolog.Logger) *DeleteHandler {
+	componentLogger := logger.With().Str("component", "delete-handler").Logger()
+	if tempDir == "" {
+		componentLogger.Warn().Msg("NewDeleteHandler called with empty tempDir — DELETE on S3 backends will fail under the DuckDB sandbox; cmd/iedb/main.go should pass the sandbox-allowlisted upload directory")
+	}
 	return &DeleteHandler{
 		db:          db,
 		storage:     storage,
 		config:      cfg,
 		authManager: authManager,
-		logger:      logger.With().Str("component", "delete-handler").Logger(),
+		tempDir:     tempDir,
+		logger:      componentLogger,
 	}
 }
 
@@ -161,6 +186,11 @@ func NewDeleteHandler(db *database.DuckDB, storage storage.Backend, cfg *config.
 // gating. Called after construction when cluster mode is enabled.
 func (h *DeleteHandler) SetCoordinator(c DeleteCoordinator) {
 	h.coordinator = c
+}
+
+// SetTieringManager wires the tiering manager for metadata cleanup after deletes.
+func (h *DeleteHandler) SetTieringManager(tm *tiering.Manager) {
+	h.tieringManager = tm
 }
 
 // RegisterRoutes registers delete endpoints
@@ -411,6 +441,29 @@ func (h *DeleteHandler) handleDelete(c *fiber.Ctx) error {
 		Int("failed_files", len(failedFiles)).
 		Float64("execution_time_ms", executionTime).
 		Msg("Delete operation completed")
+
+	// Cleanup: if no files remain for this measurement, clean tiering metadata
+	// and remove empty directories so it disappears from measurement listings.
+	if len(failedFiles) == 0 {
+		remaining, err := h.storage.List(ctx, req.Database+"/"+req.Measurement+"/")
+		if err == nil && len(remaining) == 0 {
+			// Clean tiering metadata
+			if h.tieringManager != nil {
+				if n, metaErr := h.tieringManager.DeleteFilesByMeasurement(ctx, req.Database, req.Measurement); metaErr != nil {
+					h.logger.Warn().Err(metaErr).Str("database", req.Database).
+						Str("measurement", req.Measurement).Msg("Failed to clean tiering metadata")
+				} else if n > 0 {
+					h.logger.Info().Str("database", req.Database).
+						Str("measurement", req.Measurement).Int64("count", n).
+						Msg("Cleaned tiering metadata")
+				}
+			}
+			// Remove empty directory tree
+			if dirRemover, ok := h.storage.(storage.DirectoryRemover); ok {
+				_ = dirRemover.RemoveDirectory(ctx, req.Database+"/"+req.Measurement)
+			}
+		}
+	}
 
 	resp := DeleteResponse{
 		Success:         len(failedFiles) == 0,
@@ -772,15 +825,32 @@ type s3RewriteResult struct {
 // rewriteS3File handles file rewrite for S3 storage
 // DuckDB can read from S3 directly, then we write to a temp file and upload
 func (h *DeleteHandler) rewriteS3File(ctx context.Context, s3Path, relativePath, whereClause string, rowsBefore, rowsAfter int64) (int64, *s3RewriteResult, error) {
+	// Fail-closed when the handler was constructed without a sandbox-
+	// allowlisted tempDir. Without this guard, os.CreateTemp("", ...) would
+	// fall back to os.TempDir() — outside the sandbox — and the subsequent
+	// COPY ... TO would fail with a confusing DuckDB permission error. The
+	// constructor Warn surfaces the misconfiguration at startup; this
+	// fail-fast at request time provides a clearer signal in the response
+	// body for the (rare) case where a constructor warning was missed.
+	if h.tempDir == "" {
+		return 0, nil, fmt.Errorf("delete handler is misconfigured: tempDir is empty; the DELETE-on-S3 staging directory must be allowlisted in the DuckDB sandbox (see cmd/iedb/main.go uploadDir wiring)")
+	}
 	db := h.db.DB()
 	deleted := rowsBefore - rowsAfter
 
-	// Create temp file locally for the rewritten data
-	tempFile, err := os.CreateTemp("", "iedb-delete-*.parquet")
+	// Create temp file locally for the rewritten data. The destination
+	// directory MUST be inside DuckDB's allowed_directories — main.go
+	// passes the same sandbox-allowlisted path as the import-upload dir.
+	tempFile, err := os.CreateTemp(h.tempDir, "iedb-delete-*.parquet")
 	if err != nil {
 		return 0, nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
-	tempPath := tempFile.Name()
+	// ToSlash so Windows backslashes from os.CreateTemp match the
+	// forward-slash sandbox allowlist entry (h.tempDir is already
+	// normalized by main.go). The COPY ... TO statement below
+	// interpolates tempPath verbatim into SQL, so a backslash form
+	// would mismatch allowed_directories and the rewrite would fail.
+	tempPath := filepath.ToSlash(tempFile.Name())
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
@@ -799,8 +869,16 @@ func (h *DeleteHandler) rewriteS3File(ctx context.Context, s3Path, relativePath,
 		return 0, nil, fmt.Errorf("failed to write filtered data: %w", err)
 	}
 
-	// Open temp file, compute SHA256 and size while streaming the upload via
-	// io.TeeReader — single pass over the file instead of two.
+	// Compute SHA256 by full-reading the temp file, then Seek(0,0) and pass
+	// the seekable *os.File to the storage backend. Two reads of the same
+	// file, but the second hits OS page cache so disk is touched once.
+	//
+	// We can't use io.TeeReader here (one pass instead of two): AWS SDK Go v2
+	// requires either TLS or a seekable body to compute the mandatory request
+	// checksum. TeeReader-wrapping an *os.File is non-seekable and breaks
+	// uploads to plain-HTTP S3 (MinIO, Garage) with:
+	//   "compute input header checksum failed, unseekable stream is not
+	//    supported without TLS and trailing checksum"
 	uploadFile, err := os.Open(tempPath)
 	if err != nil {
 		return 0, nil, fmt.Errorf("failed to open temp file for upload: %w", err)
@@ -814,11 +892,18 @@ func (h *DeleteHandler) rewriteS3File(ctx context.Context, s3Path, relativePath,
 	sizeBytes := info.Size()
 
 	h256 := sha256.New()
-	tee := io.TeeReader(uploadFile, h256)
-	if err := h.storage.WriteReader(ctx, relativePath, tee, sizeBytes); err != nil {
-		return 0, nil, fmt.Errorf("failed to upload rewritten file to remote storage: %w", err)
+	if _, err := io.Copy(h256, uploadFile); err != nil {
+		return 0, nil, fmt.Errorf("failed to compute SHA256 of rewritten file: %w", err)
 	}
 	sha256hex := fmt.Sprintf("%x", h256.Sum(nil))
+
+	if _, err := uploadFile.Seek(0, io.SeekStart); err != nil {
+		return 0, nil, fmt.Errorf("failed to rewind rewritten file for upload: %w", err)
+	}
+
+	if err := h.storage.WriteReader(ctx, relativePath, uploadFile, sizeBytes); err != nil {
+		return 0, nil, fmt.Errorf("failed to upload rewritten file to remote storage: %w", err)
+	}
 
 	h.logger.Info().
 		Str("file", filepath.Base(relativePath)).
