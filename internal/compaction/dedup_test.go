@@ -5,8 +5,14 @@ import (
 	"testing"
 )
 
+// buildCompactionSQL joins the statement(s) buildCompactionQuery returns into a
+// single string for the string-assertion unit tests below. The dedup path
+// returns two statements (CREATE TEMP TABLE + COPY); the standard path one.
+func buildCompactionSQL(fileListSQL, orderByClause, outputFile string, tagColumns []string) string {
+	return strings.Join(buildCompactionQuery(fileListSQL, orderByClause, outputFile, tagColumns), "\n;\n")
+}
 func TestBuildCompactionQuery_NoDedup(t *testing.T) {
-	query := buildCompactionQuery("['a.parquet', 'b.parquet']", `ORDER BY "time"`, "/tmp/out.parquet", nil)
+	query := buildCompactionSQL("['a.parquet', 'b.parquet']", `ORDER BY "time"`, "/tmp/out.parquet", nil)
 
 	if strings.Contains(query, "ROW_NUMBER") {
 		t.Error("expected no ROW_NUMBER without dedup keys")
@@ -20,7 +26,7 @@ func TestBuildCompactionQuery_NoDedup(t *testing.T) {
 }
 
 func TestBuildCompactionQuery_WithDedup(t *testing.T) {
-	query := buildCompactionQuery(
+	query := buildCompactionSQL(
 		"['a.parquet', 'b.parquet']",
 		`ORDER BY "time"`,
 		"/tmp/out.parquet",
@@ -30,17 +36,21 @@ func TestBuildCompactionQuery_WithDedup(t *testing.T) {
 	if !strings.Contains(query, "ROW_NUMBER") {
 		t.Error("expected ROW_NUMBER with dedup keys")
 	}
-	if !strings.Contains(query, `PARTITION BY "host", "region"`) {
-		t.Error("expected PARTITION BY with tag columns")
+	if !strings.Contains(query, `PARTITION BY "host", "region", "time"`) {
+		t.Error("expected PARTITION BY with tag columns and time")
 	}
-	if !strings.Contains(query, `CAST("time" AS TIMESTAMP WITH TIME ZONE)`) {
-		t.Error("expected CAST time to TIMESTAMP WITH TIME ZONE")
+	// Dedup uses QUALIFY (not a SELECT *, ROW_NUMBER ... ) WHERE rn=1 subquery):
+	// the subquery/star-expansion form mis-binds time under union_by_name. See
+	// buildCompactionQuery for the full explanation.
+	if !strings.Contains(query, "QUALIFY ROW_NUMBER") {
+		t.Errorf("expected QUALIFY ROW_NUMBER dedup form, got: %s", query)
 	}
-	if !strings.Contains(query, "EXCLUDE (__dedup_rn)") {
-		t.Error("expected EXCLUDE __dedup_rn")
+	if strings.Contains(query, "__dedup_rn") {
+		t.Error("expected no __dedup_rn subquery column (QUALIFY form has no helper column)")
 	}
-	if !strings.Contains(query, "__dedup_rn = 1") {
-		t.Error("expected WHERE __dedup_rn = 1")
+	// time must be normalized to TIMESTAMPTZ so mixed-type partitions reconcile.
+	if !strings.Contains(query, "make_timestamptz") {
+		t.Error("expected time normalized via make_timestamptz")
 	}
 	if !strings.Contains(query, `ORDER BY "time"`) {
 		t.Error("expected outer ORDER BY clause")
@@ -48,7 +58,7 @@ func TestBuildCompactionQuery_WithDedup(t *testing.T) {
 }
 
 func TestBuildCompactionQuery_EmptyDedup(t *testing.T) {
-	query := buildCompactionQuery("['a.parquet']", "", "/tmp/out.parquet", []string{})
+	query := buildCompactionSQL("['a.parquet']", "", "/tmp/out.parquet", []string{})
 
 	if strings.Contains(query, "ROW_NUMBER") {
 		t.Error("expected no ROW_NUMBER with empty dedup keys")
@@ -56,7 +66,7 @@ func TestBuildCompactionQuery_EmptyDedup(t *testing.T) {
 }
 
 func TestBuildCompactionQuery_SpecialCharsInPath(t *testing.T) {
-	query := buildCompactionQuery("['a.parquet']", "", "/tmp/it's out.parquet", []string{"host"})
+	query := buildCompactionSQL("['a.parquet']", "", "/tmp/it's out.parquet", []string{"host"})
 
 	if !strings.Contains(query, "it''s") {
 		t.Error("expected escaped single quote in output path")
@@ -65,7 +75,7 @@ func TestBuildCompactionQuery_SpecialCharsInPath(t *testing.T) {
 
 func TestBuildCompactionQuery_IdentifierEscaping(t *testing.T) {
 	// Defense-in-depth: even if validation is bypassed, identifiers are properly escaped
-	query := buildCompactionQuery("['a.parquet']", "", "/tmp/out.parquet", []string{`host"injection`})
+	query := buildCompactionSQL("['a.parquet']", "", "/tmp/out.parquet", []string{`host"injection`})
 
 	// Double-quote inside identifier should be doubled
 	if !strings.Contains(query, `"host""injection"`) {
@@ -118,6 +128,20 @@ func TestReadTagColumnsValidation(t *testing.T) {
 	for _, tag := range []string{`host" OR 1=1--`, `"; DROP TABLE`, `host,region`} {
 		if isValidIdentifier(tag) {
 			t.Errorf("expected %q to be invalid", tag)
+		}
+	}
+}
+
+// TestBuildCompactionQuery_DedupNonDedupBothNormalizeTime asserts both branches
+// (with and without tag columns) normalize time to TIMESTAMPTZ so a VARCHAR-time
+// file never wedges compaction. String-only (no DuckDB), so it lives here in the
+// untagged test file rather than the duckdb_arrow-gated integration test.
+func TestBuildCompactionQuery_DedupNonDedupBothNormalizeTime(t *testing.T) {
+	withTags := buildCompactionSQL("['a.parquet']", "", "/tmp/o.parquet", []string{"host"})
+	noTags := buildCompactionSQL("['a.parquet']", "", "/tmp/o.parquet", nil)
+	for name, q := range map[string]string{"dedup": withTags, "non-dedup": noTags} {
+		if !strings.Contains(q, "make_timestamptz") || !strings.Contains(q, "TIMESTAMPTZ") {
+			t.Errorf("%s branch does not normalize time to TIMESTAMPTZ:\n%s", name, q)
 		}
 	}
 }

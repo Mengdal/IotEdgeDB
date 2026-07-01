@@ -92,17 +92,35 @@ func isValidIdentifier(name string) bool {
 	return true
 }
 
-// buildCompactionQuery builds the DuckDB COPY query for compaction.
-// When tagColumns is non-empty, adds ROW_NUMBER deduplication (last-write-wins on time).
-// When tagColumns is nil/empty, returns the standard compaction query (zero overhead).
-func buildCompactionQuery(fileListSQL, orderByClause, outputFile string, tagColumns []string) string {
+// dedupStagingTable is the temp table the dedup path materializes into. The
+// caller (job.go) pins both statements to one connection via db.Conn (a DuckDB
+// TEMP table is connection-local) and DROPs it before returning the connection
+// to the pool — the DuckDB driver does not reset sessions, so a leftover temp
+// table would otherwise retain a full partition's rows on a pooled connection.
+// CREATE OR REPLACE additionally guards against any stale table on a reused
+// connection. A fixed name is safe: TEMP tables are per-connection, so even
+// concurrent jobs (distinct pinned connections) do not collide.
+const dedupStagingTable = "iedb_compaction_staged"
+
+// buildCompactionQuery builds the DuckDB statement(s) for compaction. It returns
+// a slice of statements to execute in order on the same connection.
+//
+// When tagColumns is nil/empty, returns a single standard COPY (zero overhead).
+// When tagColumns is non-empty, returns two statements (CREATE OR REPLACE TEMP
+// TABLE ... AS <normalized read> ; COPY <dedup window over the table>) — see the
+// long comment on the dedup branch for why a temp table is required rather than
+// a CTE or subquery.
+func buildCompactionQuery(fileListSQL, orderByClause, outputFile string, tagColumns []string) []string {
 	escapedOutput := escapeSQLPath(outputFile)
 
 	if len(tagColumns) == 0 {
-		// Standard compaction — no dedup overhead
-		return fmt.Sprintf(`
+		// Standard compaction — no dedup overhead.
+		// Normalize "time" to TIMESTAMP so a partition that mixes file schemas
+		// (some time=TIMESTAMP, some time=VARCHAR from a misbehaving writer)
+		// still compacts instead of failing the column bind. See timeNormalizeReplace.
+		return []string{fmt.Sprintf(`
 		COPY (
-			SELECT * FROM read_parquet(%s, union_by_name=true)
+			SELECT * REPLACE (%s) FROM read_parquet(%s, union_by_name=true)
 			%s
 		) TO '%s' (
 			FORMAT PARQUET,
@@ -110,13 +128,45 @@ func buildCompactionQuery(fileListSQL, orderByClause, outputFile string, tagColu
 			COMPRESSION_LEVEL 3,
 			ROW_GROUP_SIZE 122880
 		)
-	`, fileListSQL, orderByClause, escapedOutput)
+	`, timeNormalizeReplace, fileListSQL, orderByClause, escapedOutput)}
 	}
 
-	// Dedup compaction — use ROW_NUMBER to keep one row per unique key.
-	// PARTITION BY all tag columns + time: rows with identical (tags, time) are duplicates.
-	// Among duplicates, one row is kept (choice is arbitrary since all share the same time).
-	// The __dedup_rn column is excluded from the output via EXCLUDE.
+	// Dedup compaction — keep one row per unique (tags, time) key.
+	//
+	// The "time" normalization MUST be fully materialized into a typed relation
+	// BEFORE the dedup window binds. This requires a real temp table, not a CTE
+	// or subquery. Three DuckDB facts, all verified empirically against IEDB's
+	// linked DuckDB on the real 5-column cpu schema (host,time,value,cpu_idle,
+	// cpu_user) — NOT a reduced fixture, which hides the bug:
+	//
+	//  1. A dedup window that references "time" over a many-file
+	//     `read_parquet(union_by_name=true)` fails to bind with
+	//     `Failed to bind column reference "time": TIMESTAMP WITH TIME ZONE !=
+	//     VARCHAR` — EVEN WHEN EVERY FILE'S time IS ALREADY TIMESTAMPTZ and no
+	//     VARCHAR exists anywhere. The "VARCHAR" is a phantom the binder
+	//     introduces while resolving the window's column reference down through
+	//     the union scan. This is what wedged production/cpu on every cycle
+	//     (NOT a leftover mixed-type file — the partition was uniformly
+	//     TIMESTAMPTZ). It only triggers above a column/file-count threshold, so
+	//     the original 3-column test never saw it.
+	//  2. A plain CTE does NOT fix it — DuckDB inlines the CTE (and OFFSET 0,
+	//     contrary to folklore, does not reliably block the inline on the real
+	//     schema; it worked on a reduced fixture and failed on real files).
+	//  3. The flat no-CTE form `SELECT * REPLACE(time...) ... QUALIFY` DOES bind,
+	//     but QUALIFY is evaluated before the projection, so the window runs over
+	//     the RAW time. A duplicate written once as TIMESTAMPTZ and once as a
+	//     VARCHAR epoch then lands in two window partitions and BOTH survive —
+	//     silent under-dedup (verified: 2 rows out instead of 1).
+	//
+	// CREATE OR REPLACE TEMP TABLE AS forces the normalized, typed result to be
+	// fully materialized first; the dedup window then binds against the table's
+	// concrete TIMESTAMPTZ "time" — binds correctly (fact 1) and dedups
+	// correctly (fact 3). Verified: real all-TIMESTAMPTZ partition binds; a
+	// partition with an injected VARCHAR-time duplicate dedups to one row.
+	//
+	// PARTITION BY all tag columns + time: rows with identical (tags, time) are
+	// duplicates; one is kept. This is the dedup key, not the output order — the
+	// output is sorted by the separate orderByClause (time).
 	var quotedTags []string
 	for _, tag := range tagColumns {
 		// Double-quote escaping: DuckDB treats "" inside a quoted identifier as a literal "
@@ -126,21 +176,17 @@ func buildCompactionQuery(fileListSQL, orderByClause, outputFile string, tagColu
 	}
 	partitionBy := strings.Join(quotedTags, ", ")
 
-	// NOTE: CAST("time" AS TIMESTAMP WITH TIME ZONE) is required because DuckDB's
-	// union_by_name=true can create ambiguous column bindings when files have different
-	// column ordering. Without the cast, ROW_NUMBER() may bind "time" as both
-	// TIMESTAMP WITH TIME ZONE and VARCHAR, causing: "Failed to bind column reference:
-	// inequal types". The WITH TIME ZONE variant is used to preserve timezone-aware
-	// semantics, avoiding false dedup across different timezones.
-	return fmt.Sprintf(`
+	stage := fmt.Sprintf(
+		`CREATE OR REPLACE TEMP TABLE %s AS SELECT * REPLACE (%s) FROM read_parquet(%s, union_by_name=true)`,
+		dedupStagingTable, timeNormalizeReplace, fileListSQL)
+
+	copyOut := fmt.Sprintf(`
 		COPY (
-			SELECT * EXCLUDE (__dedup_rn) FROM (
-				SELECT *, ROW_NUMBER() OVER (
-					PARTITION BY %s, CAST("time" AS TIMESTAMP WITH TIME ZONE)
-					ORDER BY CAST("time" AS TIMESTAMP WITH TIME ZONE) DESC
-				) AS __dedup_rn
-				FROM read_parquet(%s, union_by_name=true)
-			) WHERE __dedup_rn = 1
+			SELECT * FROM %s
+			QUALIFY ROW_NUMBER() OVER (
+				PARTITION BY %s, "time"
+				ORDER BY "time" DESC
+			) = 1
 			%s
 		) TO '%s' (
 			FORMAT PARQUET,
@@ -148,8 +194,33 @@ func buildCompactionQuery(fileListSQL, orderByClause, outputFile string, tagColu
 			COMPRESSION_LEVEL 3,
 			ROW_GROUP_SIZE 122880
 		)
-	`, partitionBy, fileListSQL, orderByClause, escapedOutput)
+	`, dedupStagingTable, partitionBy, orderByClause, escapedOutput)
+
+	return []string{stage, copyOut}
 }
+
+// timeNormalizeReplace is the DuckDB `REPLACE (...)` expression that coerces a
+// possibly-mixed-type "time" column to a single canonical type during compaction.
+// A partition can contain files where "time" is a proper timestamp and others
+// where a misbehaving writer wrote it as VARCHAR; read_parquet(union_by_name=true)
+// reconciles column NAMES but not conflicting TYPES, so without this the column
+// bind fails (TIMESTAMP WITH TIME ZONE != VARCHAR) and the partition can never
+// compact.
+//
+// The target type is TIMESTAMPTZ (TIMESTAMP WITH TIME ZONE), NOT naive TIMESTAMP:
+// IEDB's Arrow writer types time as Timestamp_us{TimeZone:"UTC"}, which DuckDB
+// reads/writes as TIMESTAMP WITH TIME ZONE. Normalizing to naive TIMESTAMP would
+// strip the zone and make the compacted file's time type disagree with future
+// raw files (TIMESTAMPTZ) — recreating the very bind mismatch this fixes on the
+// NEXT compaction cycle. Casting to TIMESTAMPTZ keeps compacted output identical
+// to the normal ingest schema.
+//
+// COALESCE order handles every case:
+//   - already TIMESTAMPTZ, or an ISO/datetime string → TRY_CAST(... AS TIMESTAMPTZ)
+//   - epoch-microseconds written as a string ("1717689600000000") →
+//     make_timestamptz(BIGINT micros). IEDB stores time as microseconds, which is
+//     exactly make_timestamptz's unit; it yields a UTC-anchored TIMESTAMPTZ.
+const timeNormalizeReplace = `COALESCE(TRY_CAST("time" AS TIMESTAMPTZ), make_timestamptz(TRY_CAST("time" AS BIGINT))) AS "time"`
 
 // countParquetRows counts total rows across Parquet files using metadata (no data scan).
 // fileListSQL is a DuckDB array literal like "['file1.parquet', 'file2.parquet']".
