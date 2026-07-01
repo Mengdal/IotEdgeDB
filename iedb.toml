@@ -1,0 +1,196 @@
+# =============================================================================
+# iedb Configuration
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Server
+# -----------------------------------------------------------------------------
+[server]
+port = 8000
+
+# TLS/HTTPS (disabled by default)
+tls_enabled = false
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+[log]
+level = "info"      # debug, info, warn, error, fatal, panic
+format = "console"  # json or console
+
+# -----------------------------------------------------------------------------
+# Database (DuckDB)
+# -----------------------------------------------------------------------------
+# Auto-configured based on system resources if not set.
+# Override via: IEDB_DATABASE_MAX_CONNECTIONS, IEDB_DATABASE_MEMORY_LIMIT, IEDB_DATABASE_THREAD_COUNT
+[database]
+# max_connections = 28    # Default: 2x CPU cores
+# memory_limit = "8GB"    # Default: ~50% system memory
+# thread_count = 14       # Default: CPU cores
+# timezone = "UTC"  # Default: current timezone
+enable_wal = true
+
+# -----------------------------------------------------------------------------
+# Storage
+# -----------------------------------------------------------------------------
+[storage]
+backend = "local"           # "local" or "s3"
+local_path = "./data/iedb"
+
+# S3/MinIO (when backend = "s3")
+s3_bucket = "iedb-test"
+s3_region = "us-east-2"
+s3_endpoint = "192.168.0.8:9000"            # Empty for AWS, set for MinIO
+s3_use_ssl = false          # Set true for production
+s3_path_style = true        # True for MinIO, false for AWS
+s3_access_key = "admin"
+s3_secret_key = "password123"
+# Credentials via env: IEDB_STORAGE_S3_ACCESS_KEY, IEDB_STORAGE_S3_SECRET_KEY
+
+# -----------------------------------------------------------------------------
+# Ingestion
+# -----------------------------------------------------------------------------
+[ingest]
+max_buffer_size = 5000000   # Records before flush (default: 50000)
+max_buffer_age_ms = 100   # Max buffer age before flush
+
+# Sort keys for compression/query performance: "measurement:col1,col2"
+# Time column is always appended automatically
+sort_keys = []
+default_sort_keys = ""
+
+# -----------------------------------------------------------------------------
+# Compaction
+# -----------------------------------------------------------------------------
+[compaction]
+enabled = true
+
+# Hourly
+hourly_enabled = true
+hourly_schedule = "5 * * * *"
+hourly_min_age_hours = 1
+hourly_min_files = 10
+
+# Daily
+daily_enabled = true
+daily_schedule = "0 3 * * *"
+daily_min_age_hours = 24
+daily_min_files = 12
+
+# -----------------------------------------------------------------------------
+# Authentication
+# -----------------------------------------------------------------------------
+[auth]
+enabled = false
+
+# -----------------------------------------------------------------------------
+# Delete
+# -----------------------------------------------------------------------------
+[delete]
+enabled = true
+confirmation_threshold = 10000
+max_rows_per_delete = 1000000
+
+# -----------------------------------------------------------------------------
+# Governance
+# -----------------------------------------------------------------------------
+[governance]
+enabled = true
+# -----------------------------------------------------------------------------
+# Retention
+# -----------------------------------------------------------------------------
+[retention]
+enabled = true
+[scheduler]
+retention_schedule = "0 3 * * *"  # 每天凌晨 3 点执行所有活跃策略
+
+# -----------------------------------------------------------------------------
+# Continuous Queries
+# -----------------------------------------------------------------------------
+[continuous_query]
+enabled = true
+
+# -----------------------------------------------------------------------------
+# MQTT
+# -----------------------------------------------------------------------------
+[mqtt]
+enabled = true
+
+# -----------------------------------------------------------------------------
+# Query
+# -----------------------------------------------------------------------------
+[query]
+# Slow query logging threshold in milliseconds (0 = disabled)
+# Queries exceeding this threshold emit a WARN log and increment iedb_slow_queries_total
+# slow_query_threshold_ms = 1000
+
+# S3 file caching (improves CTEs, subqueries, dashboard queries)
+enable_s3_cache = false
+s3_cache_size = "128MB"
+s3_cache_ttl_seconds = 3600
+
+# -----------------------------------------------------------------------------
+# Telemetry
+# -----------------------------------------------------------------------------
+[telemetry]
+enabled = false
+
+# -----------------------------------------------------------------------------
+# Tiered Storage (Enterprise)
+# -----------------------------------------------------------------------------
+# Hot tier (local) -> Cold tier (S3/Azure) based on data age
+[tiered_storage]
+enabled = true
+migration_schedule = "0 2 * * *"
+migration_max_concurrent = 4
+migration_batch_size = 100
+default_hot_max_age_days = 0
+
+[tiered_storage.cold]
+enabled = false
+backend = "s3"              # "s3" or "azure"
+
+# S3/MinIO
+s3_bucket = "iedb-archive"
+s3_region = "us-east-1"
+s3_endpoint = "192.168.0.8:9000"
+s3_access_key = "admin"
+s3_secret_key = "password123"
+s3_use_ssl = false
+s3_path_style = true
+s3_storage_class = "GLACIER"
+
+# Azure (when backend = "azure")
+azure_container = ""
+azure_endpoint = ""
+azure_use_managed_identity = false
+azure_access_tier = "Archive"
+
+retrieval_mode = "standard"  # standard, expedited, bulk
+
+# -----------------------------------------------------------------------------
+# Audit Logging (Enterprise)
+# -----------------------------------------------------------------------------
+[audit_log]
+enabled = true
+retention_days = 90
+include_reads = false           # Log GET/query requests (high volume)
+
+# Backup & Restore
+# -----------------------------------------------------------------------------
+[backup]
+enabled = false
+local_path = "./data/backups"           # Directory for local backups
+
+# Query Management (Enterprise)
+# -----------------------------------------------------------------------------
+[query_management]
+enabled = true
+history_size = 100              # Number of completed queries to keep in memory
+
+[wal]
+enabled = false
+
+[license]
+#enabled = true
+#key = "IEDB-XXX-XXXX-XXXX-XXXX-XXXX"
