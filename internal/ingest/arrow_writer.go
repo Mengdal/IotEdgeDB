@@ -312,7 +312,21 @@ func (w *ArrowWriter) inferSchema(columns map[string]ColumnData, tagColumns []st
 		}
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	// Tag columns MUST sort before field columns — matches the ordering in
+	// database.BuildArrowSchema.  Without this, DuckDB 1.5.1 SIGSEGVs when
+	// the Arrow VIEW is unioned with read_parquet and queried with DISTINCT
+	// or WHERE pushdown.
+	tagSet := make(map[string]bool, len(tagColumns))
+	for _, t := range tagColumns {
+		tagSet[t] = true
+	}
+	sort.Slice(names, func(i, j int) bool {
+		iTag, jTag := tagSet[names[i]], tagSet[names[j]]
+		if iTag != jTag {
+			return iTag
+		}
+		return names[i] < names[j]
+	})
 
 	var fields []arrow.Field
 	for _, name := range names {
@@ -589,11 +603,30 @@ type bufferEntry struct {
 	estimatedBytes uint64                // estimated memory usage
 	schema         string                // column signature for schema evolution
 	arrowSchema    *arrow.Schema         // inferred Arrow schema (nil until first flush preparation)
+
+	// snapshotRefs counts active snapshots (from SnapshotEntry) that have
+	// not yet been consumed by BuildArrowRecordBatch.  A non-zero count
+	// prevents the adaptive flush engine from reclaiming the backing
+	// arrays that the snapshot's ColumnData slices share with the live
+	// buffer.  Once the Arrow build completes, the data has been copied
+	// and the reference is released.
+	snapshotRefs atomic.Int32
 }
 
 // Entry is the exported alias for bufferEntry. External consumers
 // reference this name; internal code uses bufferEntry for consistency.
 type Entry = bufferEntry
+
+// Retain increments the snapshot reference count.  See snapshotRefs.
+func (e *bufferEntry) Retain() { e.snapshotRefs.Add(1) }
+
+// Release decrements the snapshot reference count.  See snapshotRefs.
+func (e *bufferEntry) Release() { e.snapshotRefs.Add(-1) }
+
+// IsReferenced returns true if there are active snapshots that have not
+// been released.  The adaptive flush engine uses this to skip entries
+// whose backing arrays are still reachable from a pending query.
+func (e *bufferEntry) IsReferenced() bool { return e.snapshotRefs.Load() > 0 }
 
 // isEmpty returns true when the entry has no buffered columnar data.
 // Such entries are "empty shells" kept to preserve the cached arrowSchema
@@ -2868,6 +2901,12 @@ func (b *ArrowBuffer) SnapshotEntry(bufferKey string) *Entry {
 		return nil
 	}
 
+	// Retain the original entry so the adaptive flush engine does not
+	// reclaim the backing arrays while the snapshot is alive.  The caller
+	// MUST call entry.Release() after the Arrow RecordBatch has been
+	// built (which copies the data into independent Arrow buffers).
+	entry.Retain()
+
 	// Shallow copy of the columns map — each ColumnData retains its slice header
 	// (Data any, Validity []bool) pointing to the same backing arrays.
 	cols := make(map[string]ColumnData, len(entry.columns))
@@ -3231,6 +3270,14 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 func (b *ArrowBuffer) flushBufferLocked(ctx context.Context, shard *bufferShard, bufferKey, database, measurement, trigger string) error {
 	entry, exists := shard.buffers[bufferKey]
 	if !exists || entry.isEmpty() {
+		return nil
+	}
+
+	// If there are active snapshots referencing this entry's backing
+	// arrays, skip the flush and retry later.  Moving the data out
+	// would invalidate the snapshot and cause a use-after-free in the
+	// Arrow builder (DuckDB SIGSEGV).
+	if entry.IsReferenced() {
 		return nil
 	}
 

@@ -511,6 +511,7 @@ type QueryHandler struct {
 	// The caller MUST hold pendingMu when reading/writing this map.
 	pendingMu    sync.Mutex
 	pendingViews map[string]any // viewName -> *ingest.Entry snapshot
+	pendingCTEs []string
 }
 
 // isDebugEnabled returns true if debug logging is enabled.
@@ -1393,6 +1394,12 @@ localProcessing:
 		c.Locals("pendingViews", pendingViews)
 	}
 
+		// Wrap UNION ALL in CTE to prevent DuckDB WHERE-pushdown SIGSEGV.
+		if len(h.pendingCTEs) > 0 {
+			convertedSQL = "WITH " + strings.Join(h.pendingCTEs, ", ") + " " + convertedSQL
+			h.pendingCTEs = nil
+		}
+
 	if h.debugEnabled {
 		h.logger.Debug().
 			Str("original_sql", req.SQL).
@@ -1924,9 +1931,17 @@ func (h *QueryHandler) getTransformedSQL(sql string, headerDB string) (string, b
 		cacheKey = headerDB + ":" + sql
 	}
 
-	// Check cache
-	if transformed, ok := h.queryCache.Get(cacheKey); ok {
-		return transformed, true
+	// Skip cache if buffer has live data — the cached SQL was generated
+	// without CTE wrapping and would produce the inline UNION ALL BY NAME
+	// pattern that triggers a DuckDB 1.5.1 SIGSEGV on WHERE filters.
+	// Forcing a miss lets wrapWithBufferView regenerate the SQL with CTE.
+	hasBufferData := h.buffer != nil && len(h.buffer.AllBufferKeys()) > 0
+
+	// Check cache (skip if buffer has data — see above)
+	if !hasBufferData {
+		if transformed, ok := h.queryCache.Get(cacheKey); ok {
+			return transformed, true
+		}
 	}
 
 	// Transform using appropriate method
@@ -1937,7 +1952,11 @@ func (h *QueryHandler) getTransformedSQL(sql string, headerDB string) (string, b
 		transformed = h.convertSQLToStoragePaths(sql)
 	}
 
-	h.queryCache.Set(cacheKey, transformed)
+	// Don't cache when buffer has data — the SQL may need CTE wrapping
+	// which changes when buffer content changes (schemas evolve).
+	if !hasBufferData {
+		h.queryCache.Set(cacheKey, transformed)
+	}
 	return transformed, false
 }
 
@@ -2221,6 +2240,23 @@ func (h *QueryHandler) buildReadParquetExpr(path, originalSQL, keyword string) s
 // This method snapshots buffer entries and stores them in h.pendingViews
 // keyed by view name so they can be registered as DuckDB temporary VIEWs
 // on the query connection before execution.
+// emitCTE stores the built UNION ALL body as a CTE definition and returns
+// a table reference to that CTE.  Wrapping in a CTE prevents DuckDB 1.5.1
+// from pushing WHERE filters into Arrow VIEW branches (SIGSEGV crash).
+func (h *QueryHandler) emitCTE(keyword string, body strings.Builder, dbName, measurement string) string {
+	cteName := "_iedb_buf_" + strings.ReplaceAll(dbName+"/"+measurement, "/", "_")
+	// The body starts with " (SELECT ..." but does NOT include the
+	// trailing ") _iedb_buf" (replaced by this call).  Trim the leading
+	// " (" prefix; the CTE format provides the outer parentheses.
+	raw := strings.TrimLeft(body.String()[len(keyword):], " (")
+	// MATERIALIZED prevents DuckDB 1.5.1 from pushing WHERE/DISTINCT
+	// filters into the Arrow VIEW branches, which triggers SIGBUS on
+	// STRING columns that exist only in the buffer (not in Parquet).
+	h.pendingCTEs = append(h.pendingCTEs,
+		fmt.Sprintf("\"%s\" AS MATERIALIZED (%s)", cteName, raw))
+	return fmt.Sprintf("%s \"%s\"", keyword, cteName)
+}
+
 func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement string) string {
 	keys := h.buffer.MeasurementBufferKeys(dbName, measurement)
 	if len(keys) == 0 {
@@ -2256,16 +2292,16 @@ func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement str
 	var b strings.Builder
 	b.WriteString(keyword)
 	if hasParquet {
-		// Single SELECT wrapping: (SELECT * FROM read_parquet(...) UNION ALL SELECT * FROM "view") _iedb_buf
+		// Single SELECT wrapping: (SELECT * FROM read_parquet(...) UNION ALL BY NAME SELECT * FROM "view") _iedb_buf
 		// DuckDB rejects (read_parquet(...)) — table functions cannot be wrapped in bare parentheses.
 		// The alias _iedb_buf is required for DuckDB to accept the UNION ALL as a derived table.
 		b.WriteString(" (SELECT * FROM ")
 		b.WriteString(innerExpr)
 		for _, k := range keys {
-			b.WriteString(" UNION ALL SELECT * FROM ")
+			b.WriteString(" UNION ALL BY NAME SELECT * FROM ")
 			b.WriteString(database.QuoteIdent(database.ViewName(k)))
 		}
-		b.WriteString(") _iedb_buf")
+		return h.emitCTE(keyword, b, dbName, measurement)
 	} else {
 		// No Parquet files — replace the read_parquet(...) entirely with the VIEW.
 		// The keyword is already written (e.g. "FROM"), so we just add " view_name".
@@ -2273,14 +2309,15 @@ func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement str
 		if len(keys) == 1 {
 			b.WriteString(" ")
 			b.WriteString(database.QuoteIdent(database.ViewName(keys[0])))
+			return b.String()
 		} else {
 			b.WriteString(" (SELECT * FROM ")
 			b.WriteString(database.QuoteIdent(database.ViewName(keys[0])))
 			for _, k := range keys[1:] {
-				b.WriteString(" UNION ALL SELECT * FROM ")
+				b.WriteString(" UNION ALL BY NAME SELECT * FROM ")
 				b.WriteString(database.QuoteIdent(database.ViewName(k)))
 			}
-			b.WriteString(") _iedb_buf")
+			return h.emitCTE(keyword, b, dbName, measurement)
 		}
 	}
 	return b.String()

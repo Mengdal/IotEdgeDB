@@ -179,13 +179,23 @@ func BuildArrowSchema(entry *ingest.Entry) *arrow.Schema {
 	if len(fields) == 0 {
 		return nil
 	}
-	// Ensure "time" column is first for consistent ordering.
+	// Tag columns MUST sort before field columns to avoid a DuckDB
+	// 1.5.1 SIGSEGV when the Arrow VIEW is combined with UNION ALL
+	// BY NAME and the outer query uses DISTINCT / WHERE pushdown.
+	tagSet := make(map[string]bool, len(entry.GetTagColumns()))
+	for _, t := range entry.GetTagColumns() {
+		tagSet[t] = true
+	}
 	sort.Slice(fields, func(i, j int) bool {
 		if fields[i].Name == "time" {
 			return true
 		}
 		if fields[j].Name == "time" {
 			return false
+		}
+		iTag, jTag := tagSet[fields[i].Name], tagSet[fields[j].Name]
+		if iTag != jTag {
+			return iTag // tags before non-tags
 		}
 		return fields[i].Name < fields[j].Name
 	})

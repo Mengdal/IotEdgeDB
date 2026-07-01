@@ -142,6 +142,11 @@ func (e *AdaptiveFlushEngine) collectCandidates() []flushCandidate {
 			if entry.isEmpty() {
 				continue
 			}
+			// Skip entries that have active snapshots — their backing
+			// arrays are shared with a pending query's Arrow build.
+			if entry.IsReferenced() {
+				continue
+			}
 			candidates = append(candidates, flushCandidate{
 				shardIdx:       int(i),
 				bufferKey:      key,

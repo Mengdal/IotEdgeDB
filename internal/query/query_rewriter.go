@@ -36,7 +36,7 @@ func (r *QueryRewriter) Rewrite(userSQL, measurementKey, partitionPath string) s
 	buf.WriteString(partitionPath)
 	buf.WriteString("')\n")
 	for _, k := range keys {
-		buf.WriteString("\tUNION ALL\n")
+		buf.WriteString("\tUNION ALL BY NAME\n")
 		buf.WriteString("\tSELECT * FROM ")
 		buf.WriteString(database.QuoteIdent(database.ViewName(k)))
 		buf.WriteByte('\n')

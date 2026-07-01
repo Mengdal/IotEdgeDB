@@ -60,12 +60,17 @@ func registerPendingViews(driverConn any, views map[string]any) (func(), error) 
 
 		rec, err := database.BuildArrowRecordBatch(entry, schema)
 		if err != nil {
+			entry.Release()
 			// Clean up previously registered views on error.
 			for _, r := range releases {
 				r()
 			}
 			return nil, fmt.Errorf("failed to build RecordBatch for view %q: %w", viewName, err)
 		}
+		// The Go-side column data has been copied into Arrow buffers.
+		// Release the snapshot reference so the adaptive flush engine
+		// can safely reclaim the origin buffer entry's backing arrays.
+		entry.Release()
 
 		release, err := database.RegisterBufferView(dc, viewName, rec)
 		if err != nil {
