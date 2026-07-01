@@ -3,10 +3,13 @@ package api
 import (
 	"context"
 	"fmt"
+	"iedb/internal/auth"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -15,7 +18,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/rs/zerolog"
 )
@@ -24,15 +26,33 @@ import (
 type Server struct {
 	app            *fiber.App
 	logger         zerolog.Logger
+	host           string
 	port           int
 	maxPayloadSize int64
 	tlsEnabled     bool
 	tlsCert        string
 	tlsKey         string
+	// ready is the readiness flag surfaced by /ready (Kubernetes
+	// readiness probe; load-balancer health check). Zero = not ready
+	// (returns 503); non-zero = ready (returns 200). Starts at zero so
+	// startup work — most importantly WAL recovery in Pattern 2
+	// shared-storage multi-writer mode (cmd/iedb/main.go:701-724) — can
+	// complete before the load balancer routes traffic to this writer.
+	// MarkReady() is called by main.go once all blocking startup work
+	// is done; MarkNotReady() is called by the graceful-shutdown hook
+	// so the LB drains this node before Stop() actually closes the
+	// listener. See docs/progress/2026-05-26-multi-writer-pattern2.md.
+	ready atomic.Bool
 }
 
 // ServerConfig holds server configuration
 type ServerConfig struct {
+	// Host is the bind address. Empty preserves the historical
+	// dual-stack wildcard (":<port>" on Linux binds both IPv4 and
+	// IPv6 via IPv4-mapped addresses). Set to a specific address
+	// (e.g. "127.0.0.1", "::1", "192.0.2.10") to restrict the bind.
+	// Explicit "0.0.0.0" forces IPv4-only.
+	Host            string
 	Port            int
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
@@ -55,6 +75,30 @@ func DefaultServerConfig() *ServerConfig {
 		ShutdownTimeout: 30 * time.Second,
 		MaxPayloadSize:  1024 * 1024 * 1024, // 1GB default
 	}
+}
+
+// ListenAddr canonicalizes (host, port) into the host:port string
+// callers hand to a listener — Fiber on the HTTP path, the cluster
+// coordinator's advertise/peer logic on the cluster path.
+//
+// Behavior:
+//
+//   - host="" preserves the historical wildcard (":<port>") so existing
+//     deployments keep dual-stack binding on Linux on upgrade.
+//   - net.JoinHostPort adds IPv6 brackets when needed; surrounding
+//     brackets in user input are stripped first so we never produce
+//     an invalid double-bracketed address like "[[::1]]:8000".
+//
+// The canonicalized host is returned alongside the address so callers
+// can use it for logging without re-parsing. Exported so non-api
+// callers (cmd/iedb) format the same address shape this server does
+// — historically this was duplicated with fmt.Sprintf("%s:%d", …)
+// which mis-formatted IPv6 literals.
+func ListenAddr(host string, port int) (string, string) {
+	if len(host) >= 2 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
+	return host, net.JoinHostPort(host, strconv.Itoa(port))
 }
 
 // NewServer creates a new HTTP server with Fiber
@@ -96,8 +140,12 @@ func NewServer(config *ServerConfig, logger zerolog.Logger) *Server {
 	// This prevents double-decompression issues with gzip-compressed MessagePack payloads
 	// Response compression is still available via Accept-Encoding handling
 
-	// pprof profiling endpoints
-	app.Use(pprof.New())
+	// pprof is NOT registered on the public Fiber app. It used to be —
+	// `app.Use(pprof.New())` — but that exposed `/debug/pprof/*` to any
+	// network-reachable caller (auth middleware short-circuited it via
+	// PublicPrefixes). See cmd/iedb/main.go for the opt-in localhost-bound
+	// pprof listener started only when IEDB_DEBUG_PPROF=1.
+	// Closes audit finding #2 from 2026-05-19 (GHSA-j93g-rp6m-j32m).
 
 	// Request logging middleware
 	app.Use(requestLogger(logger))
@@ -105,6 +153,7 @@ func NewServer(config *ServerConfig, logger zerolog.Logger) *Server {
 	return &Server{
 		app:            app,
 		logger:         logger.With().Str("component", "api-server").Logger(),
+		host:           config.Host,
 		port:           config.Port,
 		maxPayloadSize: config.MaxPayloadSize,
 		tlsEnabled:     config.TLSEnabled,
@@ -131,14 +180,28 @@ func (s *Server) RegisterRoutes() {
 	s.app.Get("/api/v1/metrics/endpoints", s.endpointMetricsHandler)
 	s.app.Get("/api/v1/metrics/timeseries/:type", s.timeseriesMetricsHandler)
 
-	// Application logs endpoint
-	s.app.Get("/api/v1/logs", s.logsHandler)
+	// NOTE: /api/v1/logs is intentionally NOT registered here. It exposes
+	// buffered application logs and must be admin-authenticated. Registering
+	// it among these public base routes (before the global auth middleware is
+	// installed) left it reachable unauthenticated, because Fiber matches
+	// routes in registration order and returns before reaching a later
+	// app.Use middleware (GHSA-m3qr-fvp4-78xj). It is now registered via
+	// RegisterLogsRoute() AFTER the auth middleware, from cmd/iedb/main.go.
 
 	// API v1 routes will be added here
 	// MessagePack endpoint will be registered separately
 
 	// Serve frontend static files
 	s.app.Static("/", "./front")
+}
+
+// RegisterLogsRoute registers the admin-authenticated application logs
+// endpoint. It must be called AFTER the global auth middleware is installed so
+// the route sits later in the Fiber stack than the middleware. withAdminAuth
+// returns the admin guard when authManager is non-nil, or a passthrough when it
+// is nil (authentication disabled), preserving no-auth deployment behaviour.
+func (s *Server) RegisterLogsRoute(authManager *auth.AuthManager) {
+	s.app.Get("/api/v1/logs", withAdminAuth(authManager), s.logsHandler)
 }
 
 // healthHandler returns server health status
@@ -152,10 +215,35 @@ func (s *Server) healthHandler(c *fiber.Ctx) error {
 	})
 }
 
-// readyHandler returns server readiness status (for Kubernetes readiness probes)
+// readyHandler returns server readiness status for load-balancer health
+// checks and Kubernetes readiness probes.
+//
+// Returns 200 only when the server has finished startup work that must
+// complete before accepting traffic — most importantly WAL recovery in
+// Pattern 2 shared-storage multi-writer mode, where a writer that just
+// restarted must replay un-flushed WAL entries into its Arrow buffer
+// before re-opening the ingest gate (otherwise the LB would route
+// writes to it and risk duplicate/out-of-order entries on the
+// in-flight recovery boundary).
+//
+// Returns 503 in two cases:
+//
+//  1. Startup not complete: ready flag not yet flipped via MarkReady().
+//     main.go flips it after WAL recovery returns (cmd/iedb/main.go:701).
+//  2. Graceful shutdown in progress: shutdown hook flips the flag back
+//     via MarkNotReady() so the LB drains this node before the listener
+//     closes. The /health endpoint stays 200 throughout — operators
+//     check /health for liveness ("is the process alive") and /ready
+//     for traffic-routing decisions ("should requests go here right
+//     now").
 func (s *Server) readyHandler(c *fiber.Ctx) error {
-	// Server is ready if it's responding to requests
-	// Additional checks can be added here (e.g., database connectivity)
+	if !s.ready.Load() {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"status": "not_ready",
+			"time":   time.Now().UTC().Format(time.RFC3339),
+			"reason": "server is starting up or shutting down; load balancer should not route traffic here",
+		})
+	}
 	uptime := time.Since(startTime).Seconds()
 
 	return c.JSON(fiber.Map{
@@ -163,6 +251,22 @@ func (s *Server) readyHandler(c *fiber.Ctx) error {
 		"time":       time.Now().UTC().Format(time.RFC3339),
 		"uptime_sec": uptime,
 	})
+}
+
+// MarkReady flips the readiness flag to true. Called by main.go once
+// all blocking startup work (notably WAL recovery in Pattern 2
+// shared-storage multi-writer mode) has completed and the server is
+// safe for the load balancer to route traffic to.
+func (s *Server) MarkReady() {
+	s.ready.Store(true)
+}
+
+// MarkNotReady flips the readiness flag to false. Called by the
+// graceful-shutdown hook so the load balancer stops routing new
+// traffic to this node before the HTTP listener closes. In-flight
+// requests still drain via Fiber's normal shutdown handling.
+func (s *Server) MarkNotReady() {
+	s.ready.Store(false)
 }
 
 // metricsHandler returns metrics in Prometheus format or JSON
@@ -362,7 +466,28 @@ func (s *Server) Start() error {
 		protocol = "HTTPS"
 	}
 
+	host, addr := ListenAddr(s.host, s.port)
+
+	// Wildcard variants read differently in logs so an operator
+	// debugging "why can't IPv6 clients connect" can see at a
+	// glance which wildcard is in effect. The "::" case binds
+	// platform-default (dual-stack on modern Linux with
+	// bindv6only=0, v6-only on systems where IPV6_V6ONLY is
+	// set) — don't overclaim the family. Other values are
+	// logged verbatim.
+	var loggedHost string
+	switch host {
+	case "":
+		loggedHost = "* (wildcard, dual-stack)"
+	case "0.0.0.0":
+		loggedHost = "0.0.0.0 (wildcard, IPv4-only)"
+	case "::":
+		loggedHost = ":: (wildcard, platform default)"
+	default:
+		loggedHost = host
+	}
 	s.logger.Info().
+		Str("host", loggedHost).
 		Int("port", s.port).
 		Bool("tls_enabled", s.tlsEnabled).
 		Str("protocol", protocol).
@@ -370,7 +495,6 @@ func (s *Server) Start() error {
 
 	// Start server in goroutine
 	go func() {
-		addr := fmt.Sprintf(":%d", s.port)
 		var err error
 
 		if s.tlsEnabled {

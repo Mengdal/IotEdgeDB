@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -35,11 +36,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// AuthManager interface for getting token info from context
-type AuthManager interface {
-	HasPermission(tokenInfo *auth.TokenInfo, permission string) bool
-}
-
 // RBACChecker interface for RBAC permission checking
 type RBACChecker interface {
 	IsRBACEnabled() bool
@@ -56,7 +52,14 @@ type TableReference struct {
 // Regex patterns for SHOW commands
 var (
 	showDatabasesPattern = regexp.MustCompile(`(?i)^\s*SHOW\s+DATABASES\s*;?\s*$`)
-	showTablesPattern    = regexp.MustCompile(`(?i)^\s*SHOW\s+(?:TABLES|MEASUREMENTS)(?:\s+FROM\s+([\w-]+))?\s*;?\s*$`)
+	// The database name in `SHOW TABLES FROM <db>` may be quoted ("db", 'db', or
+	// `db`). The capture excludes the quotes so the RBAC check and the listing
+	// use the real database name. The surrounding quotes are matched
+	// independently (RE2 has no backreferences) — that is acceptable here: the
+	// goal is to RECOGNIZE the SHOW so it is RBAC-gated, and over-recognizing is
+	// safe; only a SHOW that fails to match would slip past the gate. Not a raw
+	// string literal because the pattern itself contains a backtick.
+	showTablesPattern = regexp.MustCompile("(?i)^\\s*SHOW\\s+(?:TABLES|MEASUREMENTS)(?:\\s+FROM\\s+[\"'`]?([\\w.-]+)[\"'`]?)?\\s*;?\\s*$")
 )
 
 // Pre-compiled regex patterns for SQL-to-storage-path conversion
@@ -110,6 +113,31 @@ var (
 // Returns (rowCount, handled). If handled is false, the caller falls back to database/sql.
 var arrowJSONQueryFunc func(h *QueryHandler, c *fiber.Ctx, ctx context.Context, cancel context.CancelFunc, convertedSQL string, profileMode bool, governanceMaxRows int, start time.Time, timestamp string, onComplete func(int), onFail func(string), onTimeout func()) (int, bool)
 
+// arrowMsgPackQueryFunc is set by query_msgpack.go init() when compiled with duckdb_arrow tag.
+// It executes a query via DuckDB's native Arrow API and streams a MessagePack response.
+// Returns (rowCount, handled). If handled is false, the caller MUST treat the request as
+// unsupported and return 501 — the msgpack endpoint has no database/sql fallback because
+// the Arrow path is the entire reason for its existence.
+var arrowMsgPackQueryFunc func(h *QueryHandler, c *fiber.Ctx, ctx context.Context, cancel context.CancelFunc, convertedSQL string, profileMode bool, governanceMaxRows int, start time.Time, timestamp string, onComplete func(int), onFail func(string), onTimeout func()) (int, bool)
+
+// errClientDisconnected is wrapped into streamErr by the streaming query
+// handlers when bufio.Writer.Write or Flush fails mid-stream — the canonical
+// signal in fasthttp's streaming model that the underlying TCP connection
+// has been closed by the client. Callers use errors.Is to disambiguate
+// client-side disconnect (operational noise, log at Warn) from server-side
+// stream failures (genuine bug, log at Error).
+var errClientDisconnected = errors.New("client disconnected mid-stream")
+
+// isClientError reports whether err originated from the client side — either
+// the connection was closed mid-stream, the request's deadline elapsed, or
+// the request context was cancelled. These are expected operational events
+// and should be logged at Warn, not Error.
+func isClientError(err error) bool {
+	return errors.Is(err, errClientDisconnected) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled)
+}
+
 // isIdentChar returns true if c is a valid unquoted SQL identifier character.
 func isIdentChar(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -120,6 +148,14 @@ func isIdentRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
+// streamErrEvent picks the right zerolog level for a stream-truncation
+// error: Warn for client-side events, Error for server-side failures.
+func (h *QueryHandler) streamErrEvent(err error) *zerolog.Event {
+	if isClientError(err) {
+		return h.logger.Warn()
+	}
+	return h.logger.Error()
+}
 func scanIdentifierEnd(sql string, start int) int {
 	end := start
 	for end < len(sql) {
@@ -139,10 +175,25 @@ func scanIdentifierEnd(sql string, start int) int {
 // This is faster than regex-based detection for simple pattern matching.
 // Used to reject queries that use db.table syntax when x-iedb-database header is set.
 func hasCrossDatabaseSyntax(sql string) bool {
+	// Normalise before scanning, matching checkQueryPermissions /
+	// convertSQLToStoragePaths exactly:
+	//   - mask string literals so a db.table inside a literal isn't scanned;
+	//   - mask FROM inside function bodies so `EXTRACT(EPOCH FROM t.ts)` isn't
+	//     misread as a cross-database `t.ts` reference (false 400 on a legit
+	//     query whose `t` is just a table alias);
+	//   - strip comments so a db.table hidden in a comment can't bypass the scan
+	//     (e.g. `FROM /* x */ otherdb.cpu`).
+	features := scanSQLFeatures(sql)
+	sql, _ = sqlutil.MaskStringLiterals(sql, features.hasQuotes)
+	sql, _ = sqlutil.MaskFromKeywordsInFunctionBodies(sql)
+	sql = stripSQLComments(sql, features.hasDashComment || features.hasBlockComment)
 	sqlLower := strings.ToLower(sql)
 
-	// Check for "FROM identifier.identifier" or "JOIN identifier.identifier" patterns
-	for _, keyword := range []string{"from ", "join "} {
+	// Check for "FROM identifier.identifier" or "JOIN identifier.identifier" patterns.
+	// Search for the bare keyword and verify it's followed by whitespace (not part of
+	// a longer identifier like "fromage"), then scan past any whitespace before
+	// checking for the db.table dot pattern.
+	for _, keyword := range []string{"from", "join"} {
 		pos := 0
 		for {
 			idx := strings.Index(sqlLower[pos:], keyword)
@@ -152,27 +203,93 @@ func hasCrossDatabaseSyntax(sql string) bool {
 			idx += pos + len(keyword)
 			pos = idx
 
-			// Skip whitespace after keyword
-			for idx < len(sql) && (sql[idx] == ' ' || sql[idx] == '\t' || sql[idx] == '\n') {
+			// All indexing below uses sqlLower, since idx is derived from
+			// strings.Index(sqlLower, ...). Indexing the original sql with this
+			// offset would be incorrect (and could panic) when ToLower changes
+			// the byte length on non-ASCII input. The patterns we match (ASCII
+			// whitespace, identifier chars, '.') are unaffected by lowercasing.
+
+			// Verify keyword boundary on both sides: the preceding char must not
+			// be an identifier char (else this is a suffix like "select_from"),
+			// and the next char must be whitespace or end-of-string (else this is
+			// a prefix like "fromage"/"joiner").
+			startOfKeyword := idx - len(keyword)
+			if startOfKeyword > 0 && isIdentChar(sqlLower[startOfKeyword-1]) {
+				continue
+			}
+			if idx < len(sqlLower) && !isWhitespace(sqlLower[idx]) {
+				continue
+			}
+
+			// Skip whitespace after keyword (spaces, tabs, newlines)
+			for idx < len(sqlLower) && isWhitespace(sqlLower[idx]) {
 				idx++
 			}
 
 			// Find first identifier (database name)
 			start := idx
-			for idx < len(sql) && isIdentChar(sql[idx]) {
+			for idx < len(sqlLower) && isIdentChar(sqlLower[idx]) {
 				idx++
 			}
-			if idx == start || idx >= len(sql) {
+			if idx == start || idx >= len(sqlLower) {
 				continue
 			}
 
 			// Check for dot followed by another identifier (table name)
-			if sql[idx] == '.' && idx+1 < len(sql) && isIdentChar(sql[idx+1]) {
+			if sqlLower[idx] == '.' && idx+1 < len(sqlLower) && isIdentChar(sqlLower[idx+1]) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// isWhitespace returns true if b is a whitespace byte.
+func isWhitespace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// isFunctionCallAt reports whether the identifier ending at index `pos` is a
+// function call — i.e. the next non-whitespace byte is '('. SQL permits
+// whitespace between a function name and its opening paren (`generate_series
+// (1, 10)`), so a bare `sql[pos] == '('` check misses the spaced form and
+// would extract the function name as a spurious table reference.
+func isFunctionCallAt(sql string, pos int) bool {
+	for pos < len(sql) && isWhitespace(sql[pos]) {
+		pos++
+	}
+	return pos < len(sql) && sql[pos] == '('
+}
+
+// maskedQuoteForBacktick lets MaskStringLiterals (which only recognises ' and ")
+// also protect backtick-quoted identifiers: we map ` to " before masking so a
+// comment marker, semicolon, or keyword inside a backtick-quoted name does not
+// leak into comment-stripping / statement-splitting / denylist scanning. The
+// content inside is what matters for those scans; the exact quote character is
+// irrelevant downstream (the SHOW regex's capture excludes quotes either way).
+func backticksToDoubleQuotes(sql string) string {
+	if !strings.ContainsRune(sql, '`') {
+		return sql
+	}
+	return strings.ReplaceAll(sql, "`", "\"")
+}
+
+// normalizeSQLForShow prepares SQL for matching against the anchored SHOW
+// patterns. It masks string literals BEFORE stripping comments, then unmasks —
+// so a comment marker inside a quoted identifier (e.g. SHOW TABLES FROM
+// "my--db" or `my--db`) is not mistaken for a real comment and truncated.
+// Stripping comments on raw SQL first would turn that query into
+// `SHOW TABLES FROM "my`, causing the gate to authorise database `my` while
+// DuckDB executes against `my--db` — an RBAC bypass. Backticks are mapped to
+// double quotes first so backtick-quoted names are masked too (MaskStringLiterals
+// only knows ' and "). The captured database name excludes the surrounding
+// quotes, so the quote-character swap does not change the resolved db.
+func normalizeSQLForShow(sql string) string {
+	sql = backticksToDoubleQuotes(sql)
+	features := scanSQLFeatures(sql)
+	masked, masks := sqlutil.MaskStringLiterals(sql, features.hasQuotes)
+	stripped := stripSQLComments(masked, features.hasDashComment || features.hasBlockComment)
+	return strings.TrimSpace(sqlutil.UnmaskStringLiterals(stripped, masks))
 }
 
 // isSingleTableQuery returns true if query has exactly one FROM and no JOINs.
@@ -494,7 +611,7 @@ type QueryHandler struct {
 	pruner             *pruning.PartitionPruner
 	queryCache         *database.QueryCache
 	logger             zerolog.Logger
-	authManager        AuthManager
+	authManager        *auth.AuthManager
 	rbacManager        RBACChecker
 	debugEnabled       bool // Cached check for debug logging to avoid repeated level checks
 	parallelExecutor   *query.ParallelExecutor
@@ -503,6 +620,21 @@ type QueryHandler struct {
 
 	// Cluster routing support
 	router *cluster.Router
+
+	// Cluster catch-up gating. nil/false in OSS / standalone — gate is
+	// a no-op. The interface keeps the gate testable without a real
+	// coordinator stack.
+	coordinator        replicationReadiness
+	queryGateOnCatchup bool
+
+	// gate503LogLastNano rate-limits the "gate fired" Warn to at most one per
+	// second under sustained 503 storms. Without sampling a high-RPS catch-up
+	// would flood operator logs.
+	gate503LogLastNano atomic.Int64
+	// gate503Total counts every gated 503 since startup. Exposed via the
+	// query handler's Stats endpoint and as a Prometheus counter so operators
+	// can alert on a non-zero rate without inferring from HTTP error logs.
+	gate503Total atomic.Int64
 
 	// Tiering support for multi-tier query routing (hot/cold)
 	tieringManager *tiering.Manager
@@ -749,7 +881,6 @@ func NewQueryHandler(db *database.DuckDB, storage storage.Backend, logger zerolo
 		pruner:             pruner,
 		queryCache:         database.NewQueryCache(database.QueryCacheTTL, database.DefaultQueryCacheMaxSize),
 		logger:             handlerLogger,
-		authManager:        nil,
 		rbacManager:        nil,
 		debugEnabled:       handlerLogger.GetLevel() <= zerolog.DebugLevel,
 		parallelExecutor:   query.NewParallelExecutor(db.DB(), query.DefaultParallelConfig(), handlerLogger),
@@ -787,8 +918,11 @@ func getTokenName(c *fiber.Ctx) string {
 	return ""
 }
 
-// SetAuthAndRBAC sets the auth and RBAC managers for permission checking
-func (h *QueryHandler) SetAuthAndRBAC(am AuthManager, rm RBACChecker) {
+// SetAuthAndRBAC sets the auth and RBAC managers for permission checking.
+// Called once at startup before RegisterRoutes (see cmd/iedb/main.go), so a
+// plain pointer assignment is sufficient — there is no concurrent reader.
+// Mirrors MsgPackHandler.SetAuthAndRBAC and the other ingest handlers.
+func (h *QueryHandler) SetAuthAndRBAC(am *auth.AuthManager, rm RBACChecker) {
 	h.authManager = am
 	h.rbacManager = rm
 }
@@ -799,6 +933,105 @@ func (h *QueryHandler) SetAuthAndRBAC(am AuthManager, rm RBACChecker) {
 // This is provided for future extensibility (e.g., prefer_readers mode).
 func (h *QueryHandler) SetRouter(router *cluster.Router) {
 	h.router = router
+}
+
+// replicationReadiness is the subset of cluster.Coordinator the query gate
+// consumes. Defining the interface here (rather than depending on the
+// concrete *cluster.Coordinator) keeps the gate independently testable —
+// query_gate_test.go injects a fake without spinning up a real coordinator.
+// The concrete *cluster.Coordinator satisfies this interface implicitly.
+type replicationReadiness interface {
+	ReplicationReady() bool
+	ReplicationCatchUpStatus() map[string]int64
+}
+
+// SetCluster wires the cluster coordinator and the query-gate-on-catchup
+// behavior flag into the query handler. Consulted by checkReplicationReady
+// to short-circuit queries with 503 while peer file replication is still
+// draining. Both arguments are optional — nil coordinator OR
+// gate=false makes the gate a no-op.
+//
+// Initialization-only: must be called once during process startup before
+// the HTTP server starts accepting requests. Order relative to
+// RegisterRoutes does not matter (Fiber resolves field reads at request
+// time, and request handling does not begin until server.Start). Runtime
+// re-wiring is not supported — the fields are read lock-free per request.
+//
+// The explicit nil branch protects against the typed-nil interface trap:
+// assigning a nil *cluster.Coordinator to an interface field yields a
+// non-nil interface that panics on method call. The current caller in
+// main.go is gated on clusterCoordinator != nil so the branch is dead
+// today, but we keep it so a future caller passing nil literally can't
+// break the gate.
+func (h *QueryHandler) SetCluster(coordinator *cluster.Coordinator, queryGateOnCatchup bool) {
+	if coordinator == nil {
+		h.coordinator = nil
+	} else {
+		h.coordinator = coordinator
+	}
+	h.queryGateOnCatchup = queryGateOnCatchup
+}
+
+// gate503RetryAfterSeconds is the Retry-After header value returned with
+// 503s from the catch-up gate. Conservative; load balancers honor this
+// automatically and well-behaved clients back off before retrying.
+const gate503RetryAfterSeconds = "5"
+
+// gate503LogIntervalNanos rate-limits the "gate fired" Warn to one per
+// second to prevent log floods during sustained catch-up.
+const gate503LogIntervalNanos = int64(time.Second)
+
+// checkReplicationReady is Fiber middleware that short-circuits user-facing
+// read endpoints with 503 when peer file replication is still draining and
+// the operator has opted into the gate via cluster.query_gate_on_catchup.
+//
+// Returns c.Next() (no-op pass-through) when:
+//   - the gate is disabled (queryGateOnCatchup=false), OR
+//   - the coordinator is nil (OSS / standalone), OR
+//   - Coordinator.ReplicationReady() reports the puller is fully drained.
+//
+// Returns 503 with a structured body and Retry-After header otherwise. The
+// body includes the puller's catch-up status so clients can implement
+// bounded retry without scraping logs or polling /api/v1/cluster separately.
+// Each gated 503 increments gate503Total and emits at most one sampled Warn
+// per second so operators can alert on a non-zero rate
+func (h *QueryHandler) checkReplicationReady(c *fiber.Ctx) error {
+	if !h.queryGateOnCatchup || h.coordinator == nil {
+		return c.Next()
+	}
+	if h.coordinator.ReplicationReady() {
+		return c.Next()
+	}
+
+	// Track + log the gate fire.
+	total := h.gate503Total.Add(1)
+	now := time.Now().UnixNano()
+	last := h.gate503LogLastNano.Load()
+	if now-last >= gate503LogIntervalNanos && h.gate503LogLastNano.CompareAndSwap(last, now) {
+		h.logger.Warn().
+			Int64("gate_503_total", total).
+			Str("path", c.Path()).
+			Msg("Query gate fired: peer replication still draining (sampled at 1Hz)")
+	}
+
+	body := fiber.Map{
+		"success": false,
+		"error":   "replication_catch_up_in_progress",
+		"message": "Reader is still catching up on replicated files. Retry shortly or check /api/v1/cluster for catch-up progress.",
+	}
+	if status := h.coordinator.ReplicationCatchUpStatus(); status != nil {
+		body["catchup_status"] = status
+	}
+	c.Set("Retry-After", gate503RetryAfterSeconds)
+	return c.Status(fiber.StatusServiceUnavailable).JSON(body)
+}
+
+// QueryGate503Total returns the total number of times the catch-up gate has
+// fired since process start. Zero when the gate is disabled or has never
+// fired. Exposed for Prometheus / metrics dashboards to alert on a non-zero
+// rate without inferring from HTTP error logs.
+func (h *QueryHandler) QueryGate503Total() int64 {
+	return h.gate503Total.Load()
 }
 
 // SetTieringManager sets the tiering manager for multi-tier query routing.
@@ -826,12 +1059,34 @@ func (h *QueryHandler) InvalidateCaches() {
 	h.logger.Info().Msg("Query caches invalidated after compaction")
 }
 
+// StartBackgroundWorkers spawns the long-lived goroutines the handler
+// needs: today this is the partition pruner cache janitor, which
+// sweeps expired entries from globCache + partitionCache so they don't
+// accumulate over the process lifetime. (Both caches are TTL-only with
+// no max-size cap and no read-side eviction — get() returns "expired"
+// as a miss but leaves the stale entry in the map.)
+//
+// The workers stop when ctx is cancelled. The handler itself remains
+// usable after that, and InvalidateCaches() (called post-compaction)
+// continues to reset both maps, but expired entries are no longer
+// swept on a schedule — they accumulate until the next compaction
+// flushes everything or the process exits. Production callers should
+// pass a context tied to process lifetime via the shutdown coordinator.
+func (h *QueryHandler) StartBackgroundWorkers(ctx context.Context) {
+	h.pruner.StartCleanup(ctx, 0) // 0 → DefaultCleanupInterval
+}
+
 // extractTableReferences extracts all database.measurement references from SQL
 // Returns a slice of TableReference structs for permission checking
 func extractTableReferences(sql string) []TableReference {
 	var refs []TableReference
 	seen := make(map[string]bool)
 
+	// CTE names (WITH t AS (...)) are virtual, not real measurements. The query
+	// transform (convertSQLToStoragePaths) skips them, so the permission check
+	// must too — otherwise a query like `WITH t AS (...) SELECT * FROM t` would
+	// demand a spurious default.t:read grant (false denial).
+	cteNames := extractCTENames(sql)
 	// Extract database.table references (FROM database.table, JOIN database.table)
 	// These take priority - we track their positions to avoid double-counting
 	dbTableMatches := patternDBTable.FindAllStringSubmatch(sql, -1)
@@ -875,11 +1130,24 @@ func extractTableReferences(sql string) []TableReference {
 			if shouldSkipTableConversion(table) {
 				continue
 			}
+			// Skip CTE names — they are virtual, not real measurements.
+			if cteNames[table] {
+				continue
+			}
 
 			// Check if this table name is followed by a dot (meaning it's a database name, not a table)
 			endIdx := matchIdx[3]
 			if endIdx < len(sql) && sql[endIdx] == '.' {
 				// This is actually a database name in "database.table", skip it
+				continue
+			}
+			// Skip table-valued function calls (e.g. generate_series(...),
+			// read_csv(...)) — the name is followed by '(', not a real table.
+			// SQL allows whitespace before the paren (`generate_series  (…)`),
+			// and the query transform treats it as a function regardless, so the
+			// extractor must skip whitespace too to stay in parity (else a false
+			// default.<fn> ref → 403).
+			if isFunctionCallAt(sql, endIdx) {
 				continue
 			}
 
@@ -905,9 +1173,18 @@ func extractTableReferences(sql string) []TableReference {
 				continue
 			}
 
+			// Skip CTE names — they are virtual, not real measurements.
+			if cteNames[table] {
+				continue
+			}
 			// Check if this table name is followed by a dot
 			endIdx := matchIdx[3]
 			if endIdx < len(sql) && sql[endIdx] == '.' {
+				continue
+			}
+			// Skip table-valued function calls (name followed by '(', possibly
+			// after whitespace) — see the simple-table loop above.
+			if isFunctionCallAt(sql, endIdx) {
 				continue
 			}
 
@@ -941,13 +1218,42 @@ func (h *QueryHandler) checkQueryPermissions(c *fiber.Ctx, sql, permission strin
 		return nil
 	}
 
-	// Extract table references from SQL
-	tableRefs := extractTableReferences(sql)
+	// Normalise SQL before extracting table references. This MUST match the
+	// normalisation that convertSQLToStoragePaths applies downstream, or the
+	// permission check and the executed query disagree on which tables are
+	// referenced:
+	//   - mask string literals so keywords inside them don't false-positive;
+	//   - mask FROM inside function bodies (e.g. EXTRACT(YEAR FROM time)) so the
+	//     extractor doesn't treat the field as a default.<field> table ref —
+	//     that would cause a false-positive denial;
+	//   - strip comments so a comment interleaved between FROM/JOIN and the
+	//     table name can't hide a reference (SECURITY: RBAC bypass — the query
+	//     `SELECT * FROM /* x */ secret.cpu` would otherwise yield zero refs
+	//     here yet still execute against secret.cpu after the transform).
+	features := scanSQLFeatures(sql)
+	normalisedSQL, _ := sqlutil.MaskStringLiterals(sql, features.hasQuotes)
+	normalisedSQL, _ = sqlutil.MaskFromKeywordsInFunctionBodies(normalisedSQL)
+	normalisedSQL = stripSQLComments(normalisedSQL, features.hasDashComment || features.hasBlockComment)
+
+	// Extract table references from the normalised SQL
+	tableRefs := extractTableReferences(normalisedSQL)
 	if len(tableRefs) == 0 {
 		// No tables referenced (e.g., SELECT 1+1)
 		return nil
 	}
 
+	// Override "default" database with the x-iedb-database header value when
+	// present. Without this, a user with default.cpu:read can bypass RBAC
+	// and query sensitive_db.cpu by setting x-iedb-database: sensitive_db —
+	// the permission check would use "default" while the query transform
+	// resolves paths against the header-specified database.
+	if headerDB := c.Get("x-iedb-database"); headerDB != "" {
+		for i := range tableRefs {
+			if tableRefs[i].Database == "default" {
+				tableRefs[i].Database = headerDB
+			}
+		}
+	}
 	if h.debugEnabled {
 		h.logger.Debug().
 			Str("sql", sql).
@@ -1041,16 +1347,51 @@ func (h *QueryHandler) checkMeasurementPermission(c *fiber.Ctx, database, measur
 
 // RegisterRoutes registers query endpoints
 func (h *QueryHandler) RegisterRoutes(app *fiber.App) {
-	app.Post("/api/v1/query", h.executeQuery)
-	app.Post("/api/v1/query/estimate", h.estimateQuery)
-	app.Get("/api/v1/measurements", h.listMeasurements)
-	app.Get("/api/v1/query/:measurement", h.queryMeasurement)
+	// User-facing read endpoints get the read-auth + catch-up gate as
+	// route-level middleware. The read-auth middleware enforces that the token
+	// has read-level permission (not just any valid token). The catch-up gate
+	// is a no-op unless cluster.query_gate_on_catchup is true AND the
+	// coordinator reports peer file replication is still drifting.
+	//
+	// withReadAuth resolves to auth.RequireRead(h.authManager), or a no-op
+	// passthrough when auth is disabled (h.authManager == nil). SetAuthAndRBAC
+	// runs before RegisterRoutes (cmd/iedb/main.go), so h.authManager is already
+	// set here — no lazy resolution needed. Same pattern as the ingest handlers'
+	// withWriteAuth (internal/api/auth_middleware.go).
+	readAuth := withReadAuth(h.authManager)
+	app.Post("/api/v1/query", readAuth, h.checkReplicationReady, h.executeQuery)
+	// Experimental: same execution pipeline as /api/v1/query, but the
+	// response is streamed as MessagePack instead of JSON. Gated by the
+	// duckdb_arrow build tag (no database/sql fallback — see the
+	// wire-format dispatch in executeQuery).
+	app.Post("/api/v1/query/msgpack", readAuth, h.checkReplicationReady, h.executeQueryMsgPack)
+	app.Post("/api/v1/query/estimate", readAuth, h.checkReplicationReady, h.estimateQuery)
+	app.Get("/api/v1/measurements", readAuth, h.checkReplicationReady, h.listMeasurements)
+	app.Get("/api/v1/query/:measurement", readAuth, h.checkReplicationReady, h.queryMeasurement)
 	app.Get("/api/v1/databases/:database/measurements/:measurement/schema", h.handleGetMeasurementSchema)
-	h.registerArrowRoutes(app)
+	h.registerArrowRoutes(app, readAuth)
 
-	// Internal endpoint for distributed cache invalidation (enterprise clustering).
-	// Called by compactor/writer nodes after compaction to clear stale caches on readers.
-	app.Post("/api/v1/internal/cache/invalidate", h.handleCacheInvalidate)
+	// The distributed cache-invalidate endpoint
+	// (POST CacheInvalidatePath) is wired separately in cmd/iedb/main.go,
+	// conditionally on cluster.shared_secret being configured. It lives
+	// in its own file (cache_invalidate.go) because its auth model is
+	// HMAC-only, distinct from the user-token auth applied here.
+}
+
+// executeQueryMsgPack handles POST /api/v1/query/msgpack. It is a thin
+// wrapper that sets the "wire_format" request-local to "msgpack" and
+// delegates to executeQuery — every step (auth, RBAC, governance,
+// forwarding, transform, timeout, registry, slow-query logging) is
+// identical to the JSON path. The wire-format selector is consumed at
+// the Arrow dispatch site to route the response stream through the
+// msgpack encoder instead of JSON.
+//
+// Experimental. The endpoint may move or be removed based on benchmark
+// results; clients should not hard-code against it for production
+// traffic yet.
+func (h *QueryHandler) executeQueryMsgPack(c *fiber.Ctx) error {
+	c.Locals(wireFormatLocalsKey, wireFormatMsgPack)
+	return h.executeQuery(c)
 }
 
 // handleGetMeasurementSchema extracts the native Tag and Field schema by reading Parquet metadata
@@ -1152,18 +1493,6 @@ func (h *QueryHandler) handleGetMeasurementSchema(c *fiber.Ctx) error {
 	})
 }
 
-// handleCacheInvalidate handles POST /api/v1/internal/cache/invalidate
-// This is an internal endpoint called by cluster peers after compaction
-// to clear stale glob results and partition metadata from DuckDB caches.
-func (h *QueryHandler) handleCacheInvalidate(c *fiber.Ctx) error {
-	if c.Get("X-iedb-Internal") != "cache-invalidate" {
-		return c.SendStatus(fiber.StatusForbidden)
-	}
-	h.db.ClearHTTPCache()
-	h.InvalidateCaches()
-	return c.SendStatus(fiber.StatusNoContent)
-}
-
 // executeQuery handles POST /api/v1/query - returns JSON response
 func (h *QueryHandler) executeQuery(c *fiber.Ctx) error {
 	start := time.Now()
@@ -1181,11 +1510,7 @@ func (h *QueryHandler) executeQuery(c *fiber.Ctx) error {
 		if err != nil {
 			h.logger.Error().Err(err).Msg("Failed to build HTTP request for forwarding")
 			m.IncQueryErrors()
-			return c.Status(fiber.StatusInternalServerError).JSON(QueryResponse{
-				Success:   false,
-				Error:     "Failed to prepare request for forwarding",
-				Timestamp: timestamp,
-			})
+			return respondError(c, fiber.StatusInternalServerError, "Failed to prepare request for forwarding", timestamp, start)
 		}
 
 		resp, err := h.router.RouteQuery(c.Context(), httpReq)
@@ -1219,11 +1544,7 @@ localProcessing:
 					Str("reason", result.Reason).
 					Int("retry_after_sec", result.RetryAfterSec).
 					Msg("Query rejected: rate limit exceeded")
-				return c.Status(fiber.StatusTooManyRequests).JSON(QueryResponse{
-					Success:   false,
-					Error:     result.Reason,
-					Timestamp: timestamp,
-				})
+				return respondError(c, fiber.StatusTooManyRequests, result.Reason, timestamp, start)
 			}
 			if result := h.governanceManager.CheckQuota(tokenInfo.ID); !result.Allowed {
 				m.IncQueryErrors()
@@ -1233,11 +1554,7 @@ localProcessing:
 					Str("token_name", tokenInfo.Name).
 					Str("reason", result.Reason).
 					Msg("Query rejected: quota exhausted")
-				return c.Status(fiber.StatusTooManyRequests).JSON(QueryResponse{
-					Success:   false,
-					Error:     result.Reason,
-					Timestamp: timestamp,
-				})
+				return respondError(c, fiber.StatusTooManyRequests, result.Reason, timestamp, start)
 			} else {
 				governanceMaxRows = result.MaxRows
 				governanceTimeout = result.MaxDuration
@@ -1249,72 +1566,70 @@ localProcessing:
 	var req QueryRequest
 	if err := c.BodyParser(&req); err != nil {
 		m.IncQueryErrors()
-		return c.Status(fiber.StatusBadRequest).JSON(QueryResponse{
-			Success:   false,
-			Error:     "Invalid request body: " + err.Error(),
-			Timestamp: timestamp,
-		})
+		return respondError(c, fiber.StatusBadRequest, "Invalid request body: "+err.Error(), timestamp, start)
 	}
 
 	// Validate SQL (empty, max length, dangerous patterns)
 	if err := ValidateSQLRequest(req.SQL); err != nil {
 		m.IncQueryErrors()
-		return c.Status(fiber.StatusBadRequest).JSON(QueryResponse{
-			Success:   false,
-			Error:     err.Error(),
-			Timestamp: timestamp,
-		})
+		return respondError(c, fiber.StatusBadRequest, err.Error(), timestamp, start)
 	}
 
 	// Extract x-iedb-database header for optimized query path
 	headerDB := c.Get("x-iedb-database")
 	if err := validateHeaderDatabase(headerDB); err != nil {
 		m.IncQueryErrors()
-		return c.Status(fiber.StatusBadRequest).JSON(QueryResponse{
-			Success:   false,
-			Error:     "invalid x-iedb-database header: " + err.Error(),
-			Timestamp: timestamp,
-		})
+		return respondError(c, fiber.StatusBadRequest, "invalid x-iedb-database header: "+err.Error(), timestamp, start)
 	}
 
 	// If header is set, reject cross-database syntax (db.table not allowed)
 	if headerDB != "" && hasCrossDatabaseSyntax(req.SQL) {
 		m.IncQueryErrors()
-		return c.Status(fiber.StatusBadRequest).JSON(QueryResponse{
-			Success:   false,
-			Error:     "Cross-database queries (db.table syntax) not allowed when x-iedb-database header is set",
-			Timestamp: timestamp,
-		})
+		return respondError(c, fiber.StatusBadRequest, "Cross-database queries (db.table syntax) not allowed when x-iedb-database header is set", timestamp, start)
 	}
+	// Normalise before matching SHOW: strip comments and trim whitespace so a
+	// comment cannot hide a SHOW command from the anchored regex. Without this,
+	// `/* x */ SHOW DATABASES` fails the raw match, falls through to
+	// checkQueryPermissions (zero table refs → allowed), and DuckDB strips the
+	// comment and executes it — returning the database/table list to a caller
+	// the SHOW RBAC gate would have denied. SECURITY: RBAC bypass.
+	showNormalised := normalizeSQLForShow(req.SQL)
 
 	// Handle SHOW DATABASES command
-	if showDatabasesPattern.MatchString(req.SQL) {
+	if showDatabasesPattern.MatchString(showNormalised) {
 		// Check RBAC - user needs at least some read permission to see databases
 		if err := h.checkMeasurementPermission(c, "*", "*", "read"); err != nil {
 			m.IncQueryErrors()
-			return c.Status(fiber.StatusForbidden).JSON(QueryResponse{
-				Success:   false,
-				Error:     "access denied: no read permission to list databases",
-				Timestamp: timestamp,
-			})
+			return respondError(c, fiber.StatusForbidden, "access denied: no read permission to list databases", timestamp, start)
 		}
 		return h.handleShowDatabases(c, start)
 	}
 
 	// Handle SHOW TABLES/MEASUREMENTS command
-	if matches := showTablesPattern.FindStringSubmatch(req.SQL); matches != nil {
+	if matches := showTablesPattern.FindStringSubmatch(showNormalised); matches != nil {
+		// Resolve the target database the same way the command does: explicit
+		// `FROM db` wins, else the x-iedb-database header is the implicit target,
+		// else "default". Checking a different database than the listing targets
+		// would be an RBAC bypass (handleShowTables lists `database` below).
 		database := "default"
 		if len(matches) > 1 && matches[1] != "" {
 			database = matches[1]
+		} else if headerDB != "" {
+			database = headerDB
+		}
+		// Validate the resolved database name before it reaches storage. The
+		// SHOW regex permits a quoted/dotted token, so `SHOW TABLES FROM ..`
+		// would otherwise traverse out of the storage root when RBAC is
+		// disabled (handleShowTables lists `database + "/"`). validateIdentifier
+		// rejects anything but alphanumeric/underscore/hyphen.
+		if err := validateIdentifier(database); err != nil {
+			m.IncQueryErrors()
+			return respondError(c, fiber.StatusBadRequest, "invalid database name: "+err.Error(), timestamp, start)
 		}
 		// Check RBAC - user needs read permission on the specific database
 		if err := h.checkMeasurementPermission(c, database, "*", "read"); err != nil {
 			m.IncQueryErrors()
-			return c.Status(fiber.StatusForbidden).JSON(QueryResponse{
-				Success:   false,
-				Error:     fmt.Sprintf("access denied: no read permission for database '%s'", database),
-				Timestamp: timestamp,
-			})
+			return respondError(c, fiber.StatusForbidden, fmt.Sprintf("access denied: no read permission for database '%s'", database), timestamp, start)
 		}
 		return h.handleShowTables(c, start, database)
 	}
@@ -1322,11 +1637,7 @@ localProcessing:
 	// Check RBAC permissions for all tables referenced in the query
 	if err := h.checkQueryPermissions(c, req.SQL, "read"); err != nil {
 		m.IncQueryErrors()
-		return c.Status(fiber.StatusForbidden).JSON(QueryResponse{
-			Success:   false,
-			Error:     err.Error(),
-			Timestamp: timestamp,
-		})
+		return respondError(c, fiber.StatusForbidden, err.Error(), timestamp, start)
 	}
 
 	// Convert SQL to storage paths and check for parallel execution opportunity
@@ -1376,7 +1687,11 @@ localProcessing:
 	profileMode := c.Get("x-iedb-profile") == "true"
 
 	// Execute query - use parallel path if available
-	if parallelInfo != nil && h.parallelExecutor != nil {
+	// (msgpack endpoint deliberately bypasses the parallel-partition
+	// executor: its response shape and per-partition merging is wired
+	// for JSON streaming. The msgpack experiment routes only through
+	// the standard Arrow dispatch below.)
+	if parallelInfo != nil && h.parallelExecutor != nil && !isMsgPackWire(c) {
 		// Parallel partition execution — use registry context if available
 		execCtx := c.UserContext()
 		if queryCtx != nil {
@@ -1548,7 +1863,14 @@ localProcessing:
 						h.queryRegistry.Fail(queryID, streamErr.Error())
 					}
 				}
-				h.logger.Error().Err(streamErr).
+				// Per-handler client-disconnect counter.
+				if isClientError(streamErr) {
+					m.IncQueryClientDisconnect(metrics.DisconnectPathSQLJSON)
+				}
+				// Warn for client-disconnect / context expiry (headers already
+				// committed, partial result was delivered). Error for genuine
+				// server-side failures (scanner, db iteration).
+				h.streamErrEvent(streamErr).Err(streamErr).
 					Int("rows_sent", rowCount).
 					Float64("execution_time_ms", float64(time.Since(start).Milliseconds())).
 					Msg("Query stream truncated after headers committed; client received partial result")
@@ -1585,7 +1907,33 @@ localProcessing:
 
 		// Arrow-native path: bypasses database/sql row scanning entirely — reads typed
 		// values directly from DuckDB's internal Arrow columnar chunks.
-		if arrowJSONQueryFunc != nil {
+		//
+		// Wire-format selector: the experimental msgpack endpoint
+		// (POST /api/v1/query/msgpack) sets c.Locals("wire_format", "msgpack")
+		// in its wrapper handler so this dispatch can route to the msgpack
+		// streamer instead of JSON. Unknown / missing values default to JSON.
+		// When the msgpack dispatch fails ("handled=false", e.g. driver
+		// doesn't implement Arrow), we return 501 instead of falling back
+		// to database/sql — the entire reason for the msgpack endpoint is
+		// the typed Arrow encode, and a Scan-based fallback would silently
+		// defeat that contract.
+		arrowDispatch := arrowJSONQueryFunc
+		isMsgPack := isMsgPackWire(c)
+		if isMsgPack {
+			arrowDispatch = arrowMsgPackQueryFunc
+		}
+		// When built without -tags=duckdb_arrow, arrowMsgPackQueryFunc
+		// is nil; the JSON path would silently fall through to the
+		// database/sql route, but a msgpack client must NOT receive
+		// JSON. Short-circuit to 501 here so the wire-format contract
+		// is preserved end-to-end.
+		if isMsgPack && arrowDispatch == nil {
+			if cancel != nil {
+				cancel()
+			}
+			return respondError(c, fiber.StatusNotImplemented, "msgpack query path requires the duckdb_arrow build tag", timestamp, start)
+		}
+		if arrowDispatch != nil {
 			var onComplete func(int)
 			var onFail func(string)
 			var onTimeout func()
@@ -1594,12 +1942,20 @@ localProcessing:
 				onFail = func(msg string) { h.queryRegistry.Fail(queryID, msg) }
 				onTimeout = func() { h.queryRegistry.TimedOut(queryID) }
 			}
-			_, handled := arrowJSONQueryFunc(h, c, ctx, cancel, convertedSQL, profileMode, governanceMaxRows, start, timestamp, onComplete, onFail, onTimeout)
+			_, handled := arrowDispatch(h, c, ctx, cancel, convertedSQL, profileMode, governanceMaxRows, start, timestamp, onComplete, onFail, onTimeout)
 			if handled {
 				// Arrow path handled the response — registry callbacks are invoked
-				// inside executeArrowJSONQuery (either directly for errors, or via
-				// the async stream writer callback for success).
+				// inside executeArrowJSONQuery / executeArrowMsgPackQuery (either
+				// directly for errors, or via the async stream writer callback
+				// for success).
 				return nil
+			}
+			if isMsgPack {
+				// No database/sql fallback for the msgpack endpoint — return 501.
+				if cancel != nil {
+					cancel()
+				}
+				return respondError(c, fiber.StatusNotImplemented, "msgpack query path requires the duckdb_arrow build tag", timestamp, start)
 			}
 			// handled=false means Arrow path declined (e.g., driver issue).
 			// Fall through to database/sql path.
@@ -1733,7 +2089,14 @@ localProcessing:
 						h.queryRegistry.Fail(queryID, streamErr.Error())
 					}
 				}
-				h.logger.Error().Err(streamErr).
+				// Per-handler client-disconnect counter.
+				if isClientError(streamErr) {
+					m.IncQueryClientDisconnect(metrics.DisconnectPathSQLJSON)
+				}
+				// Warn for client-disconnect / context expiry (headers already
+				// committed, partial result was delivered). Error for genuine
+				// server-side failures (scanner, db iteration).
+				h.streamErrEvent(streamErr).Err(streamErr).
 					Int("rows_sent", rowCount).
 					Float64("execution_time_ms", float64(time.Since(start).Milliseconds())).
 					Msg("Query stream truncated after headers committed; client received partial result")
@@ -1794,33 +2157,143 @@ func ValidateSQLRequest(sql string) error {
 	// Normalise before denylist check: mask string literals so keywords
 	// inside literals don't false-positive, then strip comments so
 	// keywords interleaved with comments don't slip past token
-	// boundaries (`DROP /* */ TABLE x`).
-	features := scanSQLFeatures(sql)
-	normalised, _ := sqlutil.MaskStringLiterals(sql, features.hasQuotes)
+	// boundaries (`DROP /* */ TABLE x`). Map backticks to double quotes first
+	// so backtick-quoted identifiers are masked too — otherwise a semicolon
+	// inside `a;b` would false-trip the multi-statement check below, and a
+	// keyword inside `select` could be scanned. `normalised` is only ever read
+	// (never reconstructed into executable SQL), so the swap is safe here.
+	maskInput := backticksToDoubleQuotes(sql)
+	features := scanSQLFeatures(maskInput)
+	normalised, _ := sqlutil.MaskStringLiterals(maskInput, features.hasQuotes)
 	normalised = stripSQLComments(normalised, features.hasDashComment || features.hasBlockComment)
 
+	// SECURITY: reject multi-statement queries. A second statement smuggled
+	// behind a semicolon (`SHOW DATABASES; SELECT 1`) bypasses the anchored
+	// SHOW-command regexes (which require the SHOW to be the whole query),
+	// falls through checkQueryPermissions (a SHOW has no FROM/JOIN table refs,
+	// so zero are extracted → allowed), and DuckDB then executes the statement
+	// list. The dangerous-keyword denylist already blocks the destructive
+	// second statements, but rejecting multiple statements outright closes the
+	// SHOW-smuggling class for every endpoint that calls this (query, msgpack,
+	// arrow, estimate) in one place. A single trailing `;` is allowed; any
+	// semicolon before the final non-space character means >1 statement.
+	// Checked on the comment-stripped, literal-masked form so a `;` inside a
+	// string or comment doesn't false-positive.
+	if strings.Contains(strings.TrimRight(normalised, " \t\n\r;"), ";") {
+		return &SQLValidationError{Message: "Multiple SQL statements are not allowed"}
+	}
 	if dangerousSQLPattern.MatchString(normalised) {
 		return &SQLValidationError{Message: "Dangerous SQL operation not allowed"}
 	}
 
-	// SECURITY: reject user SQL that calls read_parquet() directly.
-	// Only IEDB's transformation layer (convertSQLToStoragePaths and
-	// related) emits read_parquet — any occurrence in user input is a
-	// RBAC bypass vector: a user scoped to db1.m1 could read
-	// /data/db2/secrets/**/*.parquet by routing around the table-name
-	// → path mapping that RBAC depends on. See review/query-path-
-	// criticals C3.
-	if userSQLReadParquetPattern.MatchString(normalised) {
-		return &SQLValidationError{Message: "Direct read_parquet() calls are not allowed in user SQL"}
+	// SECURITY: reject the DuckDB filesystem-I/O table-function family in
+	// user SQL.
+	//
+	// Background: an earlier fix (CVE-2026-47735) blocked only the literal
+	// spellings `read_parquet(` and `iedb_partition_agg(`. That missed the
+	// documented alias `parquet_scan(` and the rest of the I/O family
+	// (`glob`, `read_blob`, `read_csv*`, `read_json*`, `read_text`,
+	// `parquet_metadata`, `parquet_schema`, `delta_scan`, `iceberg_scan`,
+	// …). The DuckDB sandbox allowlists the *entire* storage root and IEDB's
+	// RBAC layer (extractTableReferences) skips anything that looks like a
+	// function call, so any of these in user SQL reads across the RBAC
+	// boundary — a user scoped to db1 could read /data/db2/secrets via
+	// `parquet_scan(...)` or enumerate every database via `glob(...)`.
+	// (GHSA-93cm-2v4m-c56c — incomplete fix of CVE-2026-47735.)
+	//
+	// The match is on the function NAME anywhere in the normalised
+	// (literal-masked, comment-stripped) SQL, NOT anchored to a FROM/JOIN
+	// position. Position-anchoring is unsafe: DuckDB supports comma
+	// cross-joins (`FROM cpu, parquet_scan(...)`) and these readers can sit
+	// in subqueries, IN-lists, and lateral joins — none of which the
+	// FROM/JOIN patterns reach. Whole-string name matching catches every
+	// position. Only IEDB's own transformation layer (convertSQLToStoragePaths,
+	// which runs AFTER this validation and carries the caller's identity)
+	// may emit read_parquet; user input never legitimately contains any of
+	// these. A false positive on a string literally containing e.g.
+	// 'read_csv' is avoided because single-quoted string literals are masked
+	// before this runs (see ioDenylistNormalise).
+	//
+	// IMPORTANT: this uses a DIFFERENT normalisation than `normalised` above.
+	// The shared `normalised` masks double-quoted/backtick identifiers, but
+	// DuckDB executes `"parquet_scan"(...)` / `` `read_parquet`(...) ``
+	// identically to the unquoted call — so matching the denylist against
+	// `normalised` lets a quoted spelling slip past (the name is hidden inside
+	// a `__STR__` placeholder). Confirmed live: `SELECT * FROM
+	// "parquet_scan"('…/other-db/…')` executed and returned cross-tenant rows
+	// (GHSA-93cm-2v4m-c56c review round 2). ioDenylistNormalise strips
+	// identifier quoting so quoted function names are exposed to the regex,
+	// while still masking single-quoted string literals.
+	ioCheckNormalised := ioDenylistNormalise(sql)
+	if m := ioTableFunctionPattern.FindStringSubmatch(ioCheckNormalised); m != nil {
+		return &SQLValidationError{Message: "File I/O function not allowed in user SQL: " + m[1] + "()"}
 	}
 	return nil
 }
 
-// userSQLReadParquetPattern matches `read_parquet(` as a function call
-// (case-insensitive, allowing whitespace before the open paren). Only
-// runs against masked/comment-stripped SQL so a literal containing
-// "read_parquet" or a comment is fine.
-var userSQLReadParquetPattern = regexp.MustCompile(`(?i)\bread_parquet\s*\(`)
+// ioDenylistNormalise produces the form of the SQL the I/O-function denylist is
+// matched against. Unlike the general ValidateSQLRequest normalisation, it
+// strips identifier quoting (`"` and backtick) BEFORE masking so that a
+// quoted-identifier function call — `"parquet_scan"(...)`, “ `read_parquet`(...) “,
+// which DuckDB executes identically to the unquoted form — is exposed to the
+// regex rather than hidden inside a masked string. Single-quoted string literals
+// are still masked (so a literal value such as 'read_csv failed' is not matched)
+// and comments are stripped (so a name interleaved with a comment cannot hide).
+//
+// Stripping `"`/backtick can only ever expose an identifier (DuckDB uses `'`
+// for strings and `"`/backtick for identifiers), never the body of a string
+// literal, so this cannot unmask a genuine string. In the pathological case of
+// a `'` inside a `"..."` identifier the subsequent literal-masking may mis-pair
+// quotes, but that errs toward showing MORE text to the denylist (fail-closed),
+// never less.
+func ioDenylistNormalise(sql string) string {
+	stripped := strings.NewReplacer(`"`, "", "`", "").Replace(sql)
+	features := scanSQLFeatures(stripped)
+	masked, _ := sqlutil.MaskStringLiterals(stripped, features.hasQuotes)
+	masked = stripSQLComments(masked, features.hasDashComment || features.hasBlockComment)
+	return masked
+}
+
+// ioTableFunctionPattern matches a call to any DuckDB function that reads from
+// the filesystem (or an attached storage scanner), by name, in any position of
+// the masked/comment-stripped SQL. This is an intentionally comprehensive
+// denylist of the I/O family: each entry takes a path/glob and would let user
+// SQL read across the RBAC boundary inside the sandbox's allowlisted storage
+// root. The trailing `\s*\(` ensures we match the function-call form, not a
+// bare identifier. Anchored matching (`\b`) avoids matching these as a
+// substring of a longer identifier.
+//
+// Maintenance: when DuckDB adds a new path-taking table function (or IEDB loads
+// an extension that exposes one), add it here. TestIOTableFunctionPattern_Family
+// documents the set we verified against the pinned DuckDB release.
+var ioTableFunctionPattern = regexp.MustCompile(`(?i)\b(` + strings.Join([]string{
+	"read_parquet",
+	"parquet_scan",
+	"parquet_metadata",
+	"parquet_schema",
+	"parquet_file_metadata",
+	"parquet_kv_metadata",
+	"parquet_bloom_probe",
+	"read_csv",
+	"read_csv_auto",
+	"sniff_csv",
+	"read_json",
+	"read_json_auto",
+	"read_json_objects",
+	"read_json_objects_auto",
+	"read_ndjson",
+	"read_ndjson_auto",
+	"read_ndjson_objects",
+	"read_text",
+	"read_blob",
+	"read_xlsx",
+	"glob",
+	"delta_scan",
+	"iceberg_scan",
+	"iceberg_metadata",
+	"iceberg_snapshots",
+	"iedb_partition_agg",
+}, "|") + `)\s*\(`)
 
 // getTransformedSQL returns the transformed SQL with caching.
 // If headerDB is non-empty, uses the optimized path with that database for all tables.
@@ -1883,9 +2356,10 @@ func (h *QueryHandler) getTransformedSQLForParallel(sql string, headerDB string)
 		return transformed, nil, cached
 	}
 
-	// Check for features that prevent fast path
+	// Bail to slow path for features the fast path can't handle. EXTRACT/
+	// SUBSTRING/TRIM/OVERLAY need the slow path's FROM-keyword mask.
 	features := scanSQLFeatures(sql)
-	if features.hasQuotes || features.hasDashComment || features.hasBlockComment {
+	if features.hasQuotes || features.hasDashComment || features.hasBlockComment || sqlutil.ContainsFromKeywordFunction(sql) {
 		transformed, cached := h.getTransformedSQL(sql, headerDB)
 		return transformed, nil, cached
 	}
@@ -1927,6 +2401,10 @@ func (h *QueryHandler) convertSQLToStoragePaths(sql string) string {
 	// e.g., WHERE msg = 'SELECT * FROM mydb.cpu' should not convert the string content
 	sql, masks := sqlutil.MaskStringLiterals(sql, features.hasQuotes)
 
+	// Phase 1b: Mask bare FROM inside EXTRACT/SUBSTRING/TRIM/OVERLAY so the
+	// table-rewriter regex below does not treat e.g. `time` in
+	// `EXTRACT(YEAR FROM time)` as a measurement.
+	sql, fromMasks := sqlutil.MaskFromKeywordsInFunctionBodies(sql)
 	// Phase 2: Strip SQL comments (after masking to preserve comments inside strings)
 	// e.g., "-- FROM mydb.cpu" should not be converted
 	sql = stripSQLComments(sql, features.hasDashComment || features.hasBlockComment)
@@ -2023,7 +2501,10 @@ func (h *QueryHandler) convertSQLToStoragePaths(sql string) string {
 		return h.buildReadParquetExpr(path, originalSQL, "JOIN")
 	})
 
-	// Restore original string literals
+	// Restore masked FROM keywords and string literals. Both use content-
+	// addressed placeholders, so the intermediate length-changing regex
+	// rewrites above are safe.
+	sql = sqlutil.UnmaskFromKeywordsInFunctionBodies(sql, fromMasks)
 	sql = sqlutil.UnmaskStringLiterals(sql, masks)
 
 	return sql
@@ -2369,7 +2850,7 @@ func (h *QueryHandler) convertSingleTableQuery(sql, sqlLower, database string) s
 		start++
 	}
 
-	// Find table name end
+	// Find table name end (supports Unicode identifiers)
 	end := scanIdentifierEnd(sql, start)
 
 	if end == start {
@@ -2405,7 +2886,7 @@ func (h *QueryHandler) convertSingleTableQueryForParallel(sql, sqlLower, databas
 		start++
 	}
 
-	// Find table name end
+	// Find table name end (supports Unicode identifiers)
 	end := scanIdentifierEnd(sql, start)
 
 	if end == start {
@@ -2461,9 +2942,11 @@ func (h *QueryHandler) convertSQLToStoragePathsWithHeaderDB(sql string, database
 		sqlLower = strings.ToLower(sql)
 	}
 
-	// FAST PATH: For simple single-table queries without special SQL features,
-	// skip all the regex machinery and use direct string manipulation
-	if isSingleTableQuery(sqlLower) && !strings.Contains(sqlLower, "with ") {
+	// FAST PATH: skip all regex machinery for simple single-table queries.
+	// Bail when the SQL has a bare FROM inside EXTRACT/SUBSTRING/TRIM/OVERLAY
+	// — `SELECT EXTRACT(YEAR FROM CURRENT_DATE)` slips past isSingleTableQuery
+	// with fromCount==1, so the slow path's mask helper must run.
+	if isSingleTableQuery(sqlLower) && !strings.Contains(sqlLower, "with ") && !sqlutil.ContainsFromKeywordFunction(sql) {
 		features := scanSQLFeatures(sql)
 		if !features.hasQuotes && !features.hasDashComment && !features.hasBlockComment {
 			// Also need to rewrite time functions if present
@@ -2483,6 +2966,8 @@ func (h *QueryHandler) convertSQLToStoragePathsWithHeaderDB(sql string, database
 	// Phase 1: Mask string literals to prevent regex from matching inside them
 	sql, masks := sqlutil.MaskStringLiterals(sql, features.hasQuotes)
 
+	// Phase 1b: see convertSQLToStoragePaths.
+	sql, fromMasks := sqlutil.MaskFromKeywordsInFunctionBodies(sql)
 	// Phase 2: Strip SQL comments
 	sql = stripSQLComments(sql, features.hasDashComment || features.hasBlockComment)
 
@@ -2566,7 +3051,8 @@ func (h *QueryHandler) convertSQLToStoragePathsWithHeaderDB(sql string, database
 		return h.buildReadParquetExpr(path, originalSQL, "JOIN")
 	})
 
-	// Restore original string literals
+	// Restore masked FROM keywords and original string literals.
+	sql = sqlutil.UnmaskFromKeywordsInFunctionBodies(sql, fromMasks)
 	sql = sqlutil.UnmaskStringLiterals(sql, masks)
 
 	return sql
@@ -2645,13 +3131,20 @@ func (h *QueryHandler) convertValue(v interface{}) interface{} {
 func (h *QueryHandler) handleShowDatabases(c *fiber.Ctx, start time.Time) error {
 	h.logger.Debug().Msg("Handling SHOW DATABASES")
 
-	// Include tier column if tiering is enabled
+	// Include tier column if tiering is enabled. The types slice is
+	// parallel to columns and feeds the msgpack envelope's "types"
+	// field — SHOW results are schema-known by construction, so we
+	// declare types explicitly rather than infer them from cell
+	// content (which is brittle when leading rows are nil).
 	var columns []string
+	var types []string
 	hasTiering := h.tieringManager != nil
 	if hasTiering {
 		columns = []string{"database", "tier"}
+		types = []string{"utf8", "utf8"}
 	} else {
 		columns = []string{"database"}
+		types = []string{"utf8"}
 	}
 	data := make([][]interface{}, 0)
 
@@ -2675,12 +3168,7 @@ func (h *QueryHandler) handleShowDatabases(c *fiber.Ctx, start time.Time) error 
 
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to list databases")
-		return c.Status(fiber.StatusInternalServerError).JSON(QueryResponse{
-			Success:         false,
-			Error:           "Failed to read storage: " + err.Error(),
-			ExecutionTimeMs: float64(time.Since(start).Milliseconds()),
-			Timestamp:       time.Now().UTC().Format(time.RFC3339),
-		})
+		return respondError(c, fiber.StatusInternalServerError, "Failed to read storage: "+err.Error(), time.Now().UTC().Format(time.RFC3339), start)
 	}
 
 	// Also get databases from tiering metadata (for cold-only databases)
@@ -2745,14 +3233,7 @@ func (h *QueryHandler) handleShowDatabases(c *fiber.Ctx, start time.Time) error 
 		Float64("execution_time_ms", executionTime).
 		Msg("SHOW DATABASES completed")
 
-	return c.JSON(QueryResponse{
-		Success:         true,
-		Columns:         columns,
-		Data:            data,
-		RowCount:        len(data),
-		ExecutionTimeMs: executionTime,
-		Timestamp:       time.Now().UTC().Format(time.RFC3339),
-	})
+	return respondSuccessRows(c, columns, types, data, time.Now().UTC().Format(time.RFC3339), start)
 }
 
 // handleShowTables handles SHOW TABLES/MEASUREMENTS command by scanning storage
@@ -2760,6 +3241,10 @@ func (h *QueryHandler) handleShowTables(c *fiber.Ctx, start time.Time, database 
 	h.logger.Debug().Str("database", database).Msg("Handling SHOW TABLES")
 
 	columns := []string{"database", "table_name", "storage_path", "file_count", "total_size_mb"}
+	// types parallel to columns: SHOW TABLES emits two text columns,
+	// a text path, an int file count, and a float size. Declared
+	// explicitly rather than inferred from row content.
+	types := []string{"utf8", "utf8", "utf8", "int64", "float64"}
 	data := make([][]interface{}, 0)
 
 	ctx := context.Background()
@@ -2783,12 +3268,7 @@ func (h *QueryHandler) handleShowTables(c *fiber.Ctx, start time.Time, database 
 
 	if err != nil {
 		h.logger.Error().Err(err).Str("database", database).Msg("Failed to list tables")
-		return c.Status(fiber.StatusInternalServerError).JSON(QueryResponse{
-			Success:         false,
-			Error:           "Failed to read database: " + err.Error(),
-			ExecutionTimeMs: float64(time.Since(start).Milliseconds()),
-			Timestamp:       time.Now().UTC().Format(time.RFC3339),
-		})
+		return respondError(c, fiber.StatusInternalServerError, "Failed to read database: "+err.Error(), time.Now().UTC().Format(time.RFC3339), start)
 	}
 
 	// Also get tables from tiering metadata (for cold-only tables)
@@ -2857,14 +3337,7 @@ func (h *QueryHandler) handleShowTables(c *fiber.Ctx, start time.Time, database 
 		Float64("execution_time_ms", executionTime).
 		Msg("SHOW TABLES completed")
 
-	return c.JSON(QueryResponse{
-		Success:         true,
-		Columns:         columns,
-		Data:            data,
-		RowCount:        len(data),
-		ExecutionTimeMs: executionTime,
-		Timestamp:       time.Now().UTC().Format(time.RFC3339),
-	})
+	return respondSuccessRows(c, columns, types, data, time.Now().UTC().Format(time.RFC3339), start)
 }
 
 // extractTableNames extracts unique table names from file paths within a database
@@ -2998,6 +3471,95 @@ func (h *QueryHandler) estimateQuery(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(EstimateResponse{
 			Success:      false,
 			Error:        "invalid x-iedb-database header: " + err.Error(),
+			WarningLevel: "error",
+		})
+	}
+
+	// RBAC-gate SHOW commands — mirror executeQuery's permission checks.
+	// SHOW DATABASES / SHOW TABLES extract zero table references, so
+	// checkQueryPermissions (which extracts FROM db.table refs) would pass them
+	// through without a permission check. Reject them here instead; the estimate
+	// endpoint has no legitimate use for metadata commands.
+	//
+	// Normalize the SQL before matching: strip comments and trim whitespace so
+	// that a comment (e.g. /* x */ SHOW DATABASES) cannot hide a SHOW command
+	// from the anchored regex. The same normalization is applied by
+	// checkQueryPermissions below; without it, the comment bypass would let
+	// SHOW reach DuckDB unchecked (the regex would not match the raw string,
+	// checkQueryPermissions would find zero table refs, and DuckDB would strip
+	// the comment and execute the SHOW).
+	normalised := normalizeSQLForShow(req.SQL)
+
+	if showDatabasesPattern.MatchString(normalised) {
+		if err := h.checkMeasurementPermission(c, "*", "*", "read"); err != nil {
+			metrics.Get().IncQueryErrors()
+			return c.Status(fiber.StatusForbidden).JSON(EstimateResponse{
+				Success:      false,
+				Error:        "access denied: no read permission to list databases",
+				WarningLevel: "error",
+			})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(EstimateResponse{
+			Success:      false,
+			Error:        "SHOW DATABASES is not supported on the estimate endpoint; use /api/v1/query instead",
+			WarningLevel: "error",
+		})
+	}
+	if matches := showTablesPattern.FindStringSubmatch(normalised); matches != nil {
+		// Resolve the target database the same way the command itself does:
+		// an explicit `SHOW TABLES FROM db` wins, otherwise the x-iedb-database
+		// header is the implicit target, falling back to "default" only when
+		// neither is set. Checking a different database than the command targets
+		// would either deny a legitimate request or check the wrong scope.
+		database := "default"
+		if len(matches) > 1 && matches[1] != "" {
+			database = matches[1]
+		} else if headerDB != "" {
+			database = headerDB
+		}
+		// Validate the resolved database name (defense-in-depth, matching
+		// executeQuery): the SHOW regex permits a quoted/dotted token, so reject
+		// path-traversal like `SHOW TABLES FROM ..` before any storage access.
+		if err := validateIdentifier(database); err != nil {
+			metrics.Get().IncQueryErrors()
+			return c.Status(fiber.StatusBadRequest).JSON(EstimateResponse{
+				Success:      false,
+				Error:        "invalid database name: " + err.Error(),
+				WarningLevel: "error",
+			})
+		}
+		if err := h.checkMeasurementPermission(c, database, "*", "read"); err != nil {
+			metrics.Get().IncQueryErrors()
+			return c.Status(fiber.StatusForbidden).JSON(EstimateResponse{
+				Success:      false,
+				Error:        fmt.Sprintf("access denied: no read permission for database '%s'", database),
+				WarningLevel: "error",
+			})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(EstimateResponse{
+			Success:      false,
+			Error:        "SHOW TABLES/MEASUREMENTS is not supported on the estimate endpoint; use /api/v1/query instead",
+			WarningLevel: "error",
+		})
+	}
+
+	// If header is set, reject cross-database syntax (db.table not allowed),
+	// matching the validation in executeQuery.
+	if headerDB != "" && hasCrossDatabaseSyntax(req.SQL) {
+		metrics.Get().IncQueryErrors()
+		return c.Status(fiber.StatusBadRequest).JSON(EstimateResponse{
+			Success:      false,
+			Error:        "Cross-database queries (db.table syntax) not allowed when x-iedb-database header is set",
+			WarningLevel: "error",
+		})
+	}
+
+	// RBAC permission check for all tables referenced in the query
+	if err := h.checkQueryPermissions(c, req.SQL, "read"); err != nil {
+		metrics.Get().IncQueryErrors()
+		return c.Status(fiber.StatusForbidden).JSON(EstimateResponse{
+			Success:      false,
+			Error:        err.Error(),
 			WarningLevel: "error",
 		})
 	}
@@ -3141,6 +3703,32 @@ func (h *QueryHandler) listMeasurements(c *fiber.Ctx) error {
 	// Optional database filter
 	dbFilter := c.Query("database", "")
 
+	// Validate the database filter parameter if provided
+	if dbFilter != "" {
+		if err := validateIdentifier(dbFilter); err != nil {
+			metrics.Get().IncQueryErrors()
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "invalid database parameter: " + err.Error(),
+			})
+		}
+	}
+
+	// RBAC permission check - user needs at least some read permission to list measurements.
+	// When a database filter is specified, check against that specific database instead of
+	// requiring wildcard access — users with single-database permissions should be able to
+	// list measurements scoped to that database.
+	rbacDB := "*"
+	if dbFilter != "" {
+		rbacDB = dbFilter
+	}
+	if err := h.checkMeasurementPermission(c, rbacDB, "*", "read"); err != nil {
+		metrics.Get().IncQueryErrors()
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
 	basePath := h.getStorageBasePath()
 	if basePath == "" {
 		return c.JSON(fiber.Map{
@@ -3399,7 +3987,7 @@ func (h *QueryHandler) queryMeasurement(c *fiber.Ctx) error {
 	// so client disconnects propagate to per-row cancellation — fasthttp
 	// keeps c.Context() alive across the SetBodyStreamWriter boundary,
 	// per gemini r1. queryMeasurement has no server-side timeout today
-	// (#308 follow-up); when #308 adds one, derive from this ctx.
+	//; when the issue adds one, derive from this ctx.
 	streamCtx := c.UserContext()
 	c.Set("Content-Type", "application/json")
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
@@ -3410,7 +3998,16 @@ func (h *QueryHandler) queryMeasurement(c *fiber.Ctx) error {
 
 		if streamErr != nil {
 			m.IncQueryErrors()
-			h.logger.Error().Err(streamErr).
+			// Per-handler client-disconnect counter. queryMeasurement
+			// uses the pure database/sql streaming JSON path same as the
+			// other sites above, so it shares the sql_json label.
+			if isClientError(streamErr) {
+				m.IncQueryClientDisconnect(metrics.DisconnectPathSQLJSON)
+			}
+			// Warn for client-disconnect / context expiry (headers already
+			// committed, partial result was delivered). Error for genuine
+			// server-side failures.
+			h.streamErrEvent(streamErr).Err(streamErr).
 				Str("measurement", measurement).
 				Int("rows_sent", rowCount).
 				Msg("queryMeasurement stream truncated after headers committed")

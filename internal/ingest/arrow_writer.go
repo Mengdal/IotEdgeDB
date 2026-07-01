@@ -457,14 +457,28 @@ func (w *ArrowWriter) inferSchema(columns map[string]interface{}, tagColumns []s
 
 		var arrowType arrow.DataType
 
+		// The time column MUST be int64 microseconds (→ Timestamp_us). This is
+		// checked BEFORE the type switch so it applies to every incoming Go
+		// type, not just []int64. The previous code only special-cased time
+		// inside `case []int64`, so a time column arriving as []string or
+		// []float64 fell through to String/Float64 — silently producing a
+		// VARCHAR (or DOUBLE) `time` parquet file. When such a file landed in a
+		// partition alongside a normally-written Timestamp file, compaction's
+		// read_parquet(union_by_name=true) could not reconcile the conflicting
+		// types and failed to bind "time" (TIMESTAMP WITH TIME ZONE != VARCHAR),
+		// permanently wedging the partition. Reject the write loudly instead —
+		// a clear error at ingest beats a corrupt-schema file discovered weeks
+		// later at compaction time, and it surfaces which writer sent bad time.
+		if name == "time" {
+			if _, ok := col.([]int64); !ok {
+				return nil, fmt.Errorf("time column must be int64 microseconds, got %T (writer must send an integer epoch, not a string or float)", col)
+			}
+			fields = append(fields, arrow.Field{Name: name, Type: arrow.FixedWidthTypes.Timestamp_us, Nullable: true})
+			continue
+		}
 		switch arr := col.(type) {
 		case []int64:
-			// Special case: time column uses timestamp type
-			if name == "time" {
-				arrowType = arrow.FixedWidthTypes.Timestamp_us
-			} else {
-				arrowType = arrow.PrimitiveTypes.Int64
-			}
+			arrowType = arrow.PrimitiveTypes.Int64
 		case []float64:
 			arrowType = arrow.PrimitiveTypes.Float64
 		case []string:
@@ -814,9 +828,22 @@ type ArrowBuffer struct {
 // int64→float64 on the same column) is detected as schema evolution and triggers a
 // flush before the new-schema data is appended.
 func getColumnSignature(columns map[string]interface{}) string {
+	// Signature encodes column NAME:TYPE. The type component is load-bearing:
+	// if two batches for the same measurement differ in a column's Go type
+	// (e.g. a field "cpu" sent as int64 then float64), they MUST get different
+	// signatures so they land in separate buffers. Otherwise mergeBatches
+	// allocates the merged column by the first batch's type and then
+	// type-asserts the second batch against it (copy(merged[name].([]float64),
+	// v)) — which panics and crashes the server when the types disagree.
+	//
+	// This does NOT reintroduce the time-column fan-out that wedged compaction
+	//: the "time" column is forced to int64 at the typing
+	// chokepoint (see convertColumnsToTyped), so its signature component is
+	// always "time:i64" and time can never fan out into mixed-type files. The
+	// type-awareness only protects the OTHER columns from the merge panic.
 	type colEntry struct{ name, typ string }
 	entries := make([]colEntry, 0, len(columns))
-	size := -1 // will add 1 per comma; starts at -1 so the first entry adds 0 commas
+	size := -1 // first entry adds 0 commas; each subsequent adds 1
 	for name, val := range columns {
 		if len(name) == 0 || name[0] == '_' {
 			continue // skip empty and internal columns
@@ -1872,6 +1899,44 @@ func (b *ArrowBuffer) convertColumnsToTyped(measurement string, columns map[stri
 			continue // Skip all-nil columns
 		}
 
+		// The "time" column is always int64 microseconds → Arrow Timestamp.
+		// Force it here so a client that sends time as a string (or float) can
+		// never produce a VARCHAR/DOUBLE time parquet file, which would make a
+		// partition un-compactable (TIMESTAMP != VARCHAR bind failure). The
+		// msgpack columnar path already normalizes time via normalizeTimestamps,
+		// but this is the single chokepoint every typed write passes through, so
+		// enforce it here regardless of source. No extra pass: it replaces the
+		// generic type switch for this one column. Reject (not coerce) a
+		// non-numeric time so the bad writer is surfaced loudly at ingest.
+		if name == "time" {
+			if _, ok := firstVal.(string); ok {
+				return nil, 0, fmt.Errorf("time column must be numeric epoch, got string in measurement '%s' (writer must send an integer/float timestamp, not a string)", measurement)
+			}
+			arr := make([]int64, len(col))
+			for i, v := range col {
+				// Fast path: time is overwhelmingly int64 in production, so a
+				// direct assertion avoids toInt64's call + multi-case type
+				// switch on the hot path. Fall back to toInt64 for other
+				// numeric kinds (float64, uints from some msgpack decoders).
+				if ts, ok := v.(int64); ok {
+					arr[i] = ts
+					continue
+				}
+				// Reject null time: groupByHour reads the time slice directly
+				// (no validity check), so a nil would become 0 and silently
+				// route the record to the 1970-01-01 partition.
+				if v == nil {
+					return nil, 0, fmt.Errorf("time column cannot contain null values in measurement '%s'", measurement)
+				}
+				ts, ok := toInt64(v)
+				if !ok {
+					return nil, 0, fmt.Errorf("time column value %T not convertible to int64 in measurement '%s'", v, measurement)
+				}
+				arr[i] = ts
+			}
+			typed[name] = arr
+			continue
+		}
 		// FAST PATH: Try zero-copy bulk conversion first (fails fast on nils or mixed types).
 		// If zero-copy succeeds, no nils exist and no validity bitmap is needed.
 		switch firstVal.(type) {
@@ -2334,11 +2399,24 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 		return fmt.Errorf("no time data in batch")
 	}
 
-	// OPTIMIZATION: Group by hour in a single O(n) pass
-	// This gives us: hour buckets, global min/max, per-hour min/max
-	hourBuckets, globalMin, globalMax, err := groupByHour(times)
-	if err != nil {
-		return fmt.Errorf("failed to group by hour: %w", err)
+	// Cheap O(n) min/max scan to decide single- vs multi-hour. The full per-hour
+	// bucketing (groupByHour) allocates an index slice covering every row and is only
+	// needed when the flush actually spans multiple hours — which the common live-ingest
+	// case (all rows in the current hour) never does. Deferring it past the single-hour
+	// check saved ~15GB of bucket-index allocation per the 2026-06-22 profile.
+	// Two unconditional comparisons (not else-if) on purpose: live ingest arrives
+	// monotonically ascending, so `t < globalMin` is reliably false and `t > globalMax`
+	// reliably true — both branches are near-perfectly predicted and run in parallel.
+	// An else-if makes the second comparison data-dependent on the first and measured
+	// ~24% slower on ascending input (benchmarked 5M rows: 1.25ms vs 1.55ms).
+	globalMin, globalMax := times[0], times[0]
+	for _, t := range times {
+		if t < globalMin {
+			globalMin = t
+		}
+		if t > globalMax {
+			globalMax = t
+		}
 	}
 
 	minTime := time.UnixMicro(globalMin).UTC()
@@ -2404,7 +2482,15 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 		return nil
 	}
 
-	// Multiple hours - process each hour bucket independently
+	// Multiple hours - now (and only now) build the per-hour index buckets. This is the
+	// allocation-heavy path, but a multi-hour flush is the uncommon backfill/clock-skew
+	// case, so paying for the full bucketing here keeps the common single-hour path cheap.
+	hourBuckets, _, _, err := groupByHour(times)
+	if err != nil {
+		return fmt.Errorf("failed to group by hour: %w", err)
+	}
+
+	// Process each hour bucket independently
 	b.logger.Info().
 		Str("buffer_key", bufferKey).
 		Int("num_hours", len(hourBuckets)).
@@ -2877,29 +2963,12 @@ func sortColumnsByTimeOnlyWithPermutation(columns map[string]interface{}) (map[s
 		return columns, nil, nil
 	}
 
-	// FAST PATH: Check if already sorted (common case for time-series producers)
-	// This is O(n) but much cheaper than sorting + permutation when data is in order
-	alreadySorted := true
-	for i := 1; i < n; i++ {
-		if times[i] < times[i-1] {
-			alreadySorted = false
-			break
-		}
+	// Compute the time-ordering permutation. permuteByTime returns nil when the
+	// data is already sorted (identity), letting callers skip rematerialization.
+	indices := permuteByTime(times)
+	if indices == nil {
+		return columns, nil, nil // already sorted — nil indices signals identity permutation
 	}
-	if alreadySorted {
-		return columns, nil, nil // nil indices signals identity permutation
-	}
-
-	// Create permutation indices
-	indices := make([]int, n)
-	for i := range indices {
-		indices[i] = i
-	}
-
-	// Sort by time directly (no function call overhead per comparison)
-	sort.Slice(indices, func(i, j int) bool {
-		return times[indices[i]] < times[indices[j]]
-	})
 
 	// Apply permutation to all columns
 	result := make(map[string]interface{}, len(columns))
@@ -2908,6 +2977,117 @@ func sortColumnsByTimeOnlyWithPermutation(columns map[string]interface{}) (map[s
 	}
 
 	return result, indices, nil
+}
+
+// radixSkipThreshold: below this row count the comparison sort wins (radix's fixed
+// per-pass overhead isn't amortized), so permuteByTime uses sort.Slice for small buffers.
+const radixSkipThreshold = 4096
+
+// permuteByTime returns the permutation that sorts times ascending, or nil when the
+// data is already sorted (identity permutation — callers skip rematerialization).
+//
+// The merged 5M-row flush buffer is, under concurrent producers, effectively unordered:
+// rows from many in-flight batches interleave at the row level as they append to the
+// shared buffer (the 2026-06-22 profile measured ~2.5M sorted runs in a 5M-row buffer,
+// i.e. no exploitable run structure). The previous closure-based sort.Slice cost ~6.9%
+// of total CPU on this path. The keys are int64 microsecond timestamps, so an LSD radix
+// sort wins decisively (no comparisons; the near-constant high bytes are skipped per
+// pass): measured ~5x faster than sort.Slice (796ms -> 157ms on 5M rows). Negative
+// (pre-epoch) timestamps are handled via radixSortBias.
+//
+// The already-sorted check is kept first: in-order single-producer ingest stays an O(n)
+// scan with zero permutation work.
+func permuteByTime(times []int64) []int {
+	n := len(times)
+	if n == 0 {
+		return nil
+	}
+
+	// FAST PATH: already sorted (single in-order producer) — identity permutation.
+	alreadySorted := true
+	for i := 1; i < n; i++ {
+		if times[i] < times[i-1] {
+			alreadySorted = false
+			break
+		}
+	}
+	if alreadySorted {
+		return nil
+	}
+
+	// Small buffers: comparison sort beats radix's fixed per-pass cost.
+	if n < radixSkipThreshold {
+		return permuteByTimeSort(times)
+	}
+
+	return radixPermuteByTime(times)
+}
+
+// permuteByTimeSort is the comparison-sort path for small buffers.
+func permuteByTimeSort(times []int64) []int {
+	n := len(times)
+	indices := make([]int, n)
+	for i := range indices {
+		indices[i] = i
+	}
+
+	sort.Slice(indices, func(i, j int) bool {
+		return times[indices[i]] < times[indices[j]]
+	})
+	return indices
+}
+
+// radixSortBias maps a signed int64 to its order-preserving unsigned key by flipping the
+// sign bit: int64 min -> 0, int64 max -> max. This lets an unsigned LSD radix sort produce
+// correct ascending order even when timestamps are negative (pre-1970, which Line Protocol
+// and MessagePack both accept.. Without it, negatives' set sign bit would sort
+// them after positives.
+func radixSortBias(t int64) uint64 {
+	return uint64(t) ^ 0x8000000000000000 // flip the sign bit
+}
+
+// radixPermuteByTime returns the ascending-time permutation via an LSD radix sort over
+// the int64 timestamps (8 passes of 8 bits), using radixSortBias so negative (pre-epoch)
+// timestamps order correctly. Passes where every key shares one byte value are skipped,
+// which makes the near-constant high-order bytes (all timestamps near "now") almost free.
+// Stable, which keeps equal-timestamp rows in arrival order.
+func radixPermuteByTime(times []int64) []int {
+	n := len(times)
+	if n == 0 {
+		// Defensive: permuteByTime already short-circuits empty input, but guard here
+		// too so a direct caller can't trip the times[src[0]] index below.
+		return nil
+	}
+	src := make([]int, n)
+	for i := range src {
+		src[i] = i
+	}
+	dst := make([]int, n)
+
+	var count [256]int
+	for shift := uint(0); shift < 64; shift += 8 {
+		count = [256]int{}
+		for _, ix := range src {
+			count[(radixSortBias(times[ix])>>shift)&0xff]++
+		}
+		// Skip this pass if all keys fall in a single bucket (e.g. constant high bytes).
+		if count[(radixSortBias(times[src[0]])>>shift)&0xff] == n {
+			continue
+		}
+		sum := 0
+		for i := 0; i < 256; i++ {
+			c := count[i]
+			count[i] = sum
+			sum += c
+		}
+		for _, ix := range src {
+			b := (radixSortBias(times[ix]) >> shift) & 0xff
+			dst[count[b]] = ix
+			count[b]++
+		}
+		src, dst = dst, src
+	}
+	return src
 }
 
 // compareMultiKeyCached compares two rows by multiple sort keys using cached column pointers
@@ -3085,10 +3265,27 @@ func hourIDToTime(hourID int64) time.Time {
 	return time.UnixMicro(hourID * microPerHour).UTC()
 }
 
+// HourBucketID returns the hour bucket for a microsecond timestamp, using
+// floor division so the bucket is the hour that actually contains the
+// timestamp. Plain integer division truncates toward zero, which puts
+// pre-epoch (negative) timestamps in the wrong hour — e.g. a timestamp 1µs
+// before the epoch would map to hour 0 (1970-01-01 00:00) instead of hour -1
+// (1969-12-31 23:00), misfiling the row's partition. For t >= 0 this
+// is identical to t / microPerHour.
+func HourBucketID(microTime int64) int64 {
+	h := microTime / microPerHour
+	// Sign check first so the modulo is short-circuited away for the common
+	// non-negative case on the per-row ingest hot path.
+	if microTime < 0 && microTime%microPerHour != 0 {
+		h--
+	}
+	return h
+}
+
 // groupByHour groups row indices by hour and tracks min/max times
 // Works correctly regardless of whether data is globally sorted by time
 // Returns: map of hourID -> bucket, global min time, global max time
-// Uses integer division for fast hour extraction (no time.Time allocations)
+// Uses HourBucketID for fast, allocation-free hour extraction (no time.Time)
 func groupByHour(times []int64) (map[int64]*hourBucket, int64, int64, error) {
 	if len(times) == 0 {
 		return nil, 0, 0, fmt.Errorf("empty time column")
@@ -3098,6 +3295,14 @@ func groupByHour(times []int64) (map[int64]*hourBucket, int64, int64, error) {
 	globalMin := times[0]
 	globalMax := times[0]
 
+	// Cache the last hour's bucket to skip the map lookup for consecutive
+	// same-hour timestamps. Data enters the buffer in arrival order, which for
+	// a typical time-series writer is near-chronological, so the cache hits on
+	// the vast majority of rows. Benchmark (1M rows): ordered ~8.0ms → ~3.6ms
+	// (2.2x); the only loss is ~5% on heavily hour-interleaved input (e.g.
+	// multi-tag secondary-sort spread across many hours in one flush).
+	var lastID int64
+	var lastBucket *hourBucket
 	// Single pass: group by hour and track min/max
 	for i, t := range times {
 		// Update global min/max
@@ -3108,27 +3313,38 @@ func groupByHour(times []int64) (map[int64]*hourBucket, int64, int64, error) {
 			globalMax = t
 		}
 
-		// Fast hour extraction using integer division (no time.Time allocation)
-		hourID := t / microPerHour
+		// Fast hour extraction (no time.Time allocation). Floor division so
+		// pre-epoch (negative) timestamps bucket into the hour that contains
+		// them rather than truncating toward the epoch.
+		hourID := HourBucketID(t)
 
-		// Get or create bucket
-		bucket, exists := buckets[hourID]
-		if !exists {
-			bucket = &hourBucket{
-				hourID:  hourID,
-				indices: make([]int, 0, 100), // Pre-allocate some capacity
-				minTime: t,
-				maxTime: t,
-			}
-			buckets[hourID] = bucket
+		// Get or create bucket, reusing the cached one on a same-hour run.
+		var bucket *hourBucket
+		if i > 0 && hourID == lastID {
+			bucket = lastBucket
 		} else {
-			// Update bucket min/max
-			if t < bucket.minTime {
-				bucket.minTime = t
+			var exists bool
+			bucket, exists = buckets[hourID]
+			if !exists {
+				bucket = &hourBucket{
+					hourID:  hourID,
+					indices: make([]int, 0, 100), // Pre-allocate some capacity
+					minTime: t,
+					maxTime: t,
+				}
+				buckets[hourID] = bucket
 			}
-			if t > bucket.maxTime {
-				bucket.maxTime = t
-			}
+			lastID = hourID
+			lastBucket = bucket
+		}
+
+		// Update bucket min/max (the newly-created bucket already has t as
+		// both, so these comparisons are no-ops on first insert).
+		if t < bucket.minTime {
+			bucket.minTime = t
+		}
+		if t > bucket.maxTime {
+			bucket.maxTime = t
 		}
 
 		// Add row index to bucket

@@ -155,7 +155,17 @@ func executeArrowJSONQuery(
 			} else if onFail != nil {
 				onFail(streamErr.Error())
 			}
-			h.logger.Error().Err(streamErr).
+			// Per-handler client-disconnect counter. See query_arrow.go
+			// for the rationale; arrow_json is the duckdb_arrow build path
+			// that /api/v1/query takes by default.
+			if isClientError(streamErr) {
+				m.IncQueryClientDisconnect(metrics.DisconnectPathArrowJSON)
+			}
+			// Warn for client-disconnect / context expiry (expected ops noise
+			// — headers were already committed, the client got partial bytes).
+			// Error for everything else: scanner/reader failures are real
+			// server-side problems worth alerting on.
+			h.streamErrEvent(streamErr).Err(streamErr).
 				Int("rows_sent", rc).
 				Float64("execution_time_ms", float64(time.Since(start).Milliseconds())).
 				Msg("Arrow JSON stream truncated after headers committed; client received partial result")
@@ -267,7 +277,18 @@ batchLoop:
 			rowCount++
 
 			if rowCount%jsonFlushInterval == 0 {
-				w.Flush()
+				// Capture Flush error: fasthttp's RequestCtx.Done() only fires
+				// on server shutdown (not per-request client disconnect), so
+				// the bufio.Writer's error on the closed connection is our
+				// signal that the client has gone away. Breaking out of both
+				// nested loops stops DuckDB from draining the rest of the
+				// result set into a buffer nobody reads. The error is wrapped
+				// with errClientDisconnected so the caller can log at Warn
+				// (not Error) for this expected ops noise.
+				if err := w.Flush(); err != nil {
+					streamErr = fmt.Errorf("stream flush failed at row %d: %w: %w", rowCount, errClientDisconnected, err)
+					break batchLoop
+				}
 			}
 		}
 	}

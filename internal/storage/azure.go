@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"iedb/internal/metrics"
 	"io"
 	"strings"
 	"time"
@@ -170,6 +172,7 @@ func (b *AzureBlobBackend) WriteReader(ctx context.Context, path string, reader 
 		},
 	})
 	if err != nil {
+		recordStorageError(ctx, err)
 		b.logger.Error().
 			Err(err).
 			Str("path", path).
@@ -178,6 +181,15 @@ func (b *AzureBlobBackend) WriteReader(ctx context.Context, path string, reader 
 		return fmt.Errorf("failed to write to Azure Blob Storage: %w", err)
 	}
 
+	// Record metrics. Callers may pass size <= 0 for unknown-size streams —
+	// count the write but skip the byte counter rather than subtracting from
+	// it. Note: size is the caller-declared length, not bytes observed on the
+	// wire — UploadStream ignores it and streams to EOF, so a stale declared
+	// size drifts the byte counter (all current callers pass stat-derived sizes).
+	metrics.Get().IncStorageWrites()
+	if size > 0 {
+		metrics.Get().IncStorageWriteBytes(size)
+	}
 	b.logger.Debug().
 		Str("path", path).
 		Int64("size", size).
@@ -194,15 +206,25 @@ func (b *AzureBlobBackend) Read(ctx context.Context, path string) ([]byte, error
 
 	resp, err := blobClient.DownloadStream(ctx, nil)
 	if err != nil {
+		recordStorageError(ctx, err)
 		return nil, fmt.Errorf("failed to read from Azure Blob Storage: %w", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
+	// io.ReadAll returns the data read so far alongside an error — count
+	// bytes transferred even on mid-stream failure (real network egress),
+	// consistent with ReadTo/ReadToAt.
+	if len(data) > 0 {
+		metrics.Get().IncStorageReadBytes(int64(len(data)))
+	}
 	if err != nil {
+		recordStorageError(ctx, err)
 		return nil, fmt.Errorf("failed to read Azure blob body: %w", err)
 	}
 
+	// Record metrics
+	metrics.Get().IncStorageReads()
 	return data, nil
 }
 
@@ -212,15 +234,24 @@ func (b *AzureBlobBackend) ReadTo(ctx context.Context, path string, writer io.Wr
 
 	resp, err := blobClient.DownloadStream(ctx, nil)
 	if err != nil {
+		recordStorageError(ctx, err)
 		return fmt.Errorf("failed to read from Azure Blob Storage: %w", err)
 	}
 	defer resp.Body.Close()
 
-	_, err = io.Copy(writer, resp.Body)
+	bytesRead, err := io.Copy(writer, resp.Body)
+	// Count bytes delivered to the writer even when the copy fails mid-stream —
+	// partial transfers are real network egress.
+	if bytesRead > 0 {
+		metrics.Get().IncStorageReadBytes(bytesRead)
+	}
 	if err != nil {
+		recordStorageError(ctx, err)
 		return fmt.Errorf("failed to copy Azure blob: %w", err)
 	}
 
+	// Record metrics
+	metrics.Get().IncStorageReads()
 	return nil
 }
 
@@ -238,14 +269,23 @@ func (b *AzureBlobBackend) ReadToAt(ctx context.Context, path string, writer io.
 	}
 	resp, err := blobClient.DownloadStream(ctx, opts)
 	if err != nil {
+		recordStorageError(ctx, err)
 		return fmt.Errorf("failed to read from Azure Blob Storage: %w", err)
 	}
 	defer resp.Body.Close()
 
-	_, err = io.Copy(writer, resp.Body)
+	bytesRead, err := io.Copy(writer, resp.Body)
+	// Count bytes delivered to the writer even when the copy fails mid-stream —
+	// partial transfers are real network egress.
+	if bytesRead > 0 {
+		metrics.Get().IncStorageReadBytes(bytesRead)
+	}
 	if err != nil {
+		recordStorageError(ctx, err)
 		return fmt.Errorf("failed to copy Azure blob: %w", err)
 	}
+	// Record metrics
+	metrics.Get().IncStorageReads()
 	return nil
 }
 
@@ -276,6 +316,9 @@ func (b *AzureBlobBackend) List(ctx context.Context, prefix string) ([]string, e
 	})
 
 	for pager.More() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list Azure blobs: %w", err)
@@ -308,15 +351,21 @@ func (b *AzureBlobBackend) Delete(ctx context.Context, path string) error {
 	return nil
 }
 
-// DeleteBatch deletes multiple blobs from Azure Blob Storage
-// Azure Blob Storage supports batch delete via the Batch API
+// DeleteBatch deletes multiple blobs from Azure Blob Storage using the Blob Batch API.
+// Azure supports up to 256 sub-requests per batch. Each batch is submitted as a
+// single HTTP request, dramatically reducing API call overhead vs per-file Delete.
+//
+// Individual sub-request failures are inspected: 404 (blob not found) is treated
+// as success (already deleted); any other error is collected and returned so
+// callers can fall back to per-file Delete or retry.
 func (b *AzureBlobBackend) DeleteBatch(ctx context.Context, paths []string) error {
 	if len(paths) == 0 {
 		return nil
 	}
 
-	// Azure Blob batch operations can handle up to 256 operations per batch
 	const batchSize = 256
+	containerClient := b.client.ServiceClient().NewContainerClient(b.containerName)
+	var nonFatalErrs []error
 
 	for i := 0; i < len(paths); i += batchSize {
 		end := i + batchSize
@@ -326,16 +375,46 @@ func (b *AzureBlobBackend) DeleteBatch(ctx context.Context, paths []string) erro
 
 		batch := paths[i:end]
 
-		// Delete each blob individually (Azure SDK batch delete requires more setup)
-		// For simplicity, we use individual deletes in parallel concept
+		bb, err := containerClient.NewBatchBuilder()
+		if err != nil {
+			return fmt.Errorf("failed to create Azure batch builder: %w", err)
+		}
 		for _, path := range batch {
-			if err := b.Delete(ctx, path); err != nil {
-				b.logger.Warn().Err(err).Str("path", path).Msg("Failed to delete blob in batch")
-				// Continue with other deletions
+			if err := bb.Delete(path, nil); err != nil {
+				return fmt.Errorf("failed to add delete to Azure batch for %q: %w", path, err)
 			}
+		}
+
+		resp, err := containerClient.SubmitBatch(ctx, bb, nil)
+		if err != nil {
+			return fmt.Errorf("failed to submit Azure batch delete: %w", err)
+		}
+
+		// Inspect per-blob results. 404 (blob not found) is normal — the
+		// blob may already have been deleted. Any other error is collected
+		// and returned so callers can fall back.
+		for _, item := range resp.Responses {
+			if item.Error == nil {
+				continue
+			}
+			if isAzureNotFoundError(item.Error) {
+				continue
+			}
+			blobName := "unknown"
+			if item.BlobName != nil {
+				blobName = *item.BlobName
+			}
+			b.logger.Warn().
+				Err(item.Error).
+				Str("blob", blobName).
+				Msg("Azure batch: individual delete failed")
+			nonFatalErrs = append(nonFatalErrs, fmt.Errorf("%s: %w", blobName, item.Error))
 		}
 	}
 
+	if len(nonFatalErrs) > 0 {
+		return fmt.Errorf("Azure batch delete: %d blob(s) failed: %w", len(nonFatalErrs), errors.Join(nonFatalErrs...))
+	}
 	b.logger.Debug().Int("count", len(paths)).Msg("Batch deleted from Azure Blob Storage")
 	return nil
 }
@@ -372,6 +451,10 @@ func (b *AzureBlobBackend) GetAccountName() string {
 }
 
 // GetAccountKey returns the account key (for subprocess credential passing)
+// GetAccountKey returns the Azure storage account key. It exists solely for
+// subprocess credential passing (compaction workers). The returned value is a
+// plaintext secret — callers MUST NOT log it, store it, or transmit it
+// outside the subprocess environment.
 func (b *AzureBlobBackend) GetAccountKey() string {
 	return b.accountKey
 }
@@ -410,6 +493,9 @@ func (b *AzureBlobBackend) ListDirectories(ctx context.Context, prefix string) (
 	})
 
 	for pager.More() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list Azure directories: %w", err)
@@ -443,6 +529,9 @@ func (b *AzureBlobBackend) ListObjects(ctx context.Context, prefix string) ([]Ob
 	})
 
 	for pager.More() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list Azure blobs: %w", err)

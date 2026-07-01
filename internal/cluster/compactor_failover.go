@@ -18,12 +18,12 @@ package cluster
 import (
 	"context"
 	"fmt"
+	Raft "iedb/internal/cluster/raft"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
-	arcRaft "iedb/internal/cluster/raft"
 )
 
 // CompactorFailoverConfig holds configuration for the compactor failover manager.
@@ -32,10 +32,10 @@ type CompactorFailoverConfig struct {
 	Registry *Registry
 
 	// RaftNode for applying AssignCompactor commands via consensus.
-	RaftNode *arcRaft.Node
+	RaftNode *Raft.Node
 
 	// RaftFSM to read the current activeCompactorID.
-	RaftFSM *arcRaft.ClusterFSM
+	RaftFSM *Raft.ClusterFSM
 
 	// CheckInterval is how often the leader checks compactor health.
 	// Default: 10s (compaction is less latency-sensitive than writes).

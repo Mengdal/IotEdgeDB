@@ -2,16 +2,16 @@ package cluster
 
 import (
 	"context"
+	Raft "iedb/internal/cluster/raft"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
-	arcRaft "iedb/internal/cluster/raft"
 )
 
 // stubFailoverFSM is a minimal ClusterFSM for failover tests.
-func stubFailoverFSM() *arcRaft.ClusterFSM {
-	return arcRaft.NewClusterFSM(zerolog.Nop())
+func stubFailoverFSM() *Raft.ClusterFSM {
+	return Raft.NewClusterFSM(zerolog.Nop())
 }
 
 // TestCompactorFailover_InitialAssignment verifies that when no active

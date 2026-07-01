@@ -51,8 +51,8 @@ func (s *Scheduler) Start() error {
 		return nil
 	}
 
-	// Create cron scheduler with seconds support
-	s.cron = cron.New(cron.WithLocation(time.UTC))
+	// Create cron scheduler (uses local timezone, consistent with compaction/retention)
+	s.cron = cron.New()
 
 	// Add the migration job
 	entryID, err := s.cron.AddFunc(s.schedule, func() {

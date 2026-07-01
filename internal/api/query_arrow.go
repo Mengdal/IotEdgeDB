@@ -6,7 +6,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"iedb/internal/metrics"
@@ -18,6 +20,16 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/gofiber/fiber/v2"
 )
+
+// arrowTrailerWarnOnce gates the AddTrailer failure log so a fasthttp
+// upgrade that ever rejects the trailer name does not produce a Warn per
+// request.
+var arrowTrailerWarnOnce sync.Once
+
+// arrowExecutionTimeTrailer is the HTTP response trailer carrying server-
+// side query execution time (milliseconds) on the Arrow IPC endpoint.
+// Clients consume the full Arrow stream then read this trailer.
+const arrowExecutionTimeTrailer = "IEDB-Execution-Time-Ms"
 
 // arrowBatchSize is the number of rows per Arrow record batch.
 // Smaller batches reduce peak memory usage and enable streaming.
@@ -65,6 +77,54 @@ func (h *QueryHandler) executeQueryArrow(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
 			"error":   "Cross-database queries (db.table syntax) not allowed when x-iedb-database header is set",
+		})
+	}
+
+	// RBAC-gate SHOW commands, mirroring executeQuery / estimateQuery. SHOW
+	// commands carry no FROM/JOIN table references, so checkQueryPermissions
+	// would pass them through unchecked. The Arrow IPC endpoint has no SHOW
+	// result handler (handleShowDatabases/handleShowTables emit JSON), so we
+	// gate on the same permission and return a 400 directing callers to
+	// /api/v1/query. normalizeSQLForShow masks literals before stripping
+	// comments so a comment marker inside a quoted db name can't truncate it.
+	showNormalised := normalizeSQLForShow(req.SQL)
+	if showDatabasesPattern.MatchString(showNormalised) {
+		if err := h.checkMeasurementPermission(c, "*", "*", "read"); err != nil {
+			m.IncQueryErrors()
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"success": false,
+				"error":   "access denied: no read permission to list databases",
+			})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "SHOW DATABASES is not supported on the Arrow endpoint; use /api/v1/query instead",
+		})
+	}
+	if matches := showTablesPattern.FindStringSubmatch(showNormalised); matches != nil {
+		database := "default"
+		if len(matches) > 1 && matches[1] != "" {
+			database = matches[1]
+		} else if headerDB != "" {
+			database = headerDB
+		}
+		if err := validateIdentifier(database); err != nil {
+			m.IncQueryErrors()
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "invalid database name: " + err.Error(),
+			})
+		}
+		if err := h.checkMeasurementPermission(c, database, "*", "read"); err != nil {
+			m.IncQueryErrors()
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"success": false,
+				"error":   fmt.Sprintf("access denied: no read permission for database '%s'", database),
+			})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "SHOW TABLES/MEASUREMENTS is not supported on the Arrow endpoint; use /api/v1/query instead",
 		})
 	}
 
@@ -132,11 +192,34 @@ func (h *QueryHandler) executeQueryArrow(c *fiber.Ctx) error {
 	}
 	c.Set("Content-Type", "application/vnd.apache.arrow.stream")
 
+	// Capture the fasthttp RequestCtx once. c *fiber.Ctx is pooled and
+	// reset after this handler returns; the SetBodyStreamWriter callback
+	// runs asynchronously after the handler exits, so any call to
+	// c.Context() inside the closure observes a recycled context (nil
+	// pointer panic in practice — verified by integration test against
+	// clickbench). The fasthttp RequestCtx itself stays valid until the
+	// stream writer returns.
+	fctx := c.Context()
+	respHeader := &fctx.Response.Header
+
+	// Declare the execution-time trailer in the response head before
+	// SetBodyStreamWriter runs so the `Trailer:` response header is
+	// emitted before the chunked body starts. Clients that don't read
+	// trailers degrade gracefully to wall-clock timing. The Warn is
+	// sync.Once-gated against per-request log spam if a future fasthttp
+	// release ever rejects the trailer name.
+	if err := respHeader.AddTrailer(arrowExecutionTimeTrailer); err != nil {
+		arrowTrailerWarnOnce.Do(func() {
+			h.logger.Warn().Err(err).Str("trailer", arrowExecutionTimeTrailer).
+				Msg("Failed to register Arrow execution-time trailer; clients will not see server-side timing")
+		})
+	}
 	streamCtx := ctx
-	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+	fctx.SetBodyStreamWriter(func(w *bufio.Writer) {
 		ipcWriter := ipc.NewWriter(w, ipc.WithSchema(schema))
 
 		var totalRows int64
+		var streamErr error
 	streamLoop:
 		for reader.Next() {
 			// Per-batch ctx check: a timeout firing or client disconnect
@@ -146,10 +229,7 @@ func (h *QueryHandler) executeQueryArrow(c *fiber.Ctx) error {
 			// break is the idiomatic Go cancellation pattern (gemini r1).
 			select {
 			case <-streamCtx.Done():
-				h.logger.Warn().
-					Err(streamCtx.Err()).
-					Int64("rows_sent", totalRows).
-					Msg("Arrow IPC stream cancelled mid-stream")
+				streamErr = fmt.Errorf("stream cancelled at row %d: %w", totalRows, streamCtx.Err())
 				break streamLoop
 			default:
 			}
@@ -173,8 +253,8 @@ func (h *QueryHandler) executeQueryArrow(c *fiber.Ctx) error {
 				var castErr error
 				castedBatch, castErr = castDecimalBatch(batch, castInfo)
 				if castErr != nil {
-					h.logger.Error().Err(castErr).Msg("Failed to cast decimal columns in Arrow batch")
-					break
+					streamErr = fmt.Errorf("failed to cast decimal columns at row %d: %w", totalRows, castErr)
+					break streamLoop
 				}
 				batch = castedBatch
 			}
@@ -184,18 +264,34 @@ func (h *QueryHandler) executeQueryArrow(c *fiber.Ctx) error {
 				castedBatch.Release()
 			}
 			if err != nil {
-				h.logger.Error().Err(err).Msg("Failed to write Arrow batch")
-				break
+				streamErr = fmt.Errorf("failed to write arrow batch at row %d: %w", totalRows, err)
+				break streamLoop
 			}
-			w.Flush()
+			// Capture Flush error: fasthttp's RequestCtx.Done() only fires on
+			// server shutdown (not per-request client disconnect), so the
+			// underlying bufio.Writer's error on the closed connection is our
+			// signal that the client has gone away. Wrap with the sentinel so
+			// the caller logs at Warn (not Error) for this expected ops noise.
+			if err := w.Flush(); err != nil {
+				streamErr = fmt.Errorf("stream flush failed at row %d: %w: %w", totalRows, errClientDisconnected, err)
+				break streamLoop
+			}
 		}
 
-		if err := reader.Err(); err != nil {
-			h.logger.Error().Err(err).Msg("Error iterating Arrow batches")
+		if streamErr == nil {
+			if err := reader.Err(); err != nil {
+				streamErr = fmt.Errorf("arrow reader error after %d rows: %w", totalRows, err)
+			}
 		}
 
 		if err := ipcWriter.Close(); err != nil {
-			h.logger.Error().Err(err).Msg("Failed to close Arrow IPC writer")
+			// Warn (not Error): when the loop broke because the client
+			// disconnected, ipcWriter.Close is guaranteed to fail flushing
+			// trailing IPC metadata over the already-closed connection.
+			// That's the same client-disconnect event already captured in
+			// streamErr — emitting Error here would defeat the ops-noise
+			// reduction.
+			h.logger.Warn().Err(err).Msg("Failed to close Arrow IPC writer")
 		}
 		reader.Release()
 		conn.Close()
@@ -203,9 +299,37 @@ func (h *QueryHandler) executeQueryArrow(c *fiber.Ctx) error {
 			cancel()
 		}
 
+		// Publish authoritative server-side timing as a chunked-transfer
+		// trailer. Set even on the error path so partial results carry
+		// time-until-failure. On a hard client disconnect the trailer is
+		// silently dropped, same as any other post-body byte.
+		//
+		// Use the captured respHeader, NOT c.Context().Response.Header —
+		// fiber.Ctx is pooled and reset before this closure runs.
+		execMs := time.Since(start).Milliseconds()
+		respHeader.Set(arrowExecutionTimeTrailer, strconv.FormatInt(execMs, 10))
+
+		if streamErr != nil {
+			m.IncQueryErrors()
+			// Per-handler client-disconnect counter. Lets operators
+			// dashboard the rate without log-scraping. Only fires on
+			// client-side events (disconnect / deadline / context-cancel)
+			// — server-side stream failures stay in IncQueryErrors only.
+			if isClientError(streamErr) {
+				m.IncQueryClientDisconnect(metrics.DisconnectPathArrowIPC)
+			}
+			// Warn for client-disconnect / timeout (expected ops noise);
+			// Error for everything else (real server-side problem worth
+			// alerting on).
+			h.streamErrEvent(streamErr).Err(streamErr).
+				Int64("rows_sent", totalRows).
+				Int64("execution_time_ms", execMs).
+				Msg("Arrow IPC stream truncated after headers committed; client received partial result")
+			return
+		}
 		h.logger.Info().
 			Int64("row_count", totalRows).
-			Float64("execution_time_ms", float64(time.Since(start).Milliseconds())).
+			Int64("execution_time_ms", execMs).
 			Msg("Arrow streaming query completed")
 	})
 
@@ -391,7 +515,9 @@ func appendValueToBuilder(builder array.Builder, val interface{}, _ arrow.DataTy
 	}
 }
 
-// registerArrowRoutes registers Arrow-specific query endpoints
-func (h *QueryHandler) registerArrowRoutes(app *fiber.App) {
-	app.Post("/api/v1/query/arrow", h.executeQueryArrow)
+// registerArrowRoutes registers Arrow-specific query endpoints. The Arrow path
+// is a user-facing read endpoint and gets the catch-up gate like the
+// JSON paths.
+func (h *QueryHandler) registerArrowRoutes(app *fiber.App, readAuth fiber.Handler) {
+	app.Post("/api/v1/query/arrow", readAuth, h.checkReplicationReady, h.executeQueryArrow)
 }

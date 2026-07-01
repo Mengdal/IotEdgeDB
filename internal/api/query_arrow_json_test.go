@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -18,6 +19,15 @@ import (
 )
 
 // buildArrowBatch creates an Arrow record batch from Go slices for testing.
+//
+// Each builder is released after its array is extracted: b.NewArray()
+// transfers buffer ownership to the returned array, but the builder
+// retains its own reference to those buffers until Release() is called.
+// Without this, every call to buildArrowBatch leaks builder-side
+// allocations — invisible under memory.NewGoAllocator (Go GC eats it),
+// but fatal under memory.NewCheckedAllocator (AssertSize(t, 0) panics).
+// Releasing the builders here lets tests use CheckedAllocator and catch
+// real Arrow leaks in production code paths.
 func buildArrowBatch(
 	alloc memory.Allocator,
 	schema *arrow.Schema,
@@ -25,6 +35,20 @@ func buildArrowBatch(
 ) arrow.Record {
 	numCols := len(schema.Fields())
 	builders := make([]array.Builder, numCols)
+	// Register the cleanup defer BEFORE the init loop so it covers a
+	// panic mid-loop. If we registered it AFTER the loop and
+	// array.NewBuilder panicked at iteration N, the defer would
+	// never register and builders[0..N-1] would leak. nil-check
+	// inside the loop guards against the trailing nil entries.
+	// Verified by counter-example: defer-after-loop never fires
+	// when the loop panics.
+	defer func() {
+		for _, b := range builders {
+			if b != nil {
+				b.Release()
+			}
+		}
+	}()
 	for i, f := range schema.Fields() {
 		builders[i] = array.NewBuilder(alloc, f.Type)
 	}
@@ -52,6 +76,22 @@ func buildArrowBatch(
 	}
 
 	cols := make([]arrow.Array, numCols)
+	// Register the cols Release defer BEFORE the NewArray loop AND
+	// before array.NewRecord — same lesson as the builders defer above.
+	// b.NewArray could panic on allocator failure, and NewRecord panics
+	// on length / schema mismatch (verified empirically). nil-check
+	// inside guards against partial population from a mid-loop panic.
+	// array.NewRecord retains each column (refcount++); this defer drops
+	// the test's own reference so the final refcount on each buffer is
+	// held only by the returned Record. CheckedAllocator sees a clean
+	// shutdown after Record.Release fires.
+	defer func() {
+		for _, c := range cols {
+			if c != nil {
+				c.Release()
+			}
+		}
+	}()
 	for i, b := range builders {
 		cols[i] = b.NewArray()
 	}
@@ -325,5 +365,103 @@ func TestStreamArrowJSON_SpecialChars(t *testing.T) {
 		if row[0].(string) != exp {
 			t.Errorf("row[%d] expected %q, got %q", i, exp, row[0])
 		}
+	}
+}
+
+// errAfterNBytes is an io.Writer that succeeds for the first n bytes then
+// returns an error. Models a TCP connection that the client closed mid-stream.
+type errAfterNBytes struct {
+	limit int
+	wrote int
+	err   error
+}
+
+func (e *errAfterNBytes) Write(p []byte) (int, error) {
+	if e.wrote >= e.limit {
+		return 0, e.err
+	}
+	remaining := e.limit - e.wrote
+	if len(p) <= remaining {
+		e.wrote += len(p)
+		return len(p), nil
+	}
+	e.wrote = e.limit
+	return remaining, e.err
+}
+
+// TestStreamArrowJSON_FlushErrorBreaksLoop verifies that when the underlying
+// connection fails (client disconnect mid-stream), streamArrowJSON stops
+// iterating record batches instead of draining the entire result set into a
+// buffer nobody is reading. Regression test for the fasthttp-RequestCtx.Done
+// limitation: that channel only fires on server shutdown, so Flush errors are
+// our only signal that the client has gone away.
+func TestStreamArrowJSON_FlushErrorBreaksLoop(t *testing.T) {
+	// CheckedAllocator + AssertSize(t, 0) at the end of the test verifies
+	// that streamArrowJSON's break-on-Flush-error path doesn't leak Arrow
+	// memory. The buildArrowBatch helper now releases its builders (#427)
+	// so the only allocations live in the records themselves, which
+	// simpleRecordReader.Release frees. If a future edit forgets to
+	// release a record after the break, AssertSize will catch it.
+	alloc := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer alloc.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	// Need more than jsonFlushInterval rows total so the explicit Flush()
+	// fires at least once. The errAfterNBytes failure point (256 bytes)
+	// makes the failure happen sometime during the first batch, but
+	// bufio's internal 4 KiB buffer absorbs the sticky error until the
+	// next per-jsonFlushInterval Flush() returns it. With jsonFlushInterval
+	// = 1000 (see query_json_writer.go), 6 × 1024 = 6144 rows is plenty.
+	const (
+		batchRows  = 1024
+		numBatches = 6
+	)
+	records := make([]arrow.Record, numBatches)
+	for b := 0; b < numBatches; b++ {
+		rows := make([][]interface{}, batchRows)
+		for i := range rows {
+			rows[i] = []interface{}{int64(b*batchRows + i)}
+		}
+		records[b] = buildArrowBatch(alloc, schema, rows)
+	}
+	reader := newSimpleRecordReader(schema, records)
+	defer reader.Release()
+
+	sentinel := errors.New("client disconnected")
+	failingWriter := &errAfterNBytes{limit: 256, err: sentinel}
+	w := bufio.NewWriter(failingWriter)
+
+	rowCount, err := streamArrowJSON(
+		context.Background(), w, reader, 0, nil,
+		time.Now(), "2024-01-15T12:00:00Z",
+	)
+
+	if err == nil {
+		t.Fatalf("expected streamArrowJSON to return an error on client disconnect; got nil (rows=%d)", rowCount)
+	}
+	// The underlying I/O sentinel must be in the error chain so future
+	// debugging can identify the actual cause.
+	if !errors.Is(err, sentinel) {
+		t.Errorf("expected error to wrap underlying I/O sentinel %v, got %v", sentinel, err)
+	}
+	// The errClientDisconnected sentinel must also be in the error chain
+	// so callers can use errors.Is to disambiguate this from genuine
+	// server-side stream failures (and log at Warn instead of Error).
+	if !errors.Is(err, errClientDisconnected) {
+		t.Errorf("expected error to wrap errClientDisconnected, got %v", err)
+	}
+
+	// The break must fire at the FIRST explicit Flush after the writer's
+	// 256-byte limit is exceeded. bufio's internal 4 KiB auto-flush hits
+	// the failing writer well before row jsonFlushInterval, sets the
+	// sticky error, and subsequent WriteByte/WriteString calls silently
+	// no-op. At row jsonFlushInterval the explicit Flush() returns the
+	// stored error and the loop breaks. So rowCount should be EXACTLY
+	// jsonFlushInterval.
+	if rowCount != jsonFlushInterval {
+		t.Errorf("loop did not break exactly at flush boundary: emitted %d rows, expected %d", rowCount, jsonFlushInterval)
 	}
 }
