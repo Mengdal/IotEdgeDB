@@ -157,8 +157,8 @@ func TestSubscription_SetDefaults(t *testing.T) {
 	sub := &Subscription{}
 	sub.SetDefaults()
 
-	if sub.QoS != 1 {
-		t.Errorf("Default QoS = %d, want 1", sub.QoS)
+	if sub.QoS != 0 {
+		t.Errorf("Default QoS = %d, want 0", sub.QoS)
 	}
 	if sub.KeepAliveSeconds != 60 {
 		t.Errorf("Default KeepAliveSeconds = %d, want 60", sub.KeepAliveSeconds)

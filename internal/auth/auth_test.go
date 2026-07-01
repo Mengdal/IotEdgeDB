@@ -1,10 +1,11 @@
 package auth
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,8 +54,16 @@ func TestNewAuthManager(t *testing.T) {
 
 	t.Run("invalid path", func(t *testing.T) {
 		logger := zerolog.Nop()
-		// Use a path that should fail (root directory, no permission)
-		_, err := NewAuthManager("/nonexistent/deeply/nested/path/that/should/fail/auth.db", time.Minute, 100, logger)
+		// Use a path whose parent component is an existing regular file, so
+		// MkdirAll fails with ENOTDIR. This fails deterministically regardless
+		// of UID — a "/nonexistent/..." path would succeed under root (e.g. in
+		// containers running as UID 0), since the new pre-create logic runs
+		// MkdirAll before sql.Open.
+		notADir := filepath.Join(t.TempDir(), "regular-file")
+		if err := os.WriteFile(notADir, []byte("x"), 0600); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		_, err := NewAuthManager(filepath.Join(notADir, "auth.db"), time.Minute, 100, logger)
 		if err == nil {
 			t.Error("Expected error for invalid path")
 		}
@@ -88,7 +97,7 @@ func TestCreateToken(t *testing.T) {
 	defer cleanup()
 
 	t.Run("basic token creation", func(t *testing.T) {
-		token, err := am.CreateToken("test-token", "Test description", "read,write", nil)
+		token, err := am.CreateToken(context.Background(), "test-token", "Test description", "read,write", nil)
 		if err != nil {
 			t.Fatalf("CreateToken failed: %v", err)
 		}
@@ -102,12 +111,12 @@ func TestCreateToken(t *testing.T) {
 	})
 
 	t.Run("duplicate name", func(t *testing.T) {
-		_, err := am.CreateToken("dup-token", "First", "read", nil)
+		_, err := am.CreateToken(context.Background(), "dup-token", "First", "read", nil)
 		if err != nil {
 			t.Fatalf("First CreateToken failed: %v", err)
 		}
 
-		_, err = am.CreateToken("dup-token", "Second", "read", nil)
+		_, err = am.CreateToken(context.Background(), "dup-token", "Second", "read", nil)
 		if err == nil {
 			t.Error("Expected error for duplicate token name")
 		}
@@ -115,7 +124,7 @@ func TestCreateToken(t *testing.T) {
 
 	t.Run("with expiration", func(t *testing.T) {
 		expiresAt := time.Now().Add(24 * time.Hour)
-		token, err := am.CreateToken("expiring-token", "Expires in 24h", "read", &expiresAt)
+		token, err := am.CreateToken(context.Background(), "expiring-token", "Expires in 24h", "read", &expiresAt)
 		if err != nil {
 			t.Fatalf("CreateToken with expiration failed: %v", err)
 		}
@@ -125,7 +134,7 @@ func TestCreateToken(t *testing.T) {
 	})
 
 	t.Run("default permissions", func(t *testing.T) {
-		token, err := am.CreateToken("default-perms", "Default permissions", "", nil)
+		token, err := am.CreateToken(context.Background(), "default-perms", "Default permissions", "", nil)
 		if err != nil {
 			t.Fatalf("CreateToken failed: %v", err)
 		}
@@ -150,6 +159,36 @@ func TestCreateToken(t *testing.T) {
 			t.Errorf("Default permissions should be read,write, got %v", info.Permissions)
 		}
 	})
+	// Regression: a token created with the PermissionsNone sentinel must be
+	// stored with NO OSS permissions (RBAC-only). Previously the auth manager
+	// re-defaulted any empty permission string to read,write, so a request for
+	// a least-privilege RBAC-only token was silently upgraded to wildcard
+	// read,write — a privilege-escalation-shaped bug surfaced while validating
+	// GHSA-93cm-2v4m-c56c.
+	t.Run("PermissionsNone yields RBAC-only token (no OSS permissions)", func(t *testing.T) {
+		token, err := am.CreateToken(context.Background(), "rbac-only", "no OSS perms", PermissionsNone, nil)
+		if err != nil {
+			t.Fatalf("CreateToken failed: %v", err)
+		}
+		info := am.VerifyToken(token)
+		if info == nil {
+			t.Fatal("Token verification failed")
+		}
+		// Empty permission set: no read, no write, nothing. RBAC grants (if any)
+		// are layered on separately by the RBAC manager, not by this field.
+		nonEmpty := false
+		for _, p := range info.Permissions {
+			if p != "" {
+				nonEmpty = true
+			}
+		}
+		if nonEmpty {
+			t.Errorf("PermissionsNone token must have no OSS permissions, got %v", info.Permissions)
+		}
+		if am.HasPermission(info, "read") || am.HasPermission(info, "write") {
+			t.Errorf("PermissionsNone token must not satisfy read/write, perms=%v", info.Permissions)
+		}
+	})
 }
 
 // TestVerifyToken tests token verification
@@ -158,7 +197,7 @@ func TestVerifyToken(t *testing.T) {
 	defer cleanup()
 
 	t.Run("valid token", func(t *testing.T) {
-		token, _ := am.CreateToken("verify-test", "Test", "read,write", nil)
+		token, _ := am.CreateToken(context.Background(), "verify-test", "Test", "read,write", nil)
 
 		info := am.VerifyToken(token)
 		if info == nil {
@@ -189,7 +228,7 @@ func TestVerifyToken(t *testing.T) {
 	t.Run("expired token", func(t *testing.T) {
 		// Create token that expires immediately
 		expiresAt := time.Now().Add(-1 * time.Second)
-		token, _ := am.CreateToken("expired-token", "Already expired", "read", &expiresAt)
+		token, _ := am.CreateToken(context.Background(), "expired-token", "Already expired", "read", &expiresAt)
 
 		info := am.VerifyToken(token)
 		if info != nil {
@@ -203,7 +242,7 @@ func TestVerifyToken_Cache(t *testing.T) {
 	am, cleanup := setupTestAuthManager(t)
 	defer cleanup()
 
-	token, _ := am.CreateToken("cache-test", "Test", "read", nil)
+	token, _ := am.CreateToken(context.Background(), "cache-test", "Test", "read", nil)
 
 	// First verification - cache miss
 	initialMisses := am.cacheMisses.Load()
@@ -232,7 +271,7 @@ func TestRotateToken(t *testing.T) {
 	defer cleanup()
 
 	// Create initial token
-	oldToken, _ := am.CreateToken("rotate-test", "Test", "read,write", nil)
+	oldToken, _ := am.CreateToken(context.Background(), "rotate-test", "Test", "read,write", nil)
 	info := am.VerifyToken(oldToken)
 	if info == nil {
 		t.Fatal("Initial token verification failed")
@@ -240,7 +279,7 @@ func TestRotateToken(t *testing.T) {
 	tokenID := info.ID
 
 	// Rotate token
-	newToken, err := am.RotateToken(tokenID)
+	newToken, err := am.RotateToken(context.Background(), tokenID)
 	if err != nil {
 		t.Fatalf("RotateToken failed: %v", err)
 	}
@@ -265,14 +304,14 @@ func TestRevokeToken(t *testing.T) {
 	am, cleanup := setupTestAuthManager(t)
 	defer cleanup()
 
-	token, _ := am.CreateToken("revoke-test", "Test", "read", nil)
+	token, _ := am.CreateToken(context.Background(), "revoke-test", "Test", "read", nil)
 	info := am.VerifyToken(token)
 	if info == nil {
 		t.Fatal("Initial verification failed")
 	}
 
 	// Revoke token
-	err := am.RevokeToken(info.ID)
+	err := am.RevokeToken(context.Background(), info.ID)
 	if err != nil {
 		t.Fatalf("RevokeToken failed: %v", err)
 	}
@@ -288,14 +327,14 @@ func TestDeleteToken(t *testing.T) {
 	am, cleanup := setupTestAuthManager(t)
 	defer cleanup()
 
-	token, _ := am.CreateToken("delete-test", "Test", "read", nil)
+	token, _ := am.CreateToken(context.Background(), "delete-test", "Test", "read", nil)
 	info := am.VerifyToken(token)
 	if info == nil {
 		t.Fatal("Initial verification failed")
 	}
 
 	// Delete token
-	err := am.DeleteToken(info.ID)
+	err := am.DeleteToken(context.Background(), info.ID)
 	if err != nil {
 		t.Fatalf("DeleteToken failed: %v", err)
 	}
@@ -321,9 +360,9 @@ func TestListTokens(t *testing.T) {
 	defer cleanup()
 
 	// Create multiple tokens
-	am.CreateToken("list-test-1", "First", "read", nil)
-	am.CreateToken("list-test-2", "Second", "write", nil)
-	am.CreateToken("list-test-3", "Third", "read,write,admin", nil)
+	am.CreateToken(context.Background(), "list-test-1", "First", "read", nil)
+	am.CreateToken(context.Background(), "list-test-2", "Second", "write", nil)
+	am.CreateToken(context.Background(), "list-test-3", "Third", "read,write,admin", nil)
 
 	tokens, err := am.ListTokens()
 	if err != nil {
@@ -378,7 +417,7 @@ func TestHasPermission(t *testing.T) {
 				return
 			}
 
-			token, _ := am.CreateToken("perm-test-"+tt.name, "Test", tt.permissions, nil)
+			token, _ := am.CreateToken(context.Background(), "perm-test-"+tt.name, "Test", tt.permissions, nil)
 			info := am.VerifyToken(token)
 			if info == nil {
 				t.Fatal("Token verification failed")
@@ -397,7 +436,7 @@ func TestUpdateToken(t *testing.T) {
 	am, cleanup := setupTestAuthManager(t)
 	defer cleanup()
 
-	token, _ := am.CreateToken("update-test", "Original", "read", nil)
+	token, _ := am.CreateToken(context.Background(), "update-test", "Original", "read", nil)
 	info := am.VerifyToken(token)
 	if info == nil {
 		t.Fatal("Initial verification failed")
@@ -405,7 +444,7 @@ func TestUpdateToken(t *testing.T) {
 
 	// Update description
 	newDesc := "Updated description"
-	err := am.UpdateToken(info.ID, nil, &newDesc, nil, nil)
+	err := am.UpdateToken(context.Background(), info.ID, nil, &newDesc, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateToken failed: %v", err)
 	}
@@ -426,7 +465,7 @@ func TestGetCacheStats(t *testing.T) {
 	defer cleanup()
 
 	// Create and verify a token to populate cache
-	token, _ := am.CreateToken("stats-test", "Test", "read", nil)
+	token, _ := am.CreateToken(context.Background(), "stats-test", "Test", "read", nil)
 	am.VerifyToken(token) // Cache miss
 	am.VerifyToken(token) // Cache hit
 
@@ -452,7 +491,7 @@ func TestInvalidateCache(t *testing.T) {
 	defer cleanup()
 
 	// Create and cache a token
-	token, _ := am.CreateToken("invalidate-test", "Test", "read", nil)
+	token, _ := am.CreateToken(context.Background(), "invalidate-test", "Test", "read", nil)
 	am.VerifyToken(token)
 
 	// Check cache has entry
@@ -481,7 +520,7 @@ func TestEnsureInitialToken(t *testing.T) {
 	defer cleanup()
 
 	// First call should create token
-	token, err := am.EnsureInitialToken()
+	token, err := am.EnsureInitialToken(context.Background())
 	if err != nil {
 		t.Fatalf("EnsureInitialToken failed: %v", err)
 	}
@@ -499,7 +538,7 @@ func TestEnsureInitialToken(t *testing.T) {
 	}
 
 	// Second call should return empty (tokens already exist)
-	token2, err := am.EnsureInitialToken()
+	token2, err := am.EnsureInitialToken(context.Background())
 	if err != nil {
 		t.Fatalf("Second EnsureInitialToken failed: %v", err)
 	}
@@ -526,7 +565,7 @@ func TestCacheEviction(t *testing.T) {
 	// Create and verify 4 tokens (should cause eviction)
 	var tokens []string
 	for i := 0; i < 4; i++ {
-		token, _ := am.CreateToken("eviction-test-"+string(rune('a'+i)), "Test", "read", nil)
+		token, _ := am.CreateToken(context.Background(), "eviction-test-"+string(rune('a'+i)), "Test", "read", nil)
 		tokens = append(tokens, token)
 		am.VerifyToken(token)
 	}
@@ -551,7 +590,7 @@ func TestTokenPrefix(t *testing.T) {
 	defer cleanup()
 
 	// Create token and verify prefix is stored
-	token, _ := am.CreateToken("prefix-test", "Test", "read", nil)
+	token, _ := am.CreateToken(context.Background(), "prefix-test", "Test", "read", nil)
 
 	// Query database directly to check prefix
 	var storedPrefix string
@@ -576,15 +615,18 @@ func TestVerifyTokenHash(t *testing.T) {
 	am, cleanup := setupTestAuthManager(t)
 	defer cleanup()
 
-	t.Run("bcrypt hash", func(t *testing.T) {
-		token := "test-token-bcrypt"
+	t.Run("pbkdf2 round-trip", func(t *testing.T) {
+		token := "test-token-pbkdf2"
 		hash, err := am.hashToken(token)
 		if err != nil {
 			t.Fatalf("hashToken failed: %v", err)
 		}
 
+		if !strings.HasPrefix(hash, pbkdf2Prefix) {
+			t.Errorf("hashToken should emit a %s hash, got %q", pbkdf2Prefix, hash)
+		}
 		if !am.verifyTokenHash(token, hash) {
-			t.Error("verifyTokenHash should return true for valid bcrypt hash")
+			t.Error("verifyTokenHash should return true for valid PBKDF2 hash")
 		}
 
 		if am.verifyTokenHash("wrong-token", hash) {
@@ -592,25 +634,50 @@ func TestVerifyTokenHash(t *testing.T) {
 		}
 	})
 
-	t.Run("sha256 legacy hash", func(t *testing.T) {
-		token := "legacy-token"
-		// Compute SHA256 hash like legacy Python code
-		h := sha256Sum(token)
-
-		if !am.verifyTokenHash(token, h) {
-			t.Error("verifyTokenHash should return true for valid SHA256 hash")
-		}
-
-		if am.verifyTokenHash("wrong-token", h) {
-			t.Error("verifyTokenHash should return false for wrong token")
+	t.Run("malformed pbkdf2 fails closed", func(t *testing.T) {
+		for _, bad := range []string{
+			pbkdf2Prefix,                            // no fields
+			pbkdf2Prefix + "notanint$c2FsdA$aGFzaA", // bad iter
+			pbkdf2Prefix + "600000$@@@$aGFzaA",      // bad salt b64
+			pbkdf2Prefix + "600000$c2FsdA$@@@",      // bad hash b64
+			pbkdf2Prefix + "0$c2FsdA$aGFzaA",        // zero iter
+		} {
+			if am.verifyTokenHash("any", bad) {
+				t.Errorf("malformed hash %q should not verify", bad)
+			}
 		}
 	})
-}
 
-// sha256Sum computes SHA256 hex digest (like legacy Python code)
-func sha256Sum(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
+	// A hostile hash with an absurd iteration count or wrong salt/key lengths
+	// must fail closed BEFORE doing the expensive derivation (CPU-DoS guard,
+	// relevant to rogue cluster-proposed TokenEntry values).
+	t.Run("pbkdf2 abusive parameters fail closed", func(t *testing.T) {
+		token := "dos-token"
+		good, err := am.hashToken(token)
+		if err != nil {
+			t.Fatalf("hashToken: %v", err)
+		}
+		parts := strings.Split(strings.TrimPrefix(good, pbkdf2Prefix), "$")
+		// Tamper only the iteration count to far above the accepted ceiling.
+		abusiveIter := pbkdf2Prefix + "999999999$" + parts[1] + "$" + parts[2]
+		if am.verifyTokenHash(token, abusiveIter) {
+			t.Error("hash with iter above the ceiling must fail closed")
+		}
+		// Oversized salt (correct b64, wrong length).
+		bigSalt := pbkdf2Prefix + "600000$" + base64.RawStdEncoding.EncodeToString(make([]byte, 1024)) + "$" + parts[2]
+		if am.verifyTokenHash(token, bigSalt) {
+			t.Error("hash with wrong-length salt must fail closed")
+		}
+		// Multi-megabyte hash must be rejected by the upfront length guard
+		// WITHOUT decoding it (memory-amplification guard).
+		huge := pbkdf2Prefix + "600000$" + strings.Repeat("A", 8<<20) + "$" + parts[2]
+		if am.verifyTokenHash(token, huge) {
+			t.Error("oversized hash must fail closed via the length guard")
+		}
+	})
+
+	// Legacy bcrypt/sha256 verification behavior is build-variant-specific and
+	// asserted in auth_hash_legacy_test.go (!fips) and auth_hash_fips_test.go (fips).
 }
 
 // TestCreateTokenWithValue tests creating a token with a user-supplied value
@@ -621,7 +688,7 @@ func TestCreateTokenWithValue(t *testing.T) {
 	validToken := "this-is-a-valid-token-value-with-enough-length"
 
 	t.Run("creates token with provided value", func(t *testing.T) {
-		got, err := am.CreateTokenWithValue(validToken, "bootstrap", "Bootstrap token", "read,write,admin", nil)
+		got, err := am.CreateTokenWithValue(context.Background(), validToken, "bootstrap", "Bootstrap token", "read,write,admin", nil)
 		if err != nil {
 			t.Fatalf("CreateTokenWithValue failed: %v", err)
 		}
@@ -640,21 +707,21 @@ func TestCreateTokenWithValue(t *testing.T) {
 	})
 
 	t.Run("rejects token shorter than 32 chars", func(t *testing.T) {
-		_, err := am.CreateTokenWithValue("tooshort", "short", "desc", "read", nil)
+		_, err := am.CreateTokenWithValue(context.Background(), "tooshort", "short", "desc", "read", nil)
 		if err == nil {
 			t.Error("expected error for token shorter than 32 chars")
 		}
 	})
 
 	t.Run("rejects duplicate name", func(t *testing.T) {
-		_, err := am.CreateTokenWithValue(validToken+"2", "bootstrap", "dup", "read", nil)
+		_, err := am.CreateTokenWithValue(context.Background(), validToken+"2", "bootstrap", "dup", "read", nil)
 		if err == nil {
 			t.Error("expected error for duplicate token name")
 		}
 	})
 
 	t.Run("default permissions are read,write when empty", func(t *testing.T) {
-		got, err := am.CreateTokenWithValue("another-valid-token-value-long-enough-here", "default-perms", "desc", "", nil)
+		got, err := am.CreateTokenWithValue(context.Background(), "another-valid-token-value-long-enough-here", "default-perms", "desc", "", nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -682,7 +749,7 @@ func TestEnsureInitialTokenWithValue(t *testing.T) {
 		am, cleanup := setupTestAuthManager(t)
 		defer cleanup()
 
-		got, err := am.EnsureInitialTokenWithValue(validToken)
+		got, err := am.EnsureInitialTokenWithValue(context.Background(), validToken)
 		if err != nil {
 			t.Fatalf("EnsureInitialTokenWithValue failed: %v", err)
 		}
@@ -704,12 +771,12 @@ func TestEnsureInitialTokenWithValue(t *testing.T) {
 		defer cleanup()
 
 		// Pre-create a token
-		_, err := am.CreateToken("existing", "pre-existing token", "admin", nil)
+		_, err := am.CreateToken(context.Background(), "existing", "pre-existing token", "admin", nil)
 		if err != nil {
 			t.Fatalf("pre-create failed: %v", err)
 		}
 
-		got, err := am.EnsureInitialTokenWithValue(validToken)
+		got, err := am.EnsureInitialTokenWithValue(context.Background(), validToken)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -731,7 +798,7 @@ func TestEnsureInitialTokenWithValue(t *testing.T) {
 		am, cleanup := setupTestAuthManager(t)
 		defer cleanup()
 
-		_, err := am.EnsureInitialTokenWithValue("short")
+		_, err := am.EnsureInitialTokenWithValue(context.Background(), "short")
 		if err == nil {
 			t.Error("expected error for token shorter than 32 chars")
 		}
@@ -745,7 +812,7 @@ func TestEnsureInitialTokenWithValue(t *testing.T) {
 		results := make(chan error, goroutines)
 		for i := 0; i < goroutines; i++ {
 			go func() {
-				_, err := am.EnsureInitialTokenWithValue(validToken)
+				_, err := am.EnsureInitialTokenWithValue(context.Background(), validToken)
 				results <- err
 			}()
 		}
@@ -776,12 +843,12 @@ func TestForceAddRecoveryToken(t *testing.T) {
 		defer cleanup()
 
 		// Create an existing admin token
-		existingToken, err := am.CreateToken("existing-admin", "pre-existing", "read,write,admin", nil)
+		existingToken, err := am.CreateToken(context.Background(), "existing-admin", "pre-existing", "read,write,admin", nil)
 		if err != nil {
 			t.Fatalf("pre-create failed: %v", err)
 		}
 
-		got, err := am.ForceAddRecoveryToken(recoveryToken)
+		got, err := am.ForceAddRecoveryToken(context.Background(), recoveryToken)
 		if err != nil {
 			t.Fatalf("ForceAddRecoveryToken failed: %v", err)
 		}
@@ -808,7 +875,7 @@ func TestForceAddRecoveryToken(t *testing.T) {
 		am, cleanup := setupTestAuthManager(t)
 		defer cleanup()
 
-		_, err := am.ForceAddRecoveryToken(recoveryToken)
+		_, err := am.ForceAddRecoveryToken(context.Background(), recoveryToken)
 		if err != nil {
 			t.Fatalf("ForceAddRecoveryToken failed: %v", err)
 		}
@@ -829,13 +896,13 @@ func TestForceAddRecoveryToken(t *testing.T) {
 		am, cleanup := setupTestAuthManager(t)
 		defer cleanup()
 
-		_, err := am.ForceAddRecoveryToken(recoveryToken)
+		_, err := am.ForceAddRecoveryToken(context.Background(), recoveryToken)
 		if err != nil {
 			t.Fatalf("first ForceAddRecoveryToken failed: %v", err)
 		}
 
 		// Second call with same token name should be a no-op, not an error
-		got, err := am.ForceAddRecoveryToken(recoveryToken)
+		got, err := am.ForceAddRecoveryToken(context.Background(), recoveryToken)
 		if err != nil {
 			t.Fatalf("second ForceAddRecoveryToken should not error: %v", err)
 		}
@@ -848,9 +915,82 @@ func TestForceAddRecoveryToken(t *testing.T) {
 		am, cleanup := setupTestAuthManager(t)
 		defer cleanup()
 
-		_, err := am.ForceAddRecoveryToken("short")
+		_, err := am.ForceAddRecoveryToken(context.Background(), "short")
 		if err == nil {
 			t.Error("expected error for token shorter than 32 chars")
 		}
 	})
+}
+
+// TestNewAuthManager_CreatesDirAndLocksPerms verifies the H2 hardening: given a
+// bare path into a not-yet-existing subdirectory (the production contract — see
+// the auth.db_path default), NewAuthManager creates the directory and locks the
+// DB plus its WAL/SHM siblings to 0600. Tokens are hashed in these files, so
+// world-readable (umask 0644) permissions would be a real exposure.
+func TestNewAuthManager_CreatesDirAndLocksPerms(t *testing.T) {
+	base := t.TempDir()
+	// Subdirectory that does NOT exist yet — NewAuthManager must create it.
+	dbPath := filepath.Join(base, "sub", "auth.db")
+
+	am, err := NewAuthManager(dbPath, 5*time.Minute, 100, zerolog.Nop())
+	if err != nil {
+		t.Fatalf("NewAuthManager into non-existent dir failed: %v", err)
+	}
+	t.Cleanup(func() { am.Close() })
+
+	// The DB and any WAL/SHM siblings that exist must be 0600.
+	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		info, err := os.Stat(p)
+		if os.IsNotExist(err) {
+			continue // -wal/-shm may not exist depending on journal state
+		}
+		if err != nil {
+			t.Fatalf("stat %s: %v", p, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Errorf("%s perm = %o, want 0600", filepath.Base(p), perm)
+		}
+	}
+}
+
+// TestNewAuthManager_SymlinkedDBLocksRealWALPerms verifies that when the auth
+// DB path is a symlink, the -wal/-shm files SQLite creates beside the symlink's
+// real target are still locked to 0600. SQLite resolves symlinks before opening,
+// so a naive "symlinkPath+'-wal'" would point at a non-existent sibling of the
+// link and leave the real WAL untouched. NewAuthManager resolves the symlink
+// (filepath.EvalSymlinks) before chmod'ing the WAL/SHM siblings.
+func TestNewAuthManager_SymlinkedDBLocksRealWALPerms(t *testing.T) {
+	base := t.TempDir()
+	realDir := filepath.Join(base, "real")
+	linkDir := filepath.Join(base, "link")
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatalf("mkdir real: %v", err)
+	}
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		// Symlink creation can be denied in restricted sandboxes/CI; the
+		// behavior under test is unobservable without one, so skip rather
+		// than fail.
+		t.Skipf("symlink creation not supported or permitted: %v", err)
+	}
+
+	// Open via the symlinked directory; the real files land under realDir.
+	am, err := NewAuthManager(filepath.Join(linkDir, "auth.db"), 5*time.Minute, 100, zerolog.Nop())
+	if err != nil {
+		t.Fatalf("NewAuthManager via symlink failed: %v", err)
+	}
+	t.Cleanup(func() { am.Close() })
+
+	realDB := filepath.Join(realDir, "auth.db")
+	for _, p := range []string{realDB, realDB + "-wal", realDB + "-shm"} {
+		info, err := os.Lstat(p)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("lstat %s: %v", p, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Errorf("%s perm = %o, want 0600 (symlink resolution failed?)", filepath.Base(p), perm)
+		}
+	}
 }
