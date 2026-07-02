@@ -106,7 +106,6 @@ check()   { if [ "$2" = "$3" ]; then log_pass "$1 (expected=$2)"; else log_fail 
 check_count() { local v; v=$(query_val "$2"); [ "$v" = "__ERR__" ] && return 1; check "$1" "$3" "$v"; }
 
 # verify_value: check that a specific row exists with the given column values
-# Usage: verify_value <label> <measurement> <where_clause>
 verify_value() {
     local label="$1" meas="$2" where="$3"
     local cnt; cnt=$(query_val "SELECT COUNT(*) FROM ${meas} WHERE ${where}")
@@ -114,15 +113,22 @@ verify_value() {
     check "$label" "1" "$cnt"
 }
 
-# verify_values_all: write input data as CSV and verify all values match
-# Usage: verify_values_all <label> <measurement> <columns> <values_csv>
-#   columns: "col1,col2,col3"
-#   values_csv: "val1,val2,val3" (one row)
-verify_values_all() {
-    local label="$1" meas="$2" cols="$3" values="$4"
-    local cnt; cnt=$(query_val "SELECT COUNT(*) FROM ${meas} WHERE ${values}")
-    [ "$cnt" = "__ERR__" ] && return 1
-    check "$label" "1" "$cnt"
+# verify_row: query a specific row's column values and compare with expected inputs.
+# Usage: verify_row <label> <measurement> <where_clause> <column> <expected_value>
+# Example: verify_row "check temp" "m" "'sensor'='s1' AND \"time\"=ts" "temp" "22.5"
+verify_row() {
+    local label="$1" meas="$2" where="$3" col="$4" expected="$5"
+    local actual; actual=$(query_val "SELECT \"${col}\" FROM ${meas} WHERE ${where} LIMIT 1")
+    [ "$actual" = "__ERR__" ] && return 1
+    check "$label" "$expected" "$actual"
+}
+
+# verify_data_consistency: check that all rows from input are queryable.
+# Queries total count and verifies key columns exist.
+verify_data_consistency() {
+    local label="$1" meas="$2" total="$3" distinct_tag="$4"
+    check_count "${label}: ${total} total rows" "SELECT COUNT(*) FROM ${meas}" "$total"
+    check_count "${label}: ${distinct_tag} distinct tags" "SELECT COUNT(DISTINCT \"tag\") FROM ${meas}" "$distinct_tag"
 }
 
 flush_all() {
@@ -131,7 +137,8 @@ flush_all() {
 
 count_parquet_files() {
     local meas="$1"
-    find "$IEDB_DATA" -path "*/${meas}/*.parquet" 2>/dev/null | wc -l | tr -d ' '
+    sleep 0.3  # allow async filesystem operations to complete
+    find "$IEDB_DATA" -name "${meas}_*.parquet" 2>/dev/null | wc -l | tr -d ' '
 }
 
 # ── Server lifecycle ────────────────────────────────────────────────────────
@@ -147,7 +154,7 @@ start_server() {
     IEDB_BIN="$(cd "$(dirname "$IEDB_BIN")" && pwd)/$(basename "$IEDB_BIN")"
 
     export IEDB_SERVER_PORT="${IEDB_PORT}" IEDB_LOG_LEVEL="error" IEDB_LOG_FORMAT="console"
-    export IEDB_DATABASE_MAX_CONNECTIONS="4" IEDB_DATABASE_MEMORY_LIMIT="512MB" IEDB_DATABASE_THREAD_COUNT="2"
+    export IEDB_DATABASE_MAX_CONNECTIONS="4" IEDB_DATABASE_MEMORY_LIMIT="256MB" IEDB_DATABASE_THREAD_COUNT="2"
     export IEDB_DATABASE_TIMEZONE="UTC" IEDB_DATABASE_ENABLE_WAL="false"
     export IEDB_STORAGE_BACKEND="local" IEDB_STORAGE_LOCAL_PATH="${IEDB_DATA}"
     export IEDB_INGEST_COMPRESSION="none" IEDB_INGEST_USE_DICTIONARY="false"

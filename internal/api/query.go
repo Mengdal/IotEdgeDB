@@ -2253,8 +2253,8 @@ func (h *QueryHandler) emitCTE(keyword string, body strings.Builder, dbName, mea
 	// filters into the Arrow VIEW branches, which triggers SIGBUS on
 	// STRING columns that exist only in the buffer (not in Parquet).
 	h.pendingCTEs = append(h.pendingCTEs,
-		fmt.Sprintf("\"%s\" AS MATERIALIZED (%s)", cteName, raw))
-	return fmt.Sprintf("%s \"%s\"", keyword, cteName)
+		fmt.Sprintf("\"%s\" AS (%s)", cteName, raw))
+	return fmt.Sprintf("%s (SELECT * FROM \"%s\" OFFSET 0) _iedb_ofs", keyword, cteName)
 }
 
 func (h *QueryHandler) wrapWithBufferView(expr, keyword, dbName, measurement string) string {
