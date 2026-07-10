@@ -18,11 +18,11 @@ type AgentInfo struct {
 
 // TableMeta describes the real-time data an agent holds for a table.
 type TableMeta struct {
-	DB       string
-	Table    string
-	MinTime  int64
-	MaxTime  int64
-	RowCount int
+	DB       string `json:"db"`
+	Table    string `json:"table"`
+	MinTime  int64  `json:"min_time"`
+	MaxTime  int64  `json:"max_time"`
+	RowCount int    `json:"row_count"`
 }
 
 // AgentRegistry manages agent registration and table-to-agent mapping.
@@ -190,6 +190,11 @@ func (r *AgentRegistry) cleanup() {
 			}
 		}
 	}
+}
+
+// ForceCleanup runs the cleanup check immediately (useful in tests).
+func (r *AgentRegistry) ForceCleanup() {
+	r.cleanup()
 }
 
 // Stop shuts down the cleanup loop.
