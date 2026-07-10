@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"iedb/internal/agent"
 	"iedb/internal/api"
 	"iedb/internal/audit"
 	"iedb/internal/auth"
@@ -1865,6 +1866,30 @@ func main() {
 	if authManager != nil && rbacManager != nil {
 		queryHandler.SetAuthAndRBAC(authManager, rbacManager)
 	}
+
+	// Initialize agent registry and handler for edge ingest agent support.
+	// Agents register via REST API and report table metadata via heartbeat;
+	// the query path merges agent in-memory data with storage-based results.
+	if !cfg.Ingest.AgentDisabled {
+		agentTimeout, err := time.ParseDuration(cfg.Ingest.AgentHeartbeatTimeout)
+		if err != nil || agentTimeout <= 0 {
+			agentTimeout = 30 * time.Second
+		}
+		agentRegistry := agent.NewAgentRegistry(agentTimeout)
+		shutdownCoordinator.RegisterHook("agent-registry", func(ctx context.Context) error {
+			agentRegistry.Stop()
+			return nil
+		}, shutdown.PriorityHTTPServer)
+
+		agentHandler := api.NewAgentHandler(agentRegistry, storageBackend)
+		agentHandler.RegisterRoutes(server.GetApp())
+
+		queryHandler.SetAgentRegistry(agentRegistry)
+		log.Info().
+			Str("heartbeat_timeout", agentTimeout.String()).
+			Msg("Agent subsystem enabled")
+	}
+
 	queryHandler.RegisterRoutes(server.GetApp())
 	// Start the handler's background workers (currently the partition
 	// pruner cache janitor — sweeps expired globCache / partitionCache

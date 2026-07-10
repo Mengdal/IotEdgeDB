@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	duckdb "github.com/duckdb/duckdb-go/v2"
+	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog"
 )
 
@@ -263,6 +266,78 @@ func toInt64(v interface{}) (int64, bool) {
 	return 0, false
 }
 
+func init() {
+	agentMergeQueryFunc = executeAgentMerge
+}
+
+// executeAgentMerge fetches live agent data for a table, registers Arrow views in
+// DuckDB, and returns a rewritten SQL that UNION ALLs the agent views with the
+// original storage-based query. Returns empty string if no agent data is available.
+func executeAgentMerge(h *QueryHandler, c *fiber.Ctx, db, table, convertedSQL string) string {
+	results := fetchAgentData(c.Context(), h.logger, h.agentRegistry, db, table, nil, nil)
+	if len(results) == 0 {
+		return ""
+	}
+
+	var successResults []AgentQueryResult
+	for _, r := range results {
+		if r.Error != nil || len(r.Rows) == 0 {
+			continue
+		}
+		rec, err := rowsToArrow(r.Rows)
+		if err != nil || rec == nil {
+			continue
+		}
+
+		viewName := fmt.Sprintf("_agent_%s", strings.ReplaceAll(r.AgentID, "-", "_"))
+		if err := registerAgentView(c.Context(), h, viewName, rec); err != nil {
+			h.logger.Warn().Err(err).Str("agent", r.AgentID).Str("view", viewName).
+				Msg("Failed to register agent Arrow view in DuckDB")
+			continue
+		}
+		successResults = append(successResults, r)
+	}
+
+	// Rewrite SQL to UNION ALL agent views
+	agentSQL := buildAgentViewsSQL(successResults)
+	if agentSQL == "" {
+		return ""
+	}
+	return fmt.Sprintf("SELECT * FROM (%s UNION ALL %s)", convertedSQL, agentSQL)
+}
+
+// registerAgentView registers an Arrow record as a named DuckDB view via the raw
+// driver connection. The view name must be a valid SQL identifier (no dashes —
+// callers replace them with underscores). The view persists for the lifetime of
+// the DuckDB connection used for the current query.
+func registerAgentView(ctx context.Context, h *QueryHandler, viewName string, rec arrow.Record) error {
+	conn, err := h.db.DB().Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire DuckDB connection: %w", err)
+	}
+	defer conn.Close()
+
+	return conn.Raw(func(driverConn any) error {
+		dc, ok := driverConn.(driver.Conn)
+		if !ok {
+			return fmt.Errorf("connection does not implement driver.Conn")
+		}
+		arrowAPI, err := duckdb.NewArrowFromConn(dc)
+		if err != nil {
+			return fmt.Errorf("failed to create Arrow interface: %w", err)
+		}
+		reader, err := array.NewRecordReader(rec.Schema(), []arrow.RecordBatch{rec})
+		if err != nil {
+			return fmt.Errorf("failed to create record reader: %w", err)
+		}
+		_, err = arrowAPI.RegisterView(reader, viewName)
+		if err != nil {
+			return fmt.Errorf("failed to register view: %w", err)
+		}
+		return nil
+	})
+}
+
 // buildAgentViewsSQL returns a UNION ALL SQL fragment for agent data,
 // or empty string if no agents returned data.
 func buildAgentViewsSQL(results []AgentQueryResult) string {
@@ -273,7 +348,7 @@ func buildAgentViewsSQL(results []AgentQueryResult) string {
 		}
 		// DuckDB can read from registered Arrow views
 		viewName := fmt.Sprintf("_agent_%s", strings.ReplaceAll(r.AgentID, "-", "_"))
-		parts = append(parts, fmt.Sprintf("SELECT * FROM %s", viewName))
+		parts = append(parts, fmt.Sprintf("SELECT * FROM \"%s\"", viewName))
 	}
 	if len(parts) == 0 {
 		return ""
