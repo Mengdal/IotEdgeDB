@@ -6,6 +6,7 @@ import (
 	"iedb/internal/ingest"
 	"iedb/pkg/models"
 	"io"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -115,6 +116,7 @@ func (h *ImportHandler) handleLineProtocolImport(c *fiber.Ctx) error {
 	if database == "" {
 		database = c.Query("db")
 	}
+	database = strings.Clone(database)
 	if database == "" {
 		h.totalErrors.Add(1)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -374,6 +376,7 @@ func (h *ImportHandler) handleTLEImport(c *fiber.Ctx) error {
 	if database == "" {
 		database = c.Query("db")
 	}
+	database = strings.Clone(database)
 	if database == "" {
 		h.totalErrors.Add(1)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -458,8 +461,15 @@ func (h *ImportHandler) handleTLEImport(c *fiber.Ctx) error {
 		})
 	}
 
-	// Measurement name from header (default: satellite_tle)
-	measurement := c.Get("x-iedb-measurement", "satellite_tle")
+	// Measurement name from header (default: satellite_tle). Clone for the same
+	// aliasing reason as database above; clone only the request-provided value,
+	// not the static default (which does not alias the request buffer).
+	measurement := c.Get("x-iedb-measurement")
+	if measurement == "" {
+		measurement = "satellite_tle"
+	} else {
+		measurement = strings.Clone(measurement)
+	}
 	if !isValidMeasurementName(measurement) {
 		h.totalErrors.Add(1)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{

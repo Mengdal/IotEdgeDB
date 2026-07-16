@@ -590,10 +590,8 @@ func (b *LocalBackend) RemoveDirectory(ctx context.Context, path string) error {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 
-	// os.RemoveAll recursively removes the directory tree. At this point all
-	// files have already been deleted by the caller, so only empty directories
-	// remain. RemoveAll handles nested empty dirs that os.Remove would reject.
-	if err := os.RemoveAll(fullPath); err != nil {
+	// os.Remove only removes empty directories
+	if err := os.Remove(fullPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil // Already removed, not an error
 		}
@@ -608,6 +606,55 @@ func (b *LocalBackend) RemoveDirectory(ctx context.Context, path string) error {
 	b.logger.Debug().
 		Str("path", path).
 		Msg("Removed directory")
+
+	return nil
+}
+
+// RemoveDirectoryRecursive recursively removes the entire directory tree for a
+// database or measurement. Unlike RemoveDirectory (which only removes empty
+// directories), this is intended for post-delete cleanup when all data files
+// have already been removed.
+//
+// All subdirectory paths that were tracked in the directory cache are evicted
+// so subsequent writes recreate them via ensureDir instead of assuming they
+// still exist.
+func (b *LocalBackend) RemoveDirectoryRecursive(ctx context.Context, path string) error {
+	fullPath, err := b.validatePath(path)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Collect cached directory entries under fullPath so we can evict them
+	// after the recursive delete. Paths in dirCache are absolute (they are
+	// produced by filepath.Join(b.basePath, ...) in ensureDir's callers).
+	var toEvict []string
+	b.dirMu.RLock()
+	for cached := range b.dirCache {
+		if cached == fullPath || strings.HasPrefix(cached, fullPath+string(filepath.Separator)) {
+			toEvict = append(toEvict, cached)
+		}
+	}
+	b.dirMu.RUnlock()
+
+	if err := os.RemoveAll(fullPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to remove directory tree: %w", err)
+	}
+
+	if len(toEvict) > 0 {
+		b.dirMu.Lock()
+		for _, cached := range toEvict {
+			delete(b.dirCache, cached)
+		}
+		b.dirMu.Unlock()
+	}
+
+	b.logger.Info().
+		Str("path", path).
+		Int("cache_entries_evicted", len(toEvict)).
+		Msg("Recursively removed directory tree")
 
 	return nil
 }

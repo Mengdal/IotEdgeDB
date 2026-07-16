@@ -408,6 +408,7 @@ func (h *ImportHandler) importPreamble(c *fiber.Ctx) (string, string, error) {
 	if database == "" {
 		database = c.Query("db")
 	}
+	database = strings.Clone(database)
 	if database == "" {
 		h.totalErrors.Add(1)
 		return "", "", c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "database is required (set x-iedb-database header or db query param)"})
@@ -417,7 +418,7 @@ func (h *ImportHandler) importPreamble(c *fiber.Ctx) (string, string, error) {
 		return "", "", c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid database name: must start with a letter and contain only alphanumeric characters, underscores, or hyphens (max 64 characters)"})
 	}
 
-	measurement := c.Query("measurement")
+	measurement := strings.Clone(c.Query("measurement"))
 	if measurement == "" {
 		h.totalErrors.Add(1)
 		return "", "", c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "measurement query parameter is required"})

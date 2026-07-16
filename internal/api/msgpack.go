@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"iedb/internal/auth"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -285,7 +286,7 @@ localProcessing:
 	}
 
 	// Get database from header (optional)
-	database := c.Get("x-iedb-database")
+	database := strings.Clone(c.Get("x-iedb-database"))
 
 	// Get record count based on type
 	var recordCount int

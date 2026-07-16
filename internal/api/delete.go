@@ -95,7 +95,7 @@ type DeleteHandler struct {
 	config         *config.DeleteConfig
 	authManager    *auth.AuthManager
 	coordinator    DeleteCoordinator // nil in standalone mode
-	tieringManager *tiering.Manager   // nil when tiering is disabled or unlicensed
+	tieringManager *tiering.Manager  // nil when tiering is disabled or unlicensed
 	// tempDir is the absolute, sandbox-allowlisted directory used by
 	// rewriteS3File to stage the COPY-rewritten parquet locally before
 	// uploading. MUST match one of the prefixes added to DuckDB's
@@ -442,25 +442,28 @@ func (h *DeleteHandler) handleDelete(c *fiber.Ctx) error {
 		Float64("execution_time_ms", executionTime).
 		Msg("Delete operation completed")
 
-	// Cleanup: if no files remain for this measurement, clean tiering metadata
-	// and remove empty directories so it disappears from measurement listings.
+	// Clean up the measurement directory only if no files remain, so it
+	// disappears from listings. Guards against partial deletes (WHERE filters)
+	// that leave other partitions intact — RemoveDirectoryRecursive would
+	// otherwise wipe those still-in-use files.
 	if len(failedFiles) == 0 {
-		remaining, err := h.storage.List(ctx, req.Database+"/"+req.Measurement+"/")
-		if err == nil && len(remaining) == 0 {
-			// Clean tiering metadata
-			if h.tieringManager != nil {
-				if n, metaErr := h.tieringManager.DeleteFilesByMeasurement(ctx, req.Database, req.Measurement); metaErr != nil {
-					h.logger.Warn().Err(metaErr).Str("database", req.Database).
-						Str("measurement", req.Measurement).Msg("Failed to clean tiering metadata")
-				} else if n > 0 {
-					h.logger.Info().Str("database", req.Database).
-						Str("measurement", req.Measurement).Int64("count", n).
-						Msg("Cleaned tiering metadata")
+		remaining, remErr := h.storage.List(ctx, req.Database+"/"+req.Measurement+"/")
+		if remErr == nil && len(remaining) == 0 {
+			if lb, ok := h.storage.(*storage.LocalBackend); ok {
+				h.logger.Info().Str("database", req.Database).Str("measurement", req.Measurement).Msg("All files removed; cleaning up measurement directory")
+				if err := lb.RemoveDirectoryRecursive(ctx, req.Database+"/"+req.Measurement); err != nil {
+					h.logger.Warn().Err(err).Str("database", req.Database).Str("measurement", req.Measurement).Msg("Could not remove measurement directory")
+				} else {
+					h.logger.Info().Str("database", req.Database).Str("measurement", req.Measurement).Msg("Measurement directory removed")
 				}
 			}
-			// Remove empty directory tree
-			if dirRemover, ok := h.storage.(storage.DirectoryRemover); ok {
-				_ = dirRemover.RemoveDirectory(ctx, req.Database+"/"+req.Measurement)
+
+			if h.tieringManager != nil {
+				if n, err := h.tieringManager.DeleteFilesByMeasurement(ctx, req.Database, req.Measurement); err != nil {
+					h.logger.Warn().Err(err).Str("database", req.Database).Str("measurement", req.Measurement).Msg("Failed to clean tiering metadata after measurement delete")
+				} else if n > 0 {
+					h.logger.Info().Str("database", req.Database).Str("measurement", req.Measurement).Int64("metadata_count", n).Msg("Cleaned tiering metadata after measurement delete")
+				}
 			}
 		}
 	}

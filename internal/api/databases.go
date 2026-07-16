@@ -376,12 +376,12 @@ func (h *DatabasesHandler) handleDelete(c *fiber.Ctx) error {
 		h.logger.Debug().Str("path", markerPath).Msg("Deleted database marker file")
 	}
 
-	// Try to remove the empty database directory
-	// This is a best-effort operation - for local storage, we try to remove the directory
-	// For S3/Azure, directories don't exist as actual objects, so this is a no-op
-	if dirRemover, ok := h.storage.(storage.DirectoryRemover); ok {
-		if err := dirRemover.RemoveDirectory(ctx, name); err != nil {
-			h.logger.Debug().Err(err).Str("database", name).Msg("Could not remove database directory (may not be empty)")
+	// Recursively remove the database directory tree (local storage only).
+	// Unlike RemoveDirectory (empty-only), this handles nested empty subdirs
+	// so the database disappears from listings after all files are gone.
+	if lb, ok := h.storage.(*storage.LocalBackend); ok {
+		if err := lb.RemoveDirectoryRecursive(ctx, name); err != nil {
+			h.logger.Debug().Err(err).Str("database", name).Msg("Could not remove database directory")
 		}
 	}
 

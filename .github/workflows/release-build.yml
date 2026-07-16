@@ -202,6 +202,11 @@ jobs:
           # Copy config
           cp iedb.toml ${PKG_DIR}/etc/iedb/iedb.toml
 
+          # Download and extract frontend files (zip contains front/ directory)
+          curl -fsSL -o /tmp/front.zip -L "https://github.com/Mengdal/iedb-ui/releases/latest/download/front.zip"
+          unzip -o /tmp/front.zip -d ${PKG_DIR}/var/lib/iedb
+          rm /tmp/front.zip
+
           # Create systemd service
           cat > ${PKG_DIR}/lib/systemd/system/iedb.service << 'SERVICE'
           [Unit]
@@ -328,11 +333,14 @@ jobs:
           # Create RPM build structure
           mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
-          # Create source tarball
+          # Create source tarball (including frontend)
           mkdir -p iedb-${VERSION}
           cp iedb-${{ matrix.binary_suffix }} iedb-${VERSION}/iedb
           chmod +x iedb-${VERSION}/iedb
           cp iedb.toml iedb-${VERSION}/
+          curl -fsSL -o /tmp/front.zip -L "https://github.com/Mengdal/iedb-ui/releases/latest/download/front.zip"
+          unzip -o /tmp/front.zip -d iedb-${VERSION}
+          rm /tmp/front.zip
           tar -czf ~/rpmbuild/SOURCES/iedb-${VERSION}.tar.gz iedb-${VERSION}
 
           # Create systemd service in SOURCES
@@ -390,12 +398,14 @@ jobs:
           install -m 755 iedb %{buildroot}/usr/bin/iedb
           install -m 644 iedb.toml %{buildroot}/etc/iedb/iedb.toml
           install -m 644 %{SOURCE1} %{buildroot}/lib/systemd/system/iedb.service
+          cp -rp front %{buildroot}/var/lib/iedb/
 
           %files
           %attr(755, root, root) /usr/bin/iedb
           %config(noreplace) /etc/iedb/iedb.toml
           /lib/systemd/system/iedb.service
           %dir %attr(755, iedb, iedb) /var/lib/iedb
+          %attr(-, iedb, iedb) /var/lib/iedb/front
 
           %pre
           # Create iedb user

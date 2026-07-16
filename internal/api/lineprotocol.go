@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -158,6 +159,7 @@ func (h *LineProtocolHandler) WriteSimple(c *fiber.Ctx) error {
 // handleWrite processes Line Protocol data and writes to the Arrow buffer.
 // precision controls timestamp interpretation: "ns" (default), "us", "ms", "s".
 func (h *LineProtocolHandler) handleWrite(c *fiber.Ctx, database string, precision string) error {
+	database = strings.Clone(database)
 	// Validate database name to prevent path traversal
 	if !isValidDatabaseName(database) {
 		h.totalErrors.Add(1)

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -18,6 +20,38 @@ import (
 
 func init() {
 	ArrowEnabled = true
+}
+
+var corruptParquetPathRe = regexp.MustCompile(`'([^']+\.parquet)'`)
+
+// removeCorruptParquetFromError extracts a local parquet file path from a DuckDB
+// error, removes the file, and returns true if a file was removed. It only acts
+// on local files; remote paths (s3/azure) are left untouched.
+func (d *DuckDB) removeCorruptParquetFromError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, ".parquet") {
+		return false
+	}
+	matches := corruptParquetPathRe.FindStringSubmatch(errStr)
+	if len(matches) < 2 {
+		return false
+	}
+	path := matches[1]
+	if strings.HasPrefix(path, "s3://") || strings.HasPrefix(path, "azure://") {
+		return false
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		return false
+	}
+	if rmErr := os.Remove(path); rmErr != nil {
+		d.logger.Error().Err(rmErr).Str("file", path).Msg("Failed to remove corrupt parquet file")
+		return false
+	}
+	d.logger.Error().Str("file", path).Msg("Removed corrupt parquet file, retrying query")
+	return true
 }
 
 // arrowQueryOnConn executes a query via the Arrow API on a raw driver connection.
@@ -52,6 +86,13 @@ func (d *DuckDB) ArrowQueryContext(ctx context.Context, query string) (array.Rec
 		reader, rawErr = arrowQueryOnConn(ctx, driverConn, query)
 		return rawErr
 	})
+	if err != nil && d.removeCorruptParquetFromError(err) {
+		err = conn.Raw(func(driverConn any) error {
+			var rawErr error
+			reader, rawErr = arrowQueryOnConn(ctx, driverConn, query)
+			return rawErr
+		})
+	}
 
 	if err != nil {
 		conn.Close()
