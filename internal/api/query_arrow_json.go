@@ -385,10 +385,16 @@ func writeArrowValue(w *bufio.Writer, scratch []byte, col arrow.Array, row int) 
 		}
 	case *array.Timestamp:
 		ts := c.Value(row)
-		unit := c.DataType().(*arrow.TimestampType).Unit
-		t := ts.ToTime(unit)
+		tsType := c.DataType().(*arrow.TimestampType)
+		t := ts.ToTime(tsType.Unit)
 		w.WriteByte('"')
-		scratch = t.UTC().AppendFormat(scratch[:0], time.RFC3339Nano)
+		if loc, err := tsType.GetZone(); err == nil {
+			// TIMESTAMPTZ：保留时区渲染（Asia/Shanghai → +08:00）
+			scratch = t.In(loc).AppendFormat(scratch[:0], time.RFC3339Nano)
+		} else {
+			// 无时区 TIMESTAMP：fallback UTC
+			scratch = t.UTC().AppendFormat(scratch[:0], time.RFC3339Nano)
+		}
 		w.Write(scratch)
 		w.WriteByte('"')
 	case *array.Date32:
