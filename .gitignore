@@ -92,6 +92,8 @@ docs/progress/
 /.gocache
 /.cache
 /.omo
+/.reasonix
+reasonix.toml
 /cmd/tools
 front/
 iedb.toml

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"iedb/internal/agent"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -119,6 +120,12 @@ var arrowJSONQueryFunc func(h *QueryHandler, c *fiber.Ctx, ctx context.Context, 
 // unsupported and return 501 — the msgpack endpoint has no database/sql fallback because
 // the Arrow path is the entire reason for its existence.
 var arrowMsgPackQueryFunc func(h *QueryHandler, c *fiber.Ctx, ctx context.Context, cancel context.CancelFunc, convertedSQL string, profileMode bool, governanceMaxRows int, start time.Time, timestamp string, onComplete func(int), onFail func(string), onTimeout func()) (int, bool)
+
+// agentMergeQueryFunc is set by query_agent_merge.go init() when compiled with duckdb_arrow tag.
+// It fetches live agent data for a table and merges it into the converted SQL via Arrow views
+// and UNION ALL. When nil (no duckdb_arrow tag), agent merging is skipped and queries run
+// against storage-only data.
+var agentMergeQueryFunc func(h *QueryHandler, c *fiber.Ctx, db, table, convertedSQL string) string
 
 // errClientDisconnected is wrapped into streamErr by the streaming query
 // handlers when bufio.Writer.Write or Flush fails mid-stream — the canonical
@@ -645,6 +652,8 @@ type QueryHandler struct {
 
 	// Query management (Enterprise feature - active query tracking and cancellation)
 	queryRegistry *queryregistry.Registry
+	// Agent registry for merging live agent in-memory data into query results
+	agentRegistry *agent.AgentRegistry
 }
 
 // isDebugEnabled returns true if debug logging is enabled.
@@ -1049,6 +1058,15 @@ func (h *QueryHandler) SetGovernance(manager *governance.Manager, lc *license.Cl
 // SetQueryRegistry sets the query registry for long-running query management.
 func (h *QueryHandler) SetQueryRegistry(registry *queryregistry.Registry) {
 	h.queryRegistry = registry
+}
+
+// SetAgentRegistry sets the agent registry for merging live agent in-memory data
+// into query results. When set and agentMergeQueryFunc is wired (requires duckdb_arrow
+// build tag), queries against tables with registered agents will UNION ALL the
+// agent's in-memory data with the storage-based results. nil means agent merging
+// is disabled.
+func (h *QueryHandler) SetAgentRegistry(r *agent.AgentRegistry) {
+	h.agentRegistry = r
 }
 
 // InvalidateCaches clears all internal caches (partition pruner and SQL transform cache).
@@ -1643,6 +1661,26 @@ localProcessing:
 	// Convert SQL to storage paths and check for parallel execution opportunity
 	convertedSQL, parallelInfo, cached := h.getTransformedSQLForParallel(req.SQL, headerDB)
 
+	// Agent query merge: integrate live agent in-memory data via UNION ALL.
+	// Only active when agentMergeQueryFunc is wired (requires duckdb_arrow build tag)
+	// and at least one agent is registered for the target table.
+	if h.agentRegistry != nil && agentMergeQueryFunc != nil {
+		var agentDB, agentTable string
+		if headerDB != "" {
+			agentDB = headerDB
+			if matches := patternSimpleTable.FindStringSubmatch(req.SQL); len(matches) >= 2 {
+				agentTable = matches[1]
+			}
+		} else if matches := patternDBTable.FindStringSubmatch(req.SQL); len(matches) >= 3 {
+			agentDB = matches[1]
+			agentTable = matches[2]
+		}
+		if agentDB != "" && agentTable != "" {
+			if merged := agentMergeQueryFunc(h, c, agentDB, agentTable, convertedSQL); merged != "" {
+				convertedSQL = merged
+			}
+		}
+	}
 	if h.debugEnabled {
 		h.logger.Debug().
 			Str("original_sql", req.SQL).

@@ -105,6 +105,8 @@ type IngestConfig struct {
 	FlushTimeoutSeconds   int      // Timeout for storage writes during flush (default: 30s, 0 = no timeout)
 	DecimalColumns        []string // Per-measurement decimal columns: "measurement:col=precision,scale;col2=p,s"
 	DefaultDecimalColumns string   // Default decimal columns for unmapped measurements
+	AgentHeartbeatTimeout string   // Agent heartbeat timeout duration (default: "30s")
+	AgentDisabled         bool     // Disable agent subsystem entirely (default: false)
 }
 
 type CacheConfig struct {
@@ -552,6 +554,8 @@ func Load() (*Config, error) {
 			DefaultSortKeys:       v.GetString("ingest.default_sort_keys"),
 			DecimalColumns:        v.GetStringSlice("ingest.decimal_columns"),
 			DefaultDecimalColumns: v.GetString("ingest.default_decimal_columns"),
+			AgentHeartbeatTimeout: v.GetString("ingest.agent_heartbeat_timeout"),
+			AgentDisabled:         v.GetBool("ingest.agent_disabled"),
 		},
 		Cache: CacheConfig{
 			Enabled:    v.GetBool("cache.enabled"),
@@ -916,6 +920,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ingest.flush_timeout_seconds", 30) // 30s timeout for storage writes during flush
 	v.SetDefault("ingest.decimal_columns", []string{})
 	v.SetDefault("ingest.default_decimal_columns", "")
+	v.SetDefault("ingest.agent_heartbeat_timeout", "30s")
+	v.SetDefault("ingest.agent_disabled", false)
 
 	// Log defaults
 	v.SetDefault("log.level", "info")
