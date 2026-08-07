@@ -134,8 +134,8 @@ func TestSubscription_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "reconnect_min_exceeds_max",
-			modify:  func(s *Subscription) { s.ReconnectMinSeconds = 60; s.ReconnectMaxSeconds = 30 },
+			name:    "negative_reconnect_max",
+			modify:  func(s *Subscription) { s.ReconnectMaxSeconds = -1 },
 			wantErr: true,
 		},
 	}
@@ -158,16 +158,13 @@ func TestSubscription_SetDefaults(t *testing.T) {
 	sub.SetDefaults()
 
 	if sub.QoS != 0 {
-		t.Errorf("Default QoS = %d, want 0", sub.QoS)
+		t.Errorf("SetDefaults should not touch QoS; got %d, want 0 (unchanged)", sub.QoS)
 	}
 	if sub.KeepAliveSeconds != 60 {
 		t.Errorf("Default KeepAliveSeconds = %d, want 60", sub.KeepAliveSeconds)
 	}
 	if sub.ConnectTimeoutSeconds != 30 {
 		t.Errorf("Default ConnectTimeoutSeconds = %d, want 30", sub.ConnectTimeoutSeconds)
-	}
-	if sub.ReconnectMinSeconds != 1 {
-		t.Errorf("Default ReconnectMinSeconds = %d, want 1", sub.ReconnectMinSeconds)
 	}
 	if sub.ReconnectMaxSeconds != 60 {
 		t.Errorf("Default ReconnectMaxSeconds = %d, want 60", sub.ReconnectMaxSeconds)
@@ -177,6 +174,70 @@ func TestSubscription_SetDefaults(t *testing.T) {
 	}
 }
 
+// TestResolveQoS is the core regression: an omitted QoS defaults to 1, but
+// an explicit value — including 0 — is preserved.
+func TestResolveQoS(t *testing.T) {
+	zero, one, two := 0, 1, 2
+	tests := []struct {
+		name string
+		in   *int
+		want int
+	}{
+		{"omitted defaults to at-least-once", nil, defaultQoS},
+		{"explicit 0 is preserved (the bug)", &zero, 0},
+		{"explicit 1 is preserved", &one, 1},
+		{"explicit 2 is preserved", &two, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveQoS(tt.in); got != tt.want {
+				t.Errorf("resolveQoS(%v) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateCreateRequest_QoSZeroPreserved verifies the full create-request
+// mapping keeps an explicit QoS 0 (#326): the request maps to a Subscription
+// whose QoS is 0, not silently rewritten to 1, and still validates.
+func TestValidateCreateRequest_QoSZeroPreserved(t *testing.T) {
+	base := func(qos *int) *CreateSubscriptionRequest {
+		return &CreateSubscriptionRequest{
+			Name:     "s",
+			Broker:   "tcp://localhost:1883",
+			ClientID: "c",
+			Topics:   []string{"sensors/#"},
+			QoS:      qos,
+			Database: "iot",
+		}
+	}
+
+	zero := 0
+	// Explicit 0 must validate (it's a legal QoS).
+	if err := ValidateCreateRequest(base(&zero)); err != nil {
+		t.Fatalf("explicit QoS 0 should be valid: %v", err)
+	}
+
+	// And it must map to a Subscription with QoS 0, not 1.
+	sub := &Subscription{
+		Name:     "s",
+		Broker:   "tcp://localhost:1883",
+		ClientID: "c",
+		Topics:   []string{"sensors/#"},
+		QoS:      resolveQoS(base(&zero).QoS),
+		Database: "iot",
+	}
+	sub.SetDefaults()
+	if sub.QoS != 0 {
+		t.Errorf("explicit QoS 0 was overwritten to %d (#326 regression)", sub.QoS)
+	}
+
+	// Omitted QoS defaults to 1.
+	omitted := resolveQoS(base(nil).QoS)
+	if omitted != 1 {
+		t.Errorf("omitted QoS = %d, want default 1", omitted)
+	}
+}
 func TestValidateBrokerURL(t *testing.T) {
 	tests := []struct {
 		url     string
