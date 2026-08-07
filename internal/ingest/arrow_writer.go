@@ -383,7 +383,7 @@ func sortColumnsTimeFirst(colNames []string) {
 // =============================================================================
 
 // getSchema gets or infers Arrow schema for columnar data (LRU cached per measurement)
-func (w *ArrowWriter) getSchema(measurement string, columns map[string]interface{}, tagColumns []string, decimalCols map[string]config.DecimalSpec) (*arrow.Schema, error) {
+func (w *ArrowWriter) getSchema(measurement string, columns map[string]interface{}, tagColumns []string, dedupTime bool, decimalCols map[string]config.DecimalSpec) (*arrow.Schema, error) {
 	// Create cache key from column names and types
 	var colNames []string
 	var typeNames []string
@@ -418,8 +418,9 @@ func (w *ArrowWriter) getSchema(measurement string, columns map[string]interface
 		}
 	}
 
-	// Create cache key (includes tag columns to ensure metadata correctness)
-	cacheKey := fmt.Sprintf("%s:%v:%v:%v", measurement, colNames, typeNames, tagColumns)
+	// Create cache key (includes tag columns and the dedup-time marker to ensure
+	// metadata correctness — the flag changes the emitted iedb:dedup_time key)
+	cacheKey := fmt.Sprintf("%s:%v:%v:%v:%t", measurement, colNames, typeNames, tagColumns, dedupTime)
 
 	// Check LRU cache
 	if schema := w.schemaCache.get(cacheKey); schema != nil {
@@ -427,7 +428,7 @@ func (w *ArrowWriter) getSchema(measurement string, columns map[string]interface
 	}
 
 	// Cache miss - infer schema
-	schema, err := w.inferSchema(columns, tagColumns, decimalCols)
+	schema, err := w.inferSchema(columns, tagColumns, dedupTime, decimalCols)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +447,7 @@ func (w *ArrowWriter) getSchema(measurement string, columns map[string]interface
 // inferSchema infers Arrow schema from columnar data.
 // tagColumns optionally lists which columns are tags (stored as schema metadata for compaction dedup).
 // decimalCols optionally maps column names to DecimalSpec for Decimal128 columns.
-func (w *ArrowWriter) inferSchema(columns map[string]interface{}, tagColumns []string, decimalCols map[string]config.DecimalSpec) (*arrow.Schema, error) {
+func (w *ArrowWriter) inferSchema(columns map[string]interface{}, tagColumns []string, dedupTime bool, decimalCols map[string]config.DecimalSpec) (*arrow.Schema, error) {
 	var fields []arrow.Field
 
 	for name, col := range columns {
@@ -511,6 +512,14 @@ func (w *ArrowWriter) inferSchema(columns map[string]interface{}, tagColumns []s
 		metaValues = append(metaValues, strings.Join(sorted, ","))
 	}
 
+	// Mark data as safe to dedup on time even without tag columns. Written only
+	// by producers whose data model is one-row-per-(tags,time) — continuous
+	// queries. Compaction reads this to dedup a no-group-by CQ's duplicate
+	// window emissions (PARTITION BY "time" alone). Raw ingest never sets it.
+	if dedupTime {
+		metaKeys = append(metaKeys, "iedb:dedup_time")
+		metaValues = append(metaValues, "true")
+	}
 	// Store decimal column specs for self-describing Parquet files
 	if len(decimalCols) > 0 {
 		var parts []string
@@ -535,10 +544,11 @@ func (w *ArrowWriter) inferSchema(columns map[string]interface{}, tagColumns []s
 // validity is an optional map of column name → []bool where false means null.
 // Columns without a validity entry (or when validity is nil) are treated as fully valid.
 // tagColumns optionally lists which columns are tags (stored as Parquet metadata for compaction dedup).
+// dedupTime, when true, marks the file with iedb:dedup_time so compaction dedups on time even with no tags.
 // decimalCols optionally maps column names to DecimalSpec for Decimal128 type inference.
-func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement string, columns map[string]interface{}, validity map[string][]bool, tagColumns []string, decimalCols map[string]config.DecimalSpec) ([]byte, error) {
+func (w *ArrowWriter) WriteParquetColumnar(ctx context.Context, measurement string, columns map[string]interface{}, validity map[string][]bool, tagColumns []string, dedupTime bool, decimalCols map[string]config.DecimalSpec) ([]byte, error) {
 	// Get or infer schema (with caching)
-	schema, err := w.getSchema(measurement, columns, tagColumns, decimalCols)
+	schema, err := w.getSchema(measurement, columns, tagColumns, dedupTime, decimalCols)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get schema: %w", err)
 	}
@@ -697,7 +707,11 @@ type TypedColumnBatch struct {
 	Data       map[string]interface{} // typed arrays ([]int64, []float64, []string, []bool)
 	Validity   map[string][]bool      // per-column null bitmap; nil entry = all valid
 	TagColumns []string               // tag column names (for Parquet metadata, enables auto-dedup)
-	Signature  string                 // sorted column-name string; cached to avoid per-write recomputation
+	// DedupTime propagates ColumnarRecord.DedupTime: when true, the Parquet
+	// footer gets an iedb:dedup_time marker so compaction dedups on time even with
+	// no tag columns. See ColumnarRecord.DedupTime — CQ output only (#521).
+	DedupTime bool
+	Signature string // sorted column-name string; cached to avoid per-write recomputation
 }
 
 type bufferShard struct {
@@ -1586,6 +1600,8 @@ func (b *ArrowBuffer) writeColumnarInternal(ctx context.Context, database string
 
 	// Propagate tag column names for Parquet metadata (enables auto-dedup in compaction)
 	typedColumns.TagColumns = record.TagColumns
+	// Propagate the dedup-on-time marker (CQ output only — see ColumnarRecord.DedupTime)
+	typedColumns.DedupTime = record.DedupTime
 
 	// Column signature for schema evolution detection (pre-computed in convertColumnsToTyped)
 	newSignature := typedColumns.Signature
@@ -1896,7 +1912,34 @@ func (b *ArrowBuffer) convertColumnsToTyped(measurement string, columns map[stri
 		// Infer type from first non-nil value
 		firstVal := firstNonNil(col)
 		if firstVal == nil {
-			continue // Skip all-nil columns
+			// Every value is nil, so there is nothing to infer a type from.
+			// Dropping the column would make it vanish from this batch's
+			// parquet file; a column that is all-nil in every batch would then
+			// never exist at all, and querying it fails to bind instead of
+			// returning NULLs.
+			//
+			// Emit it as an all-null string column instead. The value is
+			// correct either way — every entry is NULL — and string is the
+			// safe placeholder: a later batch carrying real values writes its
+			// own inferred type, and readers union across files by name
+			// (read_parquet union_by_name=true), so the type only has to be
+			// consistent within a file, not across them.
+			//
+			// Time is exempt: a partition whose time column is VARCHAR cannot be
+			// compacted (TIMESTAMP != VARCHAR bind failure), so an all-nil time
+			// is rejected here rather than written as a string. The msgpack path
+			// already rejects it upstream in normalizeTimestamps, but this
+			// function is the chokepoint every typed write passes through, so
+			// the guard belongs here too.
+			if name == "time" {
+				return nil, 0, fmt.Errorf("time column contains only null values in measurement '%s' (writer must send an integer/float timestamp)", measurement)
+			}
+
+			arr := make([]string, len(col))
+			valid := make([]bool, len(col)) // all false — every entry is NULL
+			typed[name] = arr
+			validity[name] = valid
+			continue
 		}
 
 		// The "time" column is always int64 microseconds → Arrow Timestamp.
@@ -2444,7 +2487,7 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 		// Single hour - sort once and write one file
 		sorted := sortTypedColumnBatchByKeys(merged, sortKeys)
 
-		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols)
+		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, sorted.DedupTime, decimalCols)
 		if err != nil {
 			return fmt.Errorf("failed to write Parquet: %w", err)
 		}
@@ -2520,7 +2563,7 @@ func (b *ArrowBuffer) flushPartitionedData(ctx context.Context, bufferKey, datab
 		sorted := sortTypedColumnBatchByKeys(hourBatch, sortKeys)
 
 		// Write Parquet file for this hour
-		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, decimalCols)
+		parquetData, err := b.writer.WriteParquetColumnar(ctx, measurement, sorted.Data, sorted.Validity, sorted.TagColumns, sorted.DedupTime, decimalCols)
 		if err != nil {
 			return fmt.Errorf("failed to write Parquet for hour %d: %w", hourID, err)
 		}
@@ -2670,6 +2713,10 @@ func (b *ArrowBuffer) mergeBatches(batches []interface{}) (*TypedColumnBatch, er
 
 	// Union of tag columns across all batches (for Parquet metadata)
 	tagColumnSet := make(map[string]struct{})
+	// Dedup-time marker is sticky: if ANY merged batch carries it, the output
+	// does (all writes to one measurement share the same producer, so this only
+	// ORs identical values in practice — the OR is defensive).
+	mergedDedupTime := false
 
 	// First pass: count total rows using time column
 	for _, batch := range batches {
@@ -2682,6 +2729,9 @@ func (b *ArrowBuffer) mergeBatches(batches []interface{}) (*TypedColumnBatch, er
 			}
 			for _, tag := range b.TagColumns {
 				tagColumnSet[tag] = struct{}{}
+			}
+			if b.DedupTime {
+				mergedDedupTime = true
 			}
 		case map[string]interface{}:
 			cols = b
@@ -2853,7 +2903,7 @@ func (b *ArrowBuffer) mergeBatches(batches []interface{}) (*TypedColumnBatch, er
 		}
 	}
 
-	return &TypedColumnBatch{Data: merged, Validity: mergedValidity, TagColumns: mergedTagColumns}, nil
+	return &TypedColumnBatch{Data: merged, Validity: mergedValidity, TagColumns: mergedTagColumns, DedupTime: mergedDedupTime}, nil
 }
 
 // sortColumnsByTime sorts all columns by the time column in-place
@@ -3040,7 +3090,7 @@ func permuteByTimeSort(times []int64) []int {
 // radixSortBias maps a signed int64 to its order-preserving unsigned key by flipping the
 // sign bit: int64 min -> 0, int64 max -> max. This lets an unsigned LSD radix sort produce
 // correct ascending order even when timestamps are negative (pre-1970, which Line Protocol
-// and MessagePack both accept.. Without it, negatives' set sign bit would sort
+// and MessagePack both accept. Without it, negatives' set sign bit would sort
 // them after positives.
 func radixSortBias(t int64) uint64 {
 	return uint64(t) ^ 0x8000000000000000 // flip the sign bit
@@ -3197,7 +3247,7 @@ func sortTypedColumnBatchByKeys(batch *TypedColumnBatch, sortKeys []string) *Typ
 
 	// nil indices means data was already sorted — no permutation needed
 	if indices == nil || batch.Validity == nil {
-		return &TypedColumnBatch{Data: sorted, Validity: batch.Validity, TagColumns: batch.TagColumns, Signature: batch.Signature}
+		return &TypedColumnBatch{Data: sorted, Validity: batch.Validity, TagColumns: batch.TagColumns, DedupTime: batch.DedupTime, Signature: batch.Signature}
 	}
 
 	// Apply the same permutation to validity bitmaps (no second sort)
@@ -3215,7 +3265,7 @@ func sortTypedColumnBatchByKeys(batch *TypedColumnBatch, sortKeys []string) *Typ
 		sortedValidity[name] = newValid
 	}
 
-	return &TypedColumnBatch{Data: sorted, Validity: sortedValidity, TagColumns: batch.TagColumns, Signature: batch.Signature}
+	return &TypedColumnBatch{Data: sorted, Validity: sortedValidity, TagColumns: batch.TagColumns, DedupTime: batch.DedupTime, Signature: batch.Signature}
 }
 
 // sliceTypedColumnBatchByIndices extracts rows from a TypedColumnBatch by index list,
@@ -3224,7 +3274,7 @@ func sliceTypedColumnBatchByIndices(batch *TypedColumnBatch, indices []int) *Typ
 	slicedData := sliceColumnsByIndices(batch.Data, indices)
 
 	if batch.Validity == nil {
-		return &TypedColumnBatch{Data: slicedData, Validity: nil, TagColumns: batch.TagColumns, Signature: batch.Signature}
+		return &TypedColumnBatch{Data: slicedData, Validity: nil, TagColumns: batch.TagColumns, DedupTime: batch.DedupTime, Signature: batch.Signature}
 	}
 
 	slicedValidity := make(map[string][]bool, len(batch.Validity))
@@ -3245,7 +3295,7 @@ func sliceTypedColumnBatchByIndices(batch *TypedColumnBatch, indices []int) *Typ
 		slicedValidity[name] = newValid
 	}
 
-	return &TypedColumnBatch{Data: slicedData, Validity: slicedValidity, TagColumns: batch.TagColumns, Signature: batch.Signature}
+	return &TypedColumnBatch{Data: slicedData, Validity: slicedValidity, TagColumns: batch.TagColumns, DedupTime: batch.DedupTime, Signature: batch.Signature}
 }
 
 // microPerHour is the number of microseconds in one hour (3600 * 1,000,000)

@@ -133,12 +133,12 @@ func TestBufferFlushTimingMultiple(t *testing.T) {
 		t.Skip("Skipping timing test in short mode")
 	}
 
-	const iterations = 3
+	const iterations = 5
 	var totalDuration time.Duration
 	var maxDuration time.Duration
 	var minDuration time.Duration = 1000 * time.Second
 
-	maxBufferAgeMS := 500
+	maxBufferAgeMS := 5000
 	expectedMaxFlushTime := time.Duration(maxBufferAgeMS) * time.Millisecond
 	tolerance := 1000 * time.Millisecond
 
