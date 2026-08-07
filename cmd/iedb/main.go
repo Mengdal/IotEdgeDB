@@ -814,51 +814,9 @@ func main() {
 			Msg("Periodic WAL maintenance enabled")
 	}
 
-	// Initialize MQTT Subscription Manager (if enabled)
+	// MQTT is initialized after the auth manager (below) so it can share the
+	// auth manager's SQLite handle rather than opening a second connection to
 	var mqttManager mqtt.Manager
-	if cfg.MQTT.Enabled {
-		// Get encryption key from environment (required for subscriptions with passwords)
-		encryptionKey, keyErr := mqtt.GetEncryptionKey()
-		if keyErr != nil {
-			log.Fatal().Err(keyErr).Msg("Invalid IEDB_ENCRYPTION_KEY - must be 32 bytes (base64 or hex encoded)")
-		}
-		if encryptionKey == nil {
-			log.Warn().Msg("IEDB_ENCRYPTION_KEY not set - MQTT subscriptions with passwords will be rejected")
-		}
-
-		// Create password encryptor (will be NilEncryptor if no key - rejects passwords)
-		encryptor, err := mqtt.NewPasswordEncryptor(encryptionKey)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to create password encryptor")
-		}
-
-		// Create SQLite repository for MQTT subscriptions (use shared DB path from auth config)
-		mqttDBPath := cfg.Auth.DBPath
-		if mqttDBPath == "" {
-			mqttDBPath = "./data/iedb.db" // Use shared SQLite database
-		}
-		mqttRepo, err := mqtt.NewSQLiteRepository(mqttDBPath, encryptionKey, logger.Get("mqtt-repo"))
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to initialize MQTT repository")
-		}
-
-		// Create subscription manager
-		mqttManager = mqtt.NewSubscriptionManager(mqttRepo, encryptor, arrowBuffer, logger.Get("mqtt"))
-
-		// Start manager (loads and starts auto_start subscriptions)
-		if err := mqttManager.Start(context.Background()); err != nil {
-			log.Warn().Err(err).Msg("Some MQTT subscriptions failed to auto-start")
-		}
-
-		// Register shutdown hook
-		shutdownCoordinator.RegisterHook("mqtt-manager", func(ctx context.Context) error {
-			return mqttManager.Shutdown(ctx)
-		}, shutdown.PriorityIngest)
-
-		log.Info().Bool("encryption_enabled", encryptionKey != nil).Msg("MQTT subscription manager enabled")
-	} else {
-		log.Debug().Msg("MQTT subscription manager is disabled")
-	}
 
 	// Initialize AuthManager (if enabled)
 	var authManager *auth.AuthManager
@@ -977,6 +935,65 @@ func main() {
 		log.Warn().Msg("Authentication is DISABLED - all endpoints are public")
 	}
 
+	// Initialize MQTT Subscription Manager (if enabled).
+	//
+	// Placed after the auth manager so it can borrow that SQLite handle. MQTT
+	// metadata lives in the same file as auth (cfg.Auth.DBPath); opening a
+	// second pool against it put two independent single-connection writers in
+	if cfg.MQTT.Enabled {
+		// Get encryption key from environment (required for subscriptions with passwords)
+		encryptionKey, keyErr := mqtt.GetEncryptionKey()
+		if keyErr != nil {
+			log.Fatal().Err(keyErr).Msg("Invalid IEDB_ENCRYPTION_KEY - must be 32 bytes (base64 or hex encoded)")
+		}
+		if encryptionKey == nil {
+			log.Warn().Msg("IEDB_ENCRYPTION_KEY not set - MQTT subscriptions with passwords will be rejected")
+		}
+
+		// Create password encryptor (will be NilEncryptor if no key - rejects passwords)
+		encryptor, err := mqtt.NewPasswordEncryptor(encryptionKey)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to create password encryptor")
+		}
+
+		// Borrow the auth manager's handle when there is one. MQTT and auth are
+		// enabled independently, so authManager may be nil here; in that case
+		// the repository opens and owns its own handle, as it always did.
+		mqttDBPath := cfg.Auth.DBPath
+		if mqttDBPath == "" {
+			mqttDBPath = "./data/iedb.db" // Shared SQLite database
+		}
+
+		var mqttRepo *mqtt.Repository
+		if authManager != nil {
+			mqttRepo, err = mqtt.NewRepository(authManager.GetDB(), encryptionKey, logger.Get("mqtt-repo"))
+		} else {
+			mqttRepo, err = mqtt.NewSQLiteRepository(mqttDBPath, encryptionKey, logger.Get("mqtt-repo"))
+		}
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to initialize MQTT repository")
+		}
+
+		// Create subscription manager
+		mqttManager = mqtt.NewSubscriptionManager(mqttRepo, encryptor, arrowBuffer, logger.Get("mqtt"))
+
+		// Start manager (loads and starts auto_start subscriptions)
+		if err := mqttManager.Start(context.Background()); err != nil {
+			log.Warn().Err(err).Msg("Some MQTT subscriptions failed to auto-start")
+		}
+
+		// Register shutdown hook
+		shutdownCoordinator.RegisterHook("mqtt-manager", func(ctx context.Context) error {
+			return mqttManager.Shutdown(ctx)
+		}, shutdown.PriorityIngest)
+
+		log.Info().
+			Bool("encryption_enabled", encryptionKey != nil).
+			Bool("shared_db", authManager != nil).
+			Msg("MQTT subscription manager enabled")
+	} else {
+		log.Debug().Msg("MQTT subscription manager is disabled")
+	}
 	// Initialize Compaction (if enabled)
 	var hourlyScheduler *compaction.Scheduler
 	var dailyScheduler *compaction.Scheduler
@@ -1790,7 +1807,11 @@ func main() {
 		} else if !licenseClient.CanUseAuditLogging() {
 			log.Warn().Msg("License does not include audit_logging feature - feature disabled")
 		} else {
-			auditDB, err := sql.Open("sqlite3", cfg.Auth.DBPath)
+			// Share the auth manager's SQLite handle when there is one. Audit
+			// and auth are enabled independently (this block is gated on the
+			// license, not on cfg.Auth.Enabled), so authManager may be nil —
+			// sharedSQLiteHandle falls back to a dedicated handle we own.
+			auditDB, auditOwnsDB, err := sharedSQLiteHandle(authManager, cfg.Auth.DBPath)
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to open audit database - feature disabled")
 			} else {
@@ -1801,10 +1822,18 @@ func main() {
 				})
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to create audit logger - feature disabled")
+					if auditOwnsDB {
+						auditDB.Close()
+					}
 				} else {
 					auditLogger.Start()
 					shutdownCoordinator.RegisterHook("audit", func(ctx context.Context) error {
 						auditLogger.Stop()
+						// audit.Logger never closes its DB — it may be borrowed.
+						// Close it here only when this block opened it.
+						if auditOwnsDB {
+							return auditDB.Close()
+						}
 						return nil
 					}, shutdown.PriorityCompaction)
 
@@ -1984,11 +2013,16 @@ func main() {
 		} else if !licenseClient.CanUseQueryGovernance() {
 			log.Warn().Msg("License does not include query_governance feature - feature disabled")
 		} else {
+			// Share the auth manager's SQLite handle when there is one.
+			// Governance and auth are enabled independently (this block is
+			// gated on the license, not on cfg.Auth.Enabled), so authManager
+			// may be nil — sharedSQLiteHandle falls back to a dedicated handle
+			// we own.
 			governanceDBPath := cfg.Auth.DBPath
 			if governanceDBPath == "" {
 				governanceDBPath = "./data/iedb.db"
 			}
-			governanceDB, err := sql.Open("sqlite3", governanceDBPath)
+			governanceDB, governanceOwnsDB, err := sharedSQLiteHandle(authManager, governanceDBPath)
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to open governance database - feature disabled")
 			} else {
@@ -1999,10 +2033,21 @@ func main() {
 				})
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to create governance manager - feature disabled")
+					if governanceOwnsDB {
+						governanceDB.Close()
+					}
 				} else {
 					governanceManager.Start()
 					shutdownCoordinator.RegisterHook("governance", func(ctx context.Context) error {
-						return governanceManager.Stop()
+						stopErr := governanceManager.Stop()
+						// governance.Manager never closes its DB — it may be
+						// borrowed. Close it here only when this block opened it.
+						if governanceOwnsDB {
+							if closeErr := governanceDB.Close(); closeErr != nil && stopErr == nil {
+								stopErr = closeErr
+							}
+						}
+						return stopErr
 					}, shutdown.PriorityCompaction)
 
 					// Wire governance to query handler
@@ -2428,8 +2473,12 @@ func main() {
 			log.Warn().Msg("License does not include tiered_storage feature - feature disabled")
 		} else {
 			// Open SQLite database for tiering metadata (shared with other features)
-			tieringDBPath := cfg.Auth.DBPath // Use shared SQLite database
-			tieringDB, err := sql.Open("sqlite3", tieringDBPath)
+			// Share the auth manager's SQLite handle when there is one. Tiering
+			// and auth are enabled independently (this block is gated on the
+			// license, not on cfg.Auth.Enabled), so authManager may be nil —
+			// sharedSQLiteHandle falls back to a dedicated handle we own.
+			tieringDBPath := cfg.Auth.DBPath // Shared SQLite database
+			tieringDB, tieringOwnsDB, err := sharedSQLiteHandle(authManager, tieringDBPath)
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to open tiering database - feature disabled")
 			} else {
@@ -2483,13 +2532,28 @@ func main() {
 				})
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to create tiering manager - feature disabled")
+					if tieringOwnsDB {
+						tieringDB.Close()
+					}
 				} else {
 					// Start tiering manager
 					if err := tieringManager.Start(); err != nil {
 						log.Error().Err(err).Msg("Failed to start tiering manager")
+						if tieringOwnsDB {
+							tieringDB.Close()
+						}
 					} else {
 						shutdownCoordinator.RegisterHook("tiering", func(ctx context.Context) error {
-							return tieringManager.Stop()
+							stopErr := tieringManager.Stop()
+							// tiering.Manager never closes its DB — it may be
+							// borrowed. Close it here only when this block
+							// opened it.
+							if tieringOwnsDB {
+								if closeErr := tieringDB.Close(); closeErr != nil && stopErr == nil {
+									stopErr = closeErr
+								}
+							}
+							return stopErr
 						}, shutdown.PriorityCompaction)
 
 						log.Info().
@@ -2684,6 +2748,63 @@ func main() {
 	}
 
 	log.Info().Msg("iedb shutdown complete")
+}
+
+// sharedSQLiteHandle returns the SQLite handle a feature should use for the
+// shared metadata database, preferring the auth manager's existing connection.
+//
+// IEDB keeps auth, audit, tiering and MQTT metadata in one SQLite file
+// (cfg.Auth.DBPath). Each additional sql.Open on that file is a separate
+// connection pool competing for SQLite's single write lock, so features borrow
+// the auth manager's handle whenever there is one.
+//
+// authManager may legitimately be nil: auth, audit, tiering and MQTT are each
+// enabled independently, so a feature can be on while auth is off. In that case
+// the caller gets its own handle and owns it — the returned bool reports
+// ownership, and only an owner may Close.
+func sharedSQLiteHandle(authManager *auth.AuthManager, dbPath string) (db *sql.DB, owned bool, err error) {
+	if authManager != nil {
+		return authManager.GetDB(), false, nil
+	}
+
+	// No auth manager to borrow from, so open a dedicated handle. Everything
+	// below mirrors auth.NewAuthManager's setup: with auth disabled nothing
+	// else performs it, and this file holds audit logs and tiering metadata.
+
+	// Create the parent directory. sql.Open is lazy — it validates the DSN but
+	// does not touch the filesystem — so a missing directory would otherwise
+	// surface much later as a confusing "feature disabled" warning from the
+	// caller's first query rather than an error here.
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
+		return nil, false, fmt.Errorf("failed to create database directory: %w", err)
+	}
+
+	// Pre-create the file 0600. SQLite creates it with the process umask
+	// (typically 0644, world-readable) on first write, and the Chmod that
+	// normally tightens it lives inside the auth-enabled branch — which by
+	// definition has not run here.
+	f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to create database file: %w", err)
+	}
+	f.Close()
+
+	db, err = sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Fail here rather than leaving a broken handle for the caller to discover
+	// on its first query, where the error reads as "feature disabled".
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, false, fmt.Errorf("failed to open database %s: %w", dbPath, err)
+	}
+
+	db.SetMaxOpenConns(1) // SQLite has a single writer
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(time.Hour)
+	return db, true, nil
 }
 
 // createWALRecoveryCallback creates a reusable WAL recovery callback function.

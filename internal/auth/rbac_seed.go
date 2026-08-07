@@ -133,7 +133,6 @@ func (rm *RBACManager) SeedRBACFromLocalSQLite(ctx context.Context) error {
 	for _, r := range orgRows {
 		// Bail out early on ctx cancel/timeout to avoid a flood of
 		// proposeRBACCommand failures that would each log Error.
-		//.
 		if err := ctx.Err(); err != nil {
 			rm.logger.Warn().Err(err).Msg("seed: ctx cancelled mid-pass; remaining organizations not seeded")
 			if firstErr == nil {
