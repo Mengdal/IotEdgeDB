@@ -7,13 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"iedb/internal/cluster/raft"
+	"iedb/internal/throttle"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"iedb/internal/auth"
@@ -66,24 +66,13 @@ func fileMetadata(path string) (sizeBytes int64, sha256hex string, err error) {
 	return n, fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-// freeOSMemoryProcessStart anchors the throttle to the monotonic clock so wall
-// clock adjustments (NTP steps, manual `date` changes) cannot misbehave.
-var freeOSMemoryProcessStart = time.Now()
-
-// lastFreeOSMemoryNanos is the time freeOSMemoryThrottled last fired, stored
-// as nanoseconds since freeOSMemoryProcessStart (monotonic).
-var lastFreeOSMemoryNanos atomic.Int64
+// deleteFreeOSMemoryDebounce throttles freeOSMemoryThrottled to once per 30s, process-wide.
+var deleteFreeOSMemoryDebounce = throttle.New(30 * time.Second)
 
 // freeOSMemoryThrottled fires debug.FreeOSMemory in a goroutine at most once every 30 seconds.
 // This prevents GC storms when multiple concurrent delete/retention requests complete together.
 func freeOSMemoryThrottled() {
-	now := time.Since(freeOSMemoryProcessStart).Nanoseconds()
-	last := lastFreeOSMemoryNanos.Load()
-	// last==0 means "never fired" — first call always proceeds.
-	if last != 0 && now-last < int64(30*time.Second) {
-		return
-	}
-	if lastFreeOSMemoryNanos.CompareAndSwap(last, now) {
+	if deleteFreeOSMemoryDebounce.TryAcquire() {
 		go debug.FreeOSMemory()
 	}
 }
