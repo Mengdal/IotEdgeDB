@@ -15,12 +15,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// maxLicenseResponseBytes caps the response-body size we'll read on
-// the activation/verify path. A signed RSA-2048 license_file is
-// ~800 bytes after base64; 1 MiB is generous headroom that still
-// shuts down a hostile proxy attempting to OOM us by streaming an
-// unbounded body.
-const maxLicenseResponseBytes = 1 << 20
 const (
 	// LicenseServerURL is the hardcoded enterprise license server URL
 	LicenseServerURL = "http://113.250.188.137:8080"

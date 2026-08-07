@@ -368,6 +368,23 @@ func configureDatabase(db *sql.DB, cfg *Config, logger zerolog.Logger) error {
 		if _, err := db.Exec(fmt.Sprintf("SET GLOBAL temp_directory='%s'", escapeSQLString(cfg.TempDirectory))); err != nil {
 			return fmt.Errorf("failed to set temp_directory: %w", err)
 		}
+		// Point DuckDB's secret storage at an allowlisted directory. DuckDB
+		// touches ~/.duckdb/stored_secrets when creating ANY secret (it reads
+		// persistent secrets from there on startup), so under the sandbox
+		// (enable_external_access=false) every CREATE SECRET fails with
+		// "Cannot access directory .../stored_secrets - file system operations
+		// are disabled by configuration". Directing the secret directory into
+		// the already-allowlisted temp directory keeps runtime
+		// ConfigureS3/ConfigureAzure cold-tier secrets working after the
+		// lockdown. IEDB never creates PERSISTENT secrets, so no credentials
+		// are written here.
+		secretDir := filepath.ToSlash(filepath.Join(cfg.TempDirectory, "duckdb-secrets"))
+		if err := os.MkdirAll(secretDir, 0o700); err != nil {
+			return fmt.Errorf("failed to create secret_directory %q: %w", secretDir, err)
+		}
+		if _, err := db.Exec(fmt.Sprintf("SET GLOBAL secret_directory='%s'", escapeSQLString(secretDir))); err != nil {
+			return fmt.Errorf("failed to set secret_directory: %w", err)
+		}
 	}
 
 	// Cache Parquet file metadata (schema, row group info) to reduce I/O on repeated access

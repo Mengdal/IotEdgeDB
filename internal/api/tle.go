@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iedb/internal/auth"
 	"io"
+	"strings"
 	"sync/atomic"
 
 	"iedb/internal/cluster"
@@ -77,7 +78,19 @@ func (h *TLEHandler) RegisterRoutes(app *fiber.App) {
 func (h *TLEHandler) handleWrite(c *fiber.Ctx) error {
 	h.totalRequests.Add(1)
 
-	database := c.Get("x-iedb-database", "default")
+	// strings.Clone: c.Get is zero-copy (aliases the fasthttp header buffer);
+	// this database name is retained past the handler by the async Arrow buffer
+	// (WriteTypedColumnarDirect) as the storage-path DB directory, so a
+	// concurrent request reusing the buffer could redirect the write. Copy at the
+	// boundary. See the full explanation in msgpack.go. Only the request-provided
+	// value aliases the buffer; the static "default" fallback does not, so we
+	// clone only when the header was actually present.
+	database := c.Get("x-iedb-database")
+	if database == "" {
+		database = "default"
+	} else {
+		database = strings.Clone(database)
+	}
 
 	if !isValidDatabaseName(database) {
 		h.totalErrors.Add(1)
@@ -87,7 +100,14 @@ func (h *TLEHandler) handleWrite(c *fiber.Ctx) error {
 	}
 
 	// Check if this request should be forwarded to a writer node
-	if h.router != nil && ShouldForwardWrite(h.router, c) {
+	switch WriteForwardDecision(h.router, c) {
+	case ForwardAlreadyForwarded:
+		// Already-forwarded marker on a node that cannot ingest locally:
+		// a routing loop or a spoofed X-iedb-Forwarded-By header. Return a
+		// deterministic error instead of a doomed local write attempt.
+		h.totalErrors.Add(1)
+		return RespondAlreadyForwarded(c)
+	case ForwardToPeer:
 		h.logger.Debug().Msg("Forwarding TLE write request to writer node")
 
 		httpReq, err := BuildHTTPRequest(c)
@@ -142,8 +162,15 @@ localProcessing:
 		})
 	}
 
-	// Measurement name from header (default: satellite_tle)
-	measurement := c.Get("x-iedb-measurement", "satellite_tle")
+	// Measurement name from header (default: satellite_tle). Clone for the same
+	// reason as database above; clone only the request-provided value, not the
+	// static default (which does not alias the request buffer).
+	measurement := c.Get("x-iedb-measurement")
+	if measurement == "" {
+		measurement = "satellite_tle"
+	} else {
+		measurement = strings.Clone(measurement)
+	}
 	if !isValidMeasurementName(measurement) {
 		h.totalErrors.Add(1)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{

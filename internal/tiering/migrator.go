@@ -200,7 +200,6 @@ func (m *Migrator) MigrateFile(ctx context.Context, candidate MigrationCandidate
 	// .UTC() so StartedAt persists in a stable timezone (matches the
 	// rest of internal/tiering/metadata.go). time.Since(startTime) is
 	// location-independent so the elapsed-duration math is unaffected.
-	//.
 	startTime := time.Now().UTC()
 
 	// Get source and destination backends

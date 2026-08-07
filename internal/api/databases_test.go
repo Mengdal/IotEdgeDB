@@ -900,7 +900,7 @@ func TestDatabasesHandler_CreateRequiresAdmin(t *testing.T) {
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		resp, err := app.Test(req)
+		resp, err := app.Test(req, 10000)
 		if err != nil {
 			t.Fatalf("app.Test: %v", err)
 		}
@@ -919,7 +919,7 @@ func TestDatabasesHandler_CreateRequiresAdmin(t *testing.T) {
 	t.Run("read-only token is forbidden", func(t *testing.T) {
 		status, body := doPost(t, readToken, `{"name":"db_read_should_fail"}`)
 		if status != fiber.StatusForbidden {
-			t.Errorf("read POST: status = %d, want 403 (regression for iedb#471 — read tokens MUST NOT be able to provision databases); body=%s", status, body)
+			t.Errorf("read POST: status = %d, want 403 (regression for iedb — read tokens MUST NOT be able to provision databases); body=%s", status, body)
 		}
 	})
 
@@ -962,7 +962,7 @@ func TestDatabasesHandler_DeleteRequiresAdmin(t *testing.T) {
 	createReq := httptest.NewRequest("POST", "/api/v1/databases", bytes.NewReader([]byte(`{"name":"db_to_delete"}`)))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("Authorization", "Bearer "+adminToken)
-	createResp, err := app.Test(createReq)
+	createResp, err := app.Test(createReq, 10000)
 	if err != nil {
 		t.Fatalf("seed create: %v", err)
 	}
@@ -975,7 +975,7 @@ func TestDatabasesHandler_DeleteRequiresAdmin(t *testing.T) {
 	t.Run("read-only token cannot delete", func(t *testing.T) {
 		req := httptest.NewRequest("DELETE", "/api/v1/databases/db_to_delete?confirm=true", nil)
 		req.Header.Set("Authorization", "Bearer "+readToken)
-		resp, err := app.Test(req)
+		resp, err := app.Test(req, 10000)
 		if err != nil {
 			t.Fatalf("delete: %v", err)
 		}
@@ -989,7 +989,7 @@ func TestDatabasesHandler_DeleteRequiresAdmin(t *testing.T) {
 	t.Run("admin token can delete", func(t *testing.T) {
 		req := httptest.NewRequest("DELETE", "/api/v1/databases/db_to_delete?confirm=true", nil)
 		req.Header.Set("Authorization", "Bearer "+adminToken)
-		resp, err := app.Test(req)
+		resp, err := app.Test(req, 10000)
 		if err != nil {
 			t.Fatalf("delete: %v", err)
 		}
@@ -1018,7 +1018,7 @@ func TestDatabasesHandler_ReadEndpointsAcceptAnyValidToken(t *testing.T) {
 	createReq := httptest.NewRequest("POST", "/api/v1/databases", bytes.NewReader([]byte(`{"name":"readable_db"}`)))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("Authorization", "Bearer "+adminToken)
-	createResp, err := app.Test(createReq)
+	createResp, err := app.Test(createReq, 10000)
 	if err != nil {
 		t.Fatalf("seed create: %v", err)
 	}
@@ -1040,7 +1040,7 @@ func TestDatabasesHandler_ReadEndpointsAcceptAnyValidToken(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", tc.path, nil)
 			req.Header.Set("Authorization", "Bearer "+readToken)
-			resp, err := app.Test(req)
+			resp, err := app.Test(req, 10000)
 			if err != nil {
 				t.Fatalf("Test: %v", err)
 			}

@@ -64,7 +64,7 @@ func TestLogsEndpoint_RequiresAdmin(t *testing.T) {
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		resp, err := app.Test(req)
+		resp, err := app.Test(req, 10000)
 		if err != nil {
 			t.Fatalf("app.Test(%s): %v", path, err)
 		}

@@ -511,7 +511,7 @@ func buildImportResult(database, measurement string, header []string, timeColumn
 			maxT = t
 		}
 		// Count distinct hour buckets exactly as ingest.groupByHour will
-		// (floor division so pre-epoch times match,).
+		// (floor division so pre-epoch times match).
 		hourBuckets[ingest.HourBucketID(t)] = struct{}{}
 	}
 

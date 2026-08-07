@@ -447,9 +447,6 @@ func TestScopedSecretsCoexist(t *testing.T) {
 		t.Fatalf("create primary secret: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, coldSQL); err != nil {
-		if strings.Contains(err.Error(), "Credential Chain") || strings.Contains(err.Error(), "Validation Failure") {
-			t.Skipf("credential chain not available in this environment: %v", err)
-		}
 		t.Fatalf("create cold secret: %v", err)
 	}
 
@@ -587,9 +584,6 @@ func TestColdTierS3SecretWithLocalPrimary(t *testing.T) {
 		AccessKey: "AKIACOLD",
 		SecretKey: "coldsecret",
 	}); err != nil {
-		if strings.Contains(err.Error(), "file system operations") || strings.Contains(err.Error(), "Permission Error") {
-			t.Skipf("sandbox secret persistence blocked (DuckDB version): %v", err)
-		}
 		t.Fatalf("ConfigureS3 on local-primary + S3-cold failed (httpfs not pre-loaded?): %v", err)
 	}
 }
