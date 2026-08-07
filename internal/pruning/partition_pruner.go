@@ -27,22 +27,26 @@ type globCacheEntry struct {
 // globCache provides a TTL cache for filepath.Glob results
 // This avoids expensive filesystem operations for repeated queries
 type globCache struct {
-	mu      sync.RWMutex
-	entries map[string]globCacheEntry
-	ttl     time.Duration
-	hits    atomic.Int64
-	misses  atomic.Int64
+	mu         sync.RWMutex
+	entries    map[string]globCacheEntry
+	ttl        time.Duration
+	maxEntries int
+	hits       atomic.Int64
+	misses     atomic.Int64
 }
 
 // newGlobCache creates a new glob cache with the specified TTL
 func newGlobCache(ttl time.Duration) *globCache {
 	return &globCache{
-		entries: make(map[string]globCacheEntry),
-		ttl:     ttl,
+		entries:    make(map[string]globCacheEntry),
+		ttl:        ttl,
+		maxEntries: maxCacheEntries,
 	}
 }
 
-// get retrieves a cached glob result if it exists and hasn't expired
+// get retrieves a cached glob result if it exists and hasn't expired.
+// Expired entries are evicted on read so that a workload with distinct
+// (path, sql) keys can't grow the map monotonically between janitor sweeps.
 func (c *globCache) get(pattern string) ([]string, bool) {
 	c.mu.RLock()
 	entry, ok := c.entries[pattern]
@@ -55,6 +59,14 @@ func (c *globCache) get(pattern string) ([]string, bool) {
 
 	if time.Now().After(entry.expiresAt) {
 		c.misses.Add(1)
+		// Evict-on-read: remove the stale entry so it can't accumulate.
+		c.mu.Lock()
+		// Re-check under the write lock: another goroutine may have
+		// refreshed this key with a still-valid entry in the meantime.
+		if e, ok := c.entries[pattern]; ok && time.Now().After(e.expiresAt) {
+			delete(c.entries, pattern)
+		}
+		c.mu.Unlock()
 		return nil, false
 	}
 
@@ -72,11 +84,32 @@ func (c *globCache) set(pattern string, matches []string) {
 	copy(cached, matches)
 
 	c.mu.Lock()
+	// Bound the cache: if inserting a new key would exceed maxEntries,
+	// drop expired entries first, and if still full, refuse the insert.
+	// This caps attacker-controlled memory from varying the time literal
+	// per request. Refreshing an existing key is always allowed.
+	if _, exists := c.entries[pattern]; !exists && len(c.entries) >= c.maxEntries {
+		c.evictExpiredLocked()
+		if len(c.entries) >= c.maxEntries {
+			c.mu.Unlock()
+			return
+		}
+	}
 	c.entries[pattern] = globCacheEntry{
 		matches:   cached,
 		expiresAt: time.Now().Add(c.ttl),
 	}
 	c.mu.Unlock()
+}
+
+// evictExpiredLocked removes all expired entries. Caller must hold c.mu.
+func (c *globCache) evictExpiredLocked() {
+	now := time.Now()
+	for pattern, entry := range c.entries {
+		if now.After(entry.expiresAt) {
+			delete(c.entries, pattern)
+		}
+	}
 }
 
 // invalidate removes all entries from the cache
@@ -154,6 +187,12 @@ const GlobCacheTTL = 30 * time.Second
 // PartitionCacheTTL is the default TTL for partition path caching (60 seconds)
 const PartitionCacheTTL = 60 * time.Second
 
+const maxCacheEntries = 10_000
+
+const maxPartitionPaths = 50_000
+
+var minPartitionDate = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+
 // partitionCacheEntry represents a cached partition path result
 type partitionCacheEntry struct {
 	result    interface{} // string or []string
@@ -164,18 +203,20 @@ type partitionCacheEntry struct {
 // partitionCache provides a TTL cache for OptimizeTablePath results
 // This avoids repeated partition calculations for the same queries
 type partitionCache struct {
-	mu      sync.RWMutex
-	entries map[string]partitionCacheEntry
-	ttl     time.Duration
-	hits    atomic.Int64
-	misses  atomic.Int64
+	mu         sync.RWMutex
+	entries    map[string]partitionCacheEntry
+	ttl        time.Duration
+	maxEntries int
+	hits       atomic.Int64
+	misses     atomic.Int64
 }
 
 // newPartitionCache creates a new partition cache with the specified TTL
 func newPartitionCache(ttl time.Duration) *partitionCache {
 	return &partitionCache{
-		entries: make(map[string]partitionCacheEntry),
-		ttl:     ttl,
+		entries:    make(map[string]partitionCacheEntry),
+		ttl:        ttl,
+		maxEntries: maxCacheEntries,
 	}
 }
 
@@ -186,7 +227,9 @@ func (c *partitionCache) cacheKey(originalPath, sql string) string {
 	return h
 }
 
-// get retrieves a cached partition result
+// get retrieves a cached partition result. Expired entries are evicted on
+// read so distinct (path, sql) keys can't grow the map monotonically between
+// janitor sweeps.
 func (c *partitionCache) get(key string) (interface{}, bool, bool) {
 	c.mu.RLock()
 	entry, ok := c.entries[key]
@@ -199,6 +242,13 @@ func (c *partitionCache) get(key string) (interface{}, bool, bool) {
 
 	if time.Now().After(entry.expiresAt) {
 		c.misses.Add(1)
+		// Evict-on-read: remove the stale entry so it can't accumulate.
+		c.mu.Lock()
+		// Re-check under the write lock in case another goroutine refreshed it.
+		if e, ok := c.entries[key]; ok && time.Now().After(e.expiresAt) {
+			delete(c.entries, key)
+		}
+		c.mu.Unlock()
 		return nil, false, false
 	}
 
@@ -209,12 +259,32 @@ func (c *partitionCache) get(key string) (interface{}, bool, bool) {
 // set stores a partition result in the cache
 func (c *partitionCache) set(key string, result interface{}, optimized bool) {
 	c.mu.Lock()
+	// Bound the cache: if inserting a new key would exceed maxEntries, drop
+	// expired entries first, and if still full, refuse the insert. Refreshing
+	// an existing key is always allowed.
+	if _, exists := c.entries[key]; !exists && len(c.entries) >= c.maxEntries {
+		c.evictExpiredLocked()
+		if len(c.entries) >= c.maxEntries {
+			c.mu.Unlock()
+			return
+		}
+	}
 	c.entries[key] = partitionCacheEntry{
 		result:    result,
 		optimized: optimized,
 		expiresAt: time.Now().Add(c.ttl),
 	}
 	c.mu.Unlock()
+}
+
+// evictExpiredLocked removes all expired entries. Caller must hold c.mu.
+func (c *partitionCache) evictExpiredLocked() {
+	now := time.Now()
+	for key, entry := range c.entries {
+		if now.After(entry.expiresAt) {
+			delete(c.entries, key)
+		}
+	}
 }
 
 // invalidate removes all entries from the cache
@@ -469,13 +539,10 @@ func (p *PartitionPruner) ExtractTimeRange(sqlStr string) *TimeRange {
 //
 // iedb's partition structure: {database}/{measurement}/{year}/{month}/{day}/{hour}/file.parquet
 // Example: default/cpu/2024/03/15/14/cpu_20240315_140000_1000.parquet
-func (p *PartitionPruner) GeneratePartitionPaths(basePath, database, measurement string, timeRange *TimeRange) []string {
+func (p *PartitionPruner) GeneratePartitionPaths(ctx context.Context, basePath, database, measurement string, timeRange *TimeRange) []string {
 	if timeRange == nil {
 		return nil
 	}
-
-	paths := []string{}
-	daysMap := make(map[string]bool)
 
 	// Detect if this is a remote path (S3/Azure) - use string concatenation instead of filepath.Join
 	// because filepath.Join will mangle URLs like s3://bucket to s3:/bucket
@@ -485,7 +552,55 @@ func (p *PartitionPruner) GeneratePartitionPaths(basePath, database, measurement
 	current := timeRange.Start.Truncate(time.Hour)
 	end := timeRange.End
 
+	// Clamp the start up to the epoch floor. IEDB has no data before 1970, so
+	// this is lossless (no real partition is skipped), and it bounds the number
+	// of empty pre-data hours a degenerate start (e.g. '0001-01-01') would
+	// otherwise force the loop to walk. We clamp rather than reject so a
+	// two-sided query with a very old start still prunes correctly instead of
+	// dropping legitimate rows.
+	if current.Before(minPartitionDate) {
+		current = minPartitionDate
+	}
+
+	// Cap the number of paths BEFORE allocating anything. The path count is
+	// ~1 per hour plus ~1 per covered day; bound it by an over-estimate of the
+	// total (hours rounded up, plus one day per 24 hours) so the guard never
+	// under-counts the paths the loop actually materializes. Above the cap we
+	// return nil so the caller falls back to the single unpruned glob —
+	// correct, just not pruned. This prevents a very wide time range from
+	// forcing the server to materialize millions of path strings and
+	// glob/LIST each one.
+	if span := end.Sub(current); span > 0 {
+		// ceil(span / hour) hourly paths, plus at most ceil(hours/24)+1 daily.
+		hourlyPaths := int64((span + time.Hour - 1) / time.Hour)
+		dailyPaths := hourlyPaths/24 + 1
+		if estPaths := hourlyPaths + dailyPaths; estPaths > int64(maxPartitionPaths) {
+			p.logger.Warn().
+				Int64("estimated_paths", estPaths).
+				Int("max_partition_paths", maxPartitionPaths).
+				Time("start", current).
+				Time("end", timeRange.End).
+				Msg("Time range too wide for partition pruning; falling back to unpruned glob")
+			return nil
+		}
+	}
+
+	paths := []string{}
+	daysMap := make(map[string]bool)
+
+	// ctxCheckInterval bounds how often we poll ctx.Err() inside the loop.
+	// The loop is already bounded to <= maxPartitionPaths iterations by the cap
+	// above; this just lets a client disconnect / deadline abort even that work.
+	const ctxCheckInterval = 4096
+	iter := 0
 	for current.Before(end) {
+		if iter%ctxCheckInterval == 0 && ctx.Err() != nil {
+			p.logger.Warn().
+				Int("paths_so_far", len(paths)).
+				Msg("Partition path generation cancelled")
+			return nil
+		}
+		iter++
 		year := current.Format("2006")
 		month := current.Format("01")
 		day := current.Format("02")
@@ -536,7 +651,7 @@ func (p *PartitionPruner) GeneratePartitionPaths(basePath, database, measurement
 // OptimizeTablePath optimizes a table path based on WHERE clause predicates
 //
 // Returns the optimized path (string or []string) and whether optimization was applied
-func (p *PartitionPruner) OptimizeTablePath(originalPath, sql string) (interface{}, bool) {
+func (p *PartitionPruner) OptimizeTablePath(ctx context.Context, originalPath, sql string) (interface{}, bool) {
 	if !p.enabled {
 		return originalPath, false
 	}
@@ -578,7 +693,7 @@ func (p *PartitionPruner) OptimizeTablePath(originalPath, sql string) (interface
 		Msg("Parsed path components")
 
 	// Generate optimized partition paths
-	partitionPaths := p.GeneratePartitionPaths(basePath, database, measurement, timeRange)
+	partitionPaths := p.GeneratePartitionPaths(ctx, basePath, database, measurement, timeRange)
 
 	if len(partitionPaths) == 0 {
 		p.logger.Info().Msg("No partitions found, using fallback")
