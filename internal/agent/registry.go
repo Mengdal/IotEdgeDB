@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -23,6 +24,17 @@ type TableMeta struct {
 	MinTime  int64  `json:"min_time"`
 	MaxTime  int64  `json:"max_time"`
 	RowCount int    `json:"row_count"`
+}
+
+// AgentStatus is a snapshot of one agent's registration and table metadata,
+// for the monitoring endpoints. It is built from registry state under the read
+// lock, never returned as a live reference.
+type AgentStatus struct {
+	ID            string
+	URL           string
+	Online        bool
+	LastHeartbeat time.Time
+	Tables        []TableMeta
 }
 
 // AgentRegistry manages agent registration and table-to-agent mapping.
@@ -70,19 +82,44 @@ func (r *AgentRegistry) Register(id, url string) {
 }
 
 // Heartbeat updates agent liveness and table metadata.
-func (r *AgentRegistry) Heartbeat(id string, tables []TableMeta) {
+//
+// An unknown id is auto-registered when the heartbeat carries a url: the
+// registry is in-memory, so a hub restart clears every agent, and an agent
+// that keeps heartbeating without re-registering would otherwise be silently
+// ignored forever. A url-less heartbeat for an unknown id is still ignored —
+// an entry without a url could never be reached by query merging, so creating
+// one would only produce a phantom online agent.
+func (r *AgentRegistry) Heartbeat(id, url string, tables []TableMeta) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	agent, ok := r.agents[id]
 	if !ok {
-		return
+		if url == "" {
+			return
+		}
+		agent = &AgentInfo{
+			ID:            id,
+			URL:           url,
+			LastHeartbeat: time.Now(),
+			Online:        true,
+		}
+		r.agents[id] = agent
+		r.agentTables[id] = make(map[string]TableMeta)
 	}
 	agent.LastHeartbeat = time.Now()
 	agent.Online = true
 
 	// Update table mappings
+	// currentTables is nil when a prior cleanup deleted this agent's map after
+	// its heartbeat timed out (cleanup removes the map but keeps the agents
+	// entry). A reconnecting agent heartbeat would then assign into a nil map
+	// and panic. Re-create it so the heartbeat can repopulate the tables.
 	currentTables := r.agentTables[id]
+	if currentTables == nil {
+		currentTables = make(map[string]TableMeta)
+		r.agentTables[id] = currentTables
+	}
 	tableSet := make(map[string]bool)
 
 	for _, t := range tables {
@@ -157,6 +194,66 @@ func (r *AgentRegistry) GetTableMeta(agentID, db, table string) (TableMeta, bool
 		return meta, found
 	}
 	return TableMeta{}, false
+}
+
+// List returns a snapshot of every registered agent, including offline ones
+// (cleanup marks them offline rather than deleting them), sorted by ID for a
+// stable response.
+func (r *AgentRegistry) List() []AgentStatus {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]AgentStatus, 0, len(r.agents))
+	for _, a := range r.agents {
+		result = append(result, r.buildStatus(a))
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+// ListTableAgents returns the table-to-agent mapping for the monitoring view:
+// "db.table" -> sorted online agent IDs. Offline agents are excluded, matching
+// the query path's GetAgentsForTable.
+func (r *AgentRegistry) ListTableAgents() map[string][]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[string][]string, len(r.tableAgents))
+	for key, ids := range r.tableAgents {
+		var online []string
+		for _, id := range ids {
+			if a, ok := r.agents[id]; ok && a.Online {
+				online = append(online, id)
+			}
+		}
+		if len(online) > 0 {
+			sort.Strings(online)
+			result[key] = online
+		}
+	}
+	return result
+}
+
+// buildStatus builds an AgentStatus snapshot from an AgentInfo. Caller holds
+// the read lock.
+func (r *AgentRegistry) buildStatus(a *AgentInfo) AgentStatus {
+	tables := make([]TableMeta, 0, len(r.agentTables[a.ID]))
+	for _, meta := range r.agentTables[a.ID] {
+		tables = append(tables, meta)
+	}
+	sort.Slice(tables, func(i, j int) bool {
+		if tables[i].DB != tables[j].DB {
+			return tables[i].DB < tables[j].DB
+		}
+		return tables[i].Table < tables[j].Table
+	})
+	return AgentStatus{
+		ID:            a.ID,
+		URL:           a.URL,
+		Online:        a.Online,
+		LastHeartbeat: a.LastHeartbeat,
+		Tables:        tables,
+	}
 }
 
 func (r *AgentRegistry) cleanupLoop() {
