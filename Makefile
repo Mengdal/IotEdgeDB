@@ -3,7 +3,10 @@
 # Variables
 BINARY_NAME=iedb
 GO=go
-GOFLAGS=-v -tags=duckdb_arrow
+# -trimpath: embed module-relative paths instead of the build machine's
+# absolute paths, so a binary built elsewhere runs and debugs identically
+# (and never leaks the compiler's directory layout).
+GOFLAGS=-v -tags=duckdb_arrow -trimpath
 MAIN_PATH=./cmd/iedb
 
 # windows go build -v -tags=duckdb_arrow -o iedb.exe ./cmd/iedb
