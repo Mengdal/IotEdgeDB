@@ -91,7 +91,7 @@ docs/progress/
 /LICENSE
 /.gocache
 /.cache
-/.omo
+/.zcode
 /.reasonix
 reasonix.toml
 /cmd/tools
