@@ -14,8 +14,9 @@ static int malloc_trim(size_t pad) { (void)pad; return 0; }
 import "C"
 
 import (
-	"sync/atomic"
 	"time"
+
+	"iedb/internal/throttle"
 )
 
 // trimDebounce throttles ReleaseToOS so concurrent retention/delete/compaction
