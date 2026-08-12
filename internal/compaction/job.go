@@ -114,10 +114,13 @@ type Job struct {
 	Files          []string // Original files to be compacted
 	StorageBackend storage.Backend
 	Database       string
-	TargetSizeMB   int
 	Tier           string
-	TempDirectory  string   // Base temp directory for compaction files
-	SortKeys       []string // Sort keys for this measurement (for ORDER BY in compaction)
+	// BatchNumber is the 1-based index of this batch within its partition
+	// (0 when the job was not produced by SplitCandidateIntoBatches). It is
+	// part of the output filename so sibling batches cannot collide.
+	BatchNumber   int
+	TempDirectory string   // Base temp directory for compaction files
+	SortKeys      []string // Sort keys for this measurement (for ORDER BY in compaction)
 
 	// Job metadata
 	JobID       string
@@ -161,8 +164,8 @@ type JobConfig struct {
 	Files           []string
 	StorageBackend  storage.Backend
 	Database        string
-	TargetSizeMB    int
 	Tier            string
+	BatchNumber     int      // 1-based batch index within the partition (0 = not batched)
 	TempDirectory   string   // Base temp directory for compaction files (default: ./data/compaction)
 	SortKeys        []string // Sort keys for this measurement (for ORDER BY in compaction)
 	Logger          zerolog.Logger
@@ -218,8 +221,8 @@ func NewJob(cfg *JobConfig) *Job {
 		Files:           cfg.Files,
 		StorageBackend:  cfg.StorageBackend,
 		Database:        cfg.Database,
-		TargetSizeMB:    cfg.TargetSizeMB,
 		Tier:            cfg.Tier,
+		BatchNumber:     cfg.BatchNumber,
 		TempDirectory:   tempDir,
 		SortKeys:        sortKeys,
 		JobID:           jobID,
@@ -578,7 +581,7 @@ func (j *Job) downloadSingleFile(ctx context.Context, tempDir string, index int,
 // successfully compacted files' storage keys in j.compactedFiles.
 func (j *Job) compactFiles(ctx context.Context, files []downloadedFile, tempDir string) (string, error) {
 	// Generate output filename with tier-specific suffix.
-	// Format: {measurement}_{YYYYMMDD}_{HHMMSS}_{nanos}_{suffix}.parquet
+	// Format: {measurement}_{YYYYMMDD}_{HHMMSS}_{nanos}_b{batch}_{suffix}.parquet
 	// The nanos field guarantees uniqueness when multiple batches run
 	// sequentially for the same partition (SplitCandidateIntoBatches).
 	// Without it, batches within the same second produce identical filenames
@@ -589,7 +592,8 @@ func (j *Job) compactFiles(ctx context.Context, files []downloadedFile, tempDir 
 	if j.Tier != "hourly" {
 		suffix = j.Tier
 	}
-	outputFile := filepath.Join(tempDir, fmt.Sprintf("%s_%s_%d_%s.parquet", j.Measurement, timestamp, now.UnixNano(), suffix))
+	outputFile := filepath.Join(tempDir, fmt.Sprintf("%s_%s_%d_b%d_%s.parquet",
+		j.Measurement, timestamp, now.UnixNano(), j.BatchNumber, suffix))
 
 	// Use the shared DuckDB connection instead of creating a new one
 	// This prevents memory retention from DuckDB's jemalloc not releasing memory on Close()
