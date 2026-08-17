@@ -161,6 +161,48 @@ jobs:
           path: iedb-${{ matrix.suffix }}
           retention-days: 7
 
+  # Build Windows binary on a native Windows runner. The runner image ships
+  # MinGW-w64 gcc, which CGO needs for SQLite and DuckDB.
+  build-windows:
+    name: Build Windows Binary
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: '1'
+          CC: gcc
+          CXX: g++
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+
+          go build -tags=duckdb_arrow -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o iedb.exe ./cmd/iedb
+
+          # Show binary info
+          ls -lh iedb.exe
+
+          # Create checksum (lowercase hex, same layout as sha256sum)
+          $hash = (Get-FileHash iedb.exe -Algorithm SHA256).Hash.ToLower()
+          "${hash}  iedb.exe" | Out-File -Encoding ascii iedb.exe.sha256
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: iedb-binary-windows-amd64
+          path: |
+            iedb.exe
+            iedb.exe.sha256
+          retention-days: 7
+
   # Build Debian packages
   debian-build:
     name: Build Debian Package
@@ -716,7 +758,7 @@ jobs:
   create-draft-release:
     name: Create Draft Release
     runs-on: ubuntu-latest
-    needs: [prepare, docker-merge, test-docker, test-binary, helm-package, test-helm, debian-build, rpm-build]
+    needs: [prepare, docker-merge, test-docker, test-binary, helm-package, test-helm, debian-build, rpm-build, build-windows]
     permissions:
       contents: write
     steps:
@@ -846,6 +888,8 @@ jobs:
             release-artifacts/**/*.deb.sha256
             release-artifacts/**/*.rpm
             release-artifacts/**/*.rpm.sha256
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.exe.sha256
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
