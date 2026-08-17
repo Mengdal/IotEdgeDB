@@ -1,24 +1,30 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"iedb/internal/agent"
-	"iedb/internal/storage"
+	"iedb/internal/ingest"
 	"sort"
 	"time"
 
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/gofiber/fiber/v2"
 )
 
 // AgentHandler handles agent registration and heartbeat.
 type AgentHandler struct {
 	registry *agent.AgentRegistry
-	storage  storage.Backend
+	// arrowBuffer is the shared ingestion writer used to normalize the time
+	// column (BIGINT → Timestamp) before persisting agent-uploaded parquet,
+	// keeping every file in a partition schema-compatible with compaction.
+	arrowBuffer *ingest.ArrowBuffer
 }
 
 // NewAgentHandler creates an AgentHandler.
-func NewAgentHandler(registry *agent.AgentRegistry, store storage.Backend) *AgentHandler {
-	return &AgentHandler{registry: registry, storage: store}
+func NewAgentHandler(registry *agent.AgentRegistry, arrowBuffer *ingest.ArrowBuffer) *AgentHandler {
+	return &AgentHandler{registry: registry, arrowBuffer: arrowBuffer}
 }
 
 // RegisterRoutes registers agent API routes.
@@ -91,6 +97,11 @@ func (h *AgentHandler) handleIngestParquet(c *fiber.Ctx) error {
 			"error": "db and measurement query params required",
 		})
 	}
+	if !isValidDatabaseName(db) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid database name: must start with a letter and contain only alphanumeric characters, underscores, or hyphens (max 64 characters)",
+		})
+	}
 
 	body := c.Body()
 	if len(body) == 0 {
@@ -98,28 +109,106 @@ func (h *AgentHandler) handleIngestParquet(c *fiber.Ctx) error {
 			"error": "empty body",
 		})
 	}
+	if h.arrowBuffer == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "agent handler is misconfigured: ArrowBuffer is not set",
+		})
+	}
 
-	// Build storage path
-	now := time.Now().UTC()
-	path := fmt.Sprintf("%s/%s/%s/%s/%s/%s/%s_%s_%09d.parquet",
-		db, measurement,
-		now.Format("2006"), now.Format("01"), now.Format("02"), now.Format("15"),
-		measurement,
-		now.Format("20060102_150405"),
-		now.UnixNano()%1_000_000_000,
-	)
+	// Decode the uploaded parquet into Arrow and re-write it through the shared
+	// ingestion pipeline. Raw passthrough (storage.Write) left the agent's time
+	// column as BIGINT nanoseconds, which breaks compaction when a partition
+	// mixes BIGINT and TIMESTAMP files (DuckDB cannot cast BIGINT -> TIMESTAMP
+	// during multi-file reads). Normalizing here keeps every agent file
+	// schema-compatible with the rest of the storage.
+	pf, err := file.NewParquetReader(bytes.NewReader(body))
+	if err != nil {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": "failed to read parquet file: " + err.Error(),
+		})
+	}
+	defer pf.Close()
+
+	arrowReader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, nil)
+	if err != nil {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": "failed to open parquet reader: " + err.Error(),
+		})
+	}
 
 	ctx := c.Context()
-	if err := h.storage.Write(ctx, path, body); err != nil {
+	tbl, err := arrowReader.ReadTable(ctx)
+	if err != nil {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": "failed to read parquet table: " + err.Error(),
+		})
+	}
+	defer tbl.Release()
+
+	schema := tbl.Schema()
+	header := make([]string, schema.NumFields())
+	for i := 0; i < schema.NumFields(); i++ {
+		header[i] = schema.Field(i).Name
+	}
+
+	timeFieldIdx, herr := validateImportHeader(header, "time")
+	if herr != nil {
+		return c.Status(herr.StatusCode).JSON(fiber.Map{"error": herr.Message})
+	}
+
+	numRows := int(tbl.NumRows())
+	if numRows == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "file contains no rows",
+		})
+	}
+
+	// Reuse the import pipeline's typed extraction: the time column is
+	// normalized to int64 microseconds (auto-detects s/ms/us/ns magnitude),
+	// and every other column is converted to the typed slices ArrowWriter
+	// expects.
+	cols := make(map[string]interface{}, len(header))
+	validity := make(map[string][]bool, len(header))
+	var timeMicros []int64
+	for i, name := range header {
+		if i == timeFieldIdx {
+			tm, terr := parquetColumnToTimeMicros(tbl.Column(i), "")
+			if terr != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": fmt.Sprintf("failed to parse time column %q: %v", name, terr),
+				})
+			}
+			timeMicros = tm
+			continue
+		}
+		vals, valid, conv := arrowColumnToTyped(tbl.Column(i))
+		if conv != nil {
+			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+				"error": fmt.Sprintf("unsupported parquet column %q: %v", name, conv),
+			})
+		}
+		cols[name] = vals
+		if valid != nil {
+			validity[name] = valid
+		}
+	}
+	cols["time"] = timeMicros
+
+	batch := &ingest.TypedColumnBatch{Data: cols, Validity: validity}
+	if err := h.arrowBuffer.WriteTypedColumnarDirect(ctx, db, measurement, batch, numRows); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fmt.Sprintf("storage write failed: %v", err),
+			"error": "failed to ingest parquet data: " + err.Error(),
+		})
+	}
+	if err := h.arrowBuffer.FlushAll(ctx); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to flush ingested data: " + err.Error(),
 		})
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"status": "ok",
-		"path":   path,
-		"bytes":  len(body),
+		"rows":   numRows,
 	})
 }
 

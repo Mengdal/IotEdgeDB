@@ -229,10 +229,23 @@ func (b *S3Backend) WriteReader(ctx context.Context, path string, reader io.Read
 	}
 
 	// For small files with known size, use simple PutObject
+	// The SDK computes a header checksum, which requires a seekable body over
+	// plain HTTP (unseekable streams are only supported with TLS or a trailing
+	// checksum). Buffer non-seekable readers (e.g. io.Pipe from tiering) in
+	// memory so the upload works over HTTP; sizes here are < 100MB.
+	body := reader
+	if _, ok := reader.(io.ReadSeeker); !ok {
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			return fmt.Errorf("failed to buffer file for upload: %w", err)
+		}
+		body = bytes.NewReader(data)
+	}
+
 	_, err := b.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(b.bucket),
 		Key:           aws.String(b.prefixedKey(path)),
-		Body:          reader,
+		Body:          body,
 		ContentLength: aws.Int64(size),
 		ContentType:   aws.String(contentType),
 	})

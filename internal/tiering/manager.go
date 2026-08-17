@@ -481,14 +481,17 @@ type filePathInfo struct {
 }
 
 // parseFilePath parses a storage path to extract database, measurement, and partition time
-// Expected format: {database}/{measurement}/{year}/{month}/{day}/{hour}/{filename}.parquet
+// Supported formats:
+//
+//	7 segments: {database}/{measurement}/{year}/{month}/{day}/{hour}/{filename}.parquet  (hourly/raw)
+//	6 segments: {database}/{measurement}/{year}/{month}/{day}/{filename}.parquet          (daily compacted)
 func (m *Manager) parseFilePath(path string) (*filePathInfo, error) {
 	// Normalize path separators
 	path = filepath.ToSlash(path)
 	parts := strings.Split(path, "/")
 
-	// Need at least: database/measurement/year/month/day/hour/filename.parquet
-	if len(parts) < 7 {
+	// Need at least: database/measurement/year/month/day/filename.parquet
+	if len(parts) < 6 {
 		return nil, fmt.Errorf("path too short: %s", path)
 	}
 
@@ -519,9 +522,14 @@ func (m *Manager) parseFilePath(path string) (*filePathInfo, error) {
 		return nil, fmt.Errorf("invalid day in path: %s", parts[4])
 	}
 
-	hour, err := strconv.Atoi(parts[5])
-	if err != nil {
-		return nil, fmt.Errorf("invalid hour in path: %s", parts[5])
+	// 7 segments carry an hour directory; 6 segments (daily compacted files) have no hour -> 0
+	var hour int
+	if len(parts) == 7 {
+		h, err := strconv.Atoi(parts[5])
+		if err != nil {
+			return nil, fmt.Errorf("invalid hour in path: %s", parts[5])
+		}
+		hour = h
 	}
 
 	// Construct partition time (UTC)

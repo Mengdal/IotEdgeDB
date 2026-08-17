@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends unzip && \
 ARG VERSION
 RUN go build -v \
     -tags=duckdb_arrow \
+    -trimpath \
     -ldflags="-s -w -X main.Version=${VERSION}" \
     -o iedb ./cmd/iedb
 

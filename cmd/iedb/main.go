@@ -1909,7 +1909,7 @@ func main() {
 			return nil
 		}, shutdown.PriorityHTTPServer)
 
-		agentHandler := api.NewAgentHandler(agentRegistry, storageBackend)
+		agentHandler := api.NewAgentHandler(agentRegistry, arrowBuffer)
 		agentHandler.RegisterRoutes(server.GetApp())
 
 		queryHandler.SetAgentRegistry(agentRegistry)

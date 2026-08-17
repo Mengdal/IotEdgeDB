@@ -63,6 +63,18 @@ func (h *TieringHandler) GetFiles(c *fiber.Ctx) error {
 
 	if database != "" {
 		files, err = h.manager.GetMetadata().GetFilesByDatabase(ctx, database)
+		// 组合过滤：database 与 tier 同时指定时，在 limit 截断前按 tier 过滤
+		// （否则 tier 参数会被 database 分支忽略，冷层文件被 limit 截掉）
+		if err == nil && tierParam != "" {
+			t := tiering.TierFromString(tierParam)
+			filtered := files[:0]
+			for _, f := range files {
+				if f.Tier == t {
+					filtered = append(filtered, f)
+				}
+			}
+			files = filtered
+		}
 	} else if tierParam != "" {
 		tier := tiering.TierFromString(tierParam)
 		files, err = h.manager.GetMetadata().GetFilesInTier(ctx, tier)
