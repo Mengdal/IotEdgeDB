@@ -162,13 +162,13 @@ jobs:
           retention-days: 7
 
   # Cross-compile Windows binary (CGO required for SQLite + DuckDB).
-  # Uses Ubuntu + MinGW GCC 12, which is compatible with DuckDB's prebuilt
-  # static libs (newer MinGW GCC on windows-latest fails to link them).
+  # Uses Ubuntu 22.04, whose MinGW-w64 is GCC 12 — required for DuckDB's
+  # prebuilt static libs (newer MinGW GCC fails to link them).
   # Artifact is consumed by windows-package; it is NOT published standalone.
   windows-build:
     name: Build Windows Binary
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
