@@ -47,10 +47,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "installservice"; Description: "{cm:TaskInstallService}"; GroupDescription: "{cm:TaskServiceGroup}"; Flags: unchecked
 
 [CustomMessages]
-en.TaskInstallService=Register iedb as a Windows service (auto-start on boot)
-en.TaskServiceGroup=Service
-chs.TaskInstallService=注册 iedb 为 Windows 服务（开机自启）
-chs.TaskServiceGroup=服务
+TaskInstallService=Register iedb as a Windows service (auto-start on boot)
+TaskServiceGroup=Service
+chinesesimplified.TaskInstallService=注册 iedb 为 Windows 服务（开机自启）
+chinesesimplified.TaskServiceGroup=服务
 
 [Files]
 ; Main binary
