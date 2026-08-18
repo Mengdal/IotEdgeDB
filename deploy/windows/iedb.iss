@@ -76,6 +76,7 @@ Type: filesandordirs; Name: "{app}\front"
 procedure CreateDataDir;
 var
   DataDir: String;
+  ResultCode: Integer;
 begin
   DataDir := 'C:\ProgramData\iedb\data';
   // Create the directory if it doesn't exist
