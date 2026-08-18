@@ -226,12 +226,15 @@ jobs:
           VER="${{ needs.prepare.outputs.version }}"
           WINVER=$(echo "${VER}" | awk -F. '{printf "%d.%d.%d.0", $1+0, $2+0, $3+0}')
           echo "WINVER=${WINVER}" >> "$GITHUB_ENV"
+          echo "Computed WINVER=${WINVER}"
 
       - name: Compile Inno Setup installer
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.9
-        with:
-          path: deploy/windows/iedb.iss
-          options: /DMyAppVersion=${{ needs.prepare.outputs.version }} /DMyAppVersionInfo=${{ env.WINVER }} /O"${{ github.workspace }}"
+        shell: cmd
+        env:
+          MYAPP_VERSION: ${{ needs.prepare.outputs.version }}
+          MYAPP_VERSION_INFO: ${{ env.WINVER }}
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DMyAppVersion=%MYAPP_VERSION% /DMyAppVersionInfo=%MYAPP_VERSION_INFO% /O"%GITHUB_WORKSPACE%" deploy\windows\iedb.iss
 
       - name: Create checksum
         shell: bash
