@@ -83,7 +83,7 @@ begin
     CreateDir(DataDir);
   // Grant Users group modify access so iedb can write when run manually
   // (the LocalSystem service can already write anywhere)
-  ShellExec('open', 'icacls', DataDir + ' /grant BUILTIN\Users:(OI)(CI)M /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/c icacls "' + DataDir + '" /grant BUILTIN\Users:(OI)(CI)M /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -97,7 +97,7 @@ function ServiceExists: Boolean;
 var
   ResultCode: Integer;
 begin
-  Result := (ShellExec('open', 'sc', 'query iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0));
+  Result := Exec(ExpandConstant('{cmd}'), '/c sc query iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
 end;
 
 // Unconditional service stop+delete on uninstall. This catches services that
@@ -110,8 +110,10 @@ begin
   begin
     if ServiceExists then
     begin
-      ShellExec('open', 'sc', 'stop iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      ShellExec('open', 'sc', 'delete iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      // Stop first, ignore "not started" errors
+      Exec(ExpandConstant('{cmd}'), '/c sc stop iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      // Mark for deletion (actual removal happens after process exit)
+      Exec(ExpandConstant('{cmd}'), '/c sc delete iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
   end;
 end;
