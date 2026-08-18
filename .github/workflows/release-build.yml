@@ -218,6 +218,14 @@ jobs:
           unzip -o "${FRONT_ZIP}" -d "${STAGING}"
           rm -f "${FRONT_ZIP}"
 
+          # NSSM (Non-Sucking Service Manager) — wraps iedb.exe as a proper
+          # Windows service. iedb.exe is a console app and cannot talk to SCM
+          # directly, so sc create/start fails with error 1053.
+          curl -fsSL -o "${RUNNER_TEMP}/nssm.zip" -L "https://nssm.cc/release/nssm-2.24.zip"
+          unzip -o "${RUNNER_TEMP}/nssm.zip" -d "${RUNNER_TEMP}/nssm-extract"
+          cp "${RUNNER_TEMP}/nssm-extract/nssm-2.24/win64/nssm.exe" "${STAGING}/nssm.exe"
+          rm -rf "${RUNNER_TEMP}/nssm.zip" "${RUNNER_TEMP}/nssm-extract"
+
       - name: Compute Windows version info (4-part, no leading zeros)
         id: winver
         shell: bash
