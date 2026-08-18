@@ -161,14 +161,14 @@ jobs:
           path: iedb-${{ matrix.suffix }}
           retention-days: 7
 
-  # Cross-compile Windows binary (CGO required for SQLite + DuckDB).
-  # Uses Ubuntu 22.04, whose MinGW-w64 is GCC 12 — required for DuckDB's
-  # prebuilt static libs (newer MinGW GCC fails to link them).
-  # Artifact is consumed by windows-package; it is NOT published standalone.
-  windows-build:
-    name: Build Windows Binary
+  # Build Windows installer (Inno Setup) on a Windows runner.
+  # Compiles the binary natively with MinGW-w64 GCC 13 (CGO) — DuckDB's
+  # windows-amd64 static lib links cleanly with GCC 13, unlike GCC 16 on
+  # the default runner image. Then packages exe + toml + front into an installer.
+  windows-package:
+    name: Build Windows Installer
+    runs-on: windows-latest
     needs: prepare
-    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -179,44 +179,26 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      - name: Install MinGW-w64 cross compiler (GCC 12)
+      - name: Install MinGW-w64 (GCC 13) for CGO
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix
+          choco install mingw --version=13.2.0 --no-progress -y
+          # Put MinGW 13 bin on PATH (choco installs to C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin)
+          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -Append -FilePath $env:GITHUB_PATH
 
-      - name: Build Windows binary
+      - name: Build Windows binary (CGO, native MinGW)
+        shell: pwsh
         env:
-          CGO_ENABLED: 1
+          CGO_ENABLED: '1'
           GOOS: windows
           GOARCH: amd64
-          CC: x86_64-w64-mingw32-gcc-posix
-          CXX: x86_64-w64-mingw32-g++-posix
         run: |
-          VERSION=${{ needs.prepare.outputs.version }}
-          go build -tags=duckdb_arrow -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o iedb-windows-amd64.exe ./cmd/iedb
-          ls -lh iedb-windows-amd64.exe
-
-      - name: Upload Windows binary (for packaging)
-        uses: actions/upload-artifact@v4
-        with:
-          name: iedb-binary-windows-amd64
-          path: iedb-windows-amd64.exe
-          retention-days: 7
-
-  # Build Windows installer (Inno Setup) on a Windows runner — only packages
-  # the prebuilt binary + config + frontend into an .exe installer.
-  windows-package:
-    name: Build Windows Installer
-    runs-on: windows-latest
-    needs: [prepare, windows-build]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download Windows binary
-        uses: actions/download-artifact@v4
-        with:
-          name: iedb-binary-windows-amd64
+          # Ensure the choco-installed GCC 13 takes priority over any other MinGW on PATH
+          $env:PATH = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin;" + $env:PATH
+          $VERSION = "${{ needs.prepare.outputs.version }}"
+          gcc --version | Select-Object -First 1
+          go build -tags=duckdb_arrow -trimpath "-ldflags=-s -w -X main.Version=$VERSION" -o iedb.exe ./cmd/iedb
+          if (-not (Test-Path iedb.exe)) { exit 1 }
 
       - name: Prepare package staging directory
         shell: bash
@@ -224,8 +206,8 @@ jobs:
           STAGING="deploy/windows/build"
           mkdir -p "${STAGING}"
 
-          # Binary (rename to plain iedb.exe for the installer)
-          cp iedb-windows-amd64.exe "${STAGING}/iedb.exe"
+          # Binary
+          cp iedb.exe "${STAGING}/iedb.exe"
 
           # Config
           cp iedb.toml "${STAGING}/iedb.toml"
