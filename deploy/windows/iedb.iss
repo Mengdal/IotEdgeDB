@@ -37,7 +37,6 @@ RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "installservice"; Description: "Register iedb as a Windows service (auto-start on boot)"; GroupDescription: "Service"; Flags: unchecked
