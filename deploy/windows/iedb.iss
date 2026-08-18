@@ -62,7 +62,7 @@ Name: "{group}\Uninstall IotEdgeDB"; Filename: "{uninstallexe}"
 ; binPath points at the exe; WorkingDir makes it start in {app} so that
 ; ./front (served by s.app.Static("/", "./front")) resolves correctly.
 Filename: "sc"; Parameters: "create iedb binPath= ""{app}\{#MyAppExeName}"" start= auto DisplayName= ""IotEdgeDB"" obj= ""LocalSystem"""; WorkingDir: "{app}"; StatusMsg: "Registering iedb service..."; Tasks: installservice
-Filename: "sc"; Parameters: "config iedb env= ""IEDB_DATABASE_TEMP_DIRECTORY=C:\ProgramData\iedb\.tmp"" env= ""IEDB_STORAGE_LOCAL_PATH=C:\ProgramData\iedb\data"" env= ""IEDB_COMPACTION_TEMP_DIRECTORY=C:\ProgramData\iedb\data\compaction"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
+Filename: "sc"; Parameters: "config iedb env= ""IEDB_DATABASE_TEMP_DIRECTORY=C:\ProgramData\LMgateway\.tmp"" env= ""IEDB_STORAGE_LOCAL_PATH=C:\ProgramData\LMgateway\data"" env= ""IEDB_COMPACTION_TEMP_DIRECTORY=C:\ProgramData\LMgateway\data\compaction"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
 Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
 
 [UninstallRun]
@@ -78,7 +78,7 @@ var
   BaseDir: String;
   ResultCode: Integer;
 begin
-  BaseDir := 'C:\ProgramData\iedb';
+  BaseDir := 'C:\ProgramData\LMgateway';
   // Create base + subdirectories if they don't exist
   if not DirExists(BaseDir) then
     CreateDir(BaseDir);
