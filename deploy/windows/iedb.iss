@@ -20,7 +20,7 @@ AppUpdatesURL=https://github.com/Mengdal/IotEdgeDB/releases
 VersionInfoVersion={#MyAppVersionInfo}
 VersionInfoCompany=LMGateway
 VersionInfoDescription=IotEdgeDB - High-performance time-series database
-DefaultDirName={autopf}\iedb
+DefaultDirName=C:\LMgateway\iedb
 DefaultGroupName=IotEdgeDB
 ; Request administrator so we can register a Windows service when chosen
 PrivilegesRequired=admin
@@ -69,7 +69,7 @@ Name: "{group}\Uninstall IotEdgeDB"; Filename: "{uninstallexe}"
 ; binPath points at the exe; WorkingDir makes it start in {app} so that
 ; ./front (served by s.app.Static("/", "./front")) resolves correctly.
 Filename: "sc"; Parameters: "create iedb binPath= ""{app}\{#MyAppExeName}"" start= auto DisplayName= ""IotEdgeDB"" obj= ""LocalSystem"""; WorkingDir: "{app}"; StatusMsg: "Registering iedb service..."; Tasks: installservice
-Filename: "sc"; Parameters: "config iedb env= ""IEDB_DATABASE_TEMP_DIRECTORY=C:\LMgateway\iedb\.tmp"" env= ""IEDB_STORAGE_LOCAL_PATH=C:\LMgateway\iedb\data"" env= ""IEDB_COMPACTION_TEMP_DIRECTORY=C:\LMgateway\iedb\data\compaction"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
+Filename: "sc"; Parameters: "config iedb env= ""IEDB_DATABASE_TEMP_DIRECTORY={app}\.tmp"" env= ""IEDB_STORAGE_LOCAL_PATH={app}\data"" env= ""IEDB_COMPACTION_TEMP_DIRECTORY={app}\data\compaction"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
 Filename: "sc"; Parameters: "description iedb ""IotEdgeDB - High-performance time-series database service"""; WorkingDir: "{app}"; StatusMsg: "Setting iedb service description..."; Tasks: installservice
 Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
 
@@ -79,10 +79,13 @@ Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Start
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\front"
-; Remove the iedb data directories created under C:\LMgateway\iedb by the installer
-Type: filesandordirs; Name: "C:\LMgateway\iedb\.tmp"
-Type: filesandordirs; Name: "C:\LMgateway\iedb\data"
-Type: filesandordirs; Name: "C:\LMgateway\iedb"
+; Remove the iedb data directories created under the install dir by the installer
+Type: filesandordirs; Name: "{app}\.tmp"
+Type: filesandordirs; Name: "{app}\data"
+; NOTE: do NOT delete {app} itself here — the user may have selected a folder
+; that contains other files (e.g. C:\LMgateway). Only remove iedb-specific
+; subdirs. The binary/config/front under {app} are removed by the standard
+; uninstall logic.
 
 [Code]
 procedure CreateDataDir;
@@ -90,7 +93,9 @@ var
   BaseDir: String;
   ResultCode: Integer;
 begin
-  BaseDir := 'C:\LMgateway\iedb';
+  // Derive the data directory from the install dir the user chose ({app}),
+  // so everything (binary, config, front, data, tmp) lives under one folder.
+  BaseDir := ExpandConstant('{app}');
   // Create base + subdirectories if they don't exist
   if not DirExists(BaseDir) then
     CreateDir(BaseDir);
