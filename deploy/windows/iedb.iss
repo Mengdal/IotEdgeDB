@@ -31,11 +31,15 @@ OutputBaseFilename=iedb-{#MyAppVersion}-amd64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Default to Chinese UI, no language selection dialog
+ShowLanguageDialog=no
+LanguageDetectionMethod=uilanguage
 ; Uninstall previous version silently on upgrade
 CloseApplications=yes
 RestartApplications=no
 
 [Languages]
+Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
@@ -55,9 +59,10 @@ Name: "{group}\Uninstall IotEdgeDB"; Filename: "{uninstallexe}"
 
 [Run]
 ; Register as a Windows service only if the user checked the task.
-; binPath points at the exe; AppDirectory makes it start in {app} so that
+; binPath points at the exe; WorkingDir makes it start in {app} so that
 ; ./front (served by s.app.Static("/", "./front")) resolves correctly.
 Filename: "sc"; Parameters: "create iedb binPath= ""{app}\{#MyAppExeName}"" start= auto DisplayName= ""IotEdgeDB"" obj= ""LocalSystem"""; WorkingDir: "{app}"; StatusMsg: "Registering iedb service..."; Tasks: installservice
+Filename: "sc"; Parameters: "config iedb env= ""IEDB_STORAGE_LOCAL_PATH=C:\ProgramData\iedb\data"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
 Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
 
 [UninstallRun]
@@ -67,3 +72,23 @@ Filename: "sc"; Parameters: "delete iedb"; RunOnceId: "deliedbsvc"; StatusMsg: "
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\front"
+
+[Code]
+procedure CreateDataDir;
+var
+  DataDir: String;
+begin
+  DataDir := 'C:\ProgramData\iedb\data';
+  // Create the directory if it doesn't exist
+  if not DirExists(DataDir) then
+    CreateDir(DataDir);
+  // Grant Users group modify access so iedb can write when run manually
+  // (the LocalSystem service can already write anywhere)
+  ShellExec('open', 'icacls', DataDir + ' /grant BUILTIN\Users:(OI)(CI)M /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    CreateDataDir;
+end;
