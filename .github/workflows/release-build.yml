@@ -161,12 +161,14 @@ jobs:
           path: iedb-${{ matrix.suffix }}
           retention-days: 7
 
-  # Build Windows installer (Inno Setup) — compiles the binary and packages it.
-  # Runs on Windows runner: MinGW-w64 (via MSYS2) for CGO + iscc for the installer.
-  windows-package:
-    name: Build Windows Installer
-    runs-on: windows-latest
+  # Cross-compile Windows binary (CGO required for SQLite + DuckDB).
+  # Uses Ubuntu + MinGW GCC 12, which is compatible with DuckDB's prebuilt
+  # static libs (newer MinGW GCC on windows-latest fails to link them).
+  # Artifact is consumed by windows-package; it is NOT published standalone.
+  windows-build:
+    name: Build Windows Binary
     needs: prepare
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -177,25 +179,44 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      - name: Ensure MinGW-w64 toolchain is installed
-        shell: bash
+      - name: Install MinGW-w64 cross compiler (GCC 12)
         run: |
-          C:/msys64/usr/bin/bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-x86_64-gcc"
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix
 
-      - name: Build Windows binary (CGO, MinGW-w64)
-        shell: pwsh
+      - name: Build Windows binary
         env:
-          CGO_ENABLED: '1'
+          CGO_ENABLED: 1
           GOOS: windows
           GOARCH: amd64
-          CC: x86_64-w64-mingw32-gcc
-          CXX: x86_64-w64-mingw32-g++
+          CC: x86_64-w64-mingw32-gcc-posix
+          CXX: x86_64-w64-mingw32-g++-posix
         run: |
-          # Make MinGW-w64 cross compiler available on PATH
-          $env:PATH = "C:\msys64\mingw64\bin;" + $env:PATH
-          $VERSION = "${{ needs.prepare.outputs.version }}"
-          go build -tags=duckdb_arrow -trimpath "-ldflags=-s -w -X main.Version=$VERSION" -o iedb.exe ./cmd/iedb
-          ls -lh iedb.exe
+          VERSION=${{ needs.prepare.outputs.version }}
+          go build -tags=duckdb_arrow -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o iedb-windows-amd64.exe ./cmd/iedb
+          ls -lh iedb-windows-amd64.exe
+
+      - name: Upload Windows binary (for packaging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: iedb-binary-windows-amd64
+          path: iedb-windows-amd64.exe
+          retention-days: 7
+
+  # Build Windows installer (Inno Setup) on a Windows runner — only packages
+  # the prebuilt binary + config + frontend into an .exe installer.
+  windows-package:
+    name: Build Windows Installer
+    runs-on: windows-latest
+    needs: [prepare, windows-build]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: iedb-binary-windows-amd64
 
       - name: Prepare package staging directory
         shell: bash
@@ -203,8 +224,8 @@ jobs:
           STAGING="deploy/windows/build"
           mkdir -p "${STAGING}"
 
-          # Binary (already named iedb.exe)
-          cp iedb.exe "${STAGING}/iedb.exe"
+          # Binary (rename to plain iedb.exe for the installer)
+          cp iedb-windows-amd64.exe "${STAGING}/iedb.exe"
 
           # Config
           cp iedb.toml "${STAGING}/iedb.toml"
