@@ -177,17 +177,24 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      - name: Build Windows binary (CGO, MinGW-w64 via MSYS2)
+      - name: Ensure MinGW-w64 toolchain is installed
         shell: bash
         run: |
-          VERSION=${{ needs.prepare.outputs.version }}
-          # Compile inside MSYS2 so x86_64-w64-mingw32-gcc is on PATH
-          C:/msys64/usr/bin/bash.exe -lc "
-            export CGO_ENABLED=1 GOOS=windows GOARCH=amd64
-            export CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++
-            cd '${GITHUB_WORKSPACE}'
-            go build -tags=duckdb_arrow -trimpath -ldflags=\"-s -w -X main.Version=${VERSION}\" -o iedb.exe ./cmd/iedb
-          "
+          C:/msys64/usr/bin/bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-x86_64-gcc"
+
+      - name: Build Windows binary (CGO, MinGW-w64)
+        shell: pwsh
+        env:
+          CGO_ENABLED: '1'
+          GOOS: windows
+          GOARCH: amd64
+          CC: x86_64-w64-mingw32-gcc
+          CXX: x86_64-w64-mingw32-g++
+        run: |
+          # Make MinGW-w64 cross compiler available on PATH
+          $env:PATH = "C:\msys64\mingw64\bin;" + $env:PATH
+          $VERSION = "${{ needs.prepare.outputs.version }}"
+          go build -tags=duckdb_arrow -trimpath "-ldflags=-s -w -X main.Version=$VERSION" -o iedb.exe ./cmd/iedb
           ls -lh iedb.exe
 
       - name: Prepare package staging directory
