@@ -69,7 +69,7 @@ Name: "{group}\Uninstall IotEdgeDB"; Filename: "{uninstallexe}"
 ; binPath points at the exe; WorkingDir makes it start in {app} so that
 ; ./front (served by s.app.Static("/", "./front")) resolves correctly.
 Filename: "sc"; Parameters: "create iedb binPath= ""{app}\{#MyAppExeName}"" start= auto DisplayName= ""IotEdgeDB"" obj= ""LocalSystem"""; WorkingDir: "{app}"; StatusMsg: "Registering iedb service..."; Tasks: installservice
-Filename: "sc"; Parameters: "config iedb env= ""IEDB_DATABASE_TEMP_DIRECTORY=C:\LMgateway\.tmp"" env= ""IEDB_STORAGE_LOCAL_PATH=C:\LMgateway\data"" env= ""IEDB_COMPACTION_TEMP_DIRECTORY=C:\LMgateway\data\compaction"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
+Filename: "sc"; Parameters: "config iedb env= ""IEDB_DATABASE_TEMP_DIRECTORY=C:\LMgateway\iedb\.tmp"" env= ""IEDB_STORAGE_LOCAL_PATH=C:\LMgateway\iedb\data"" env= ""IEDB_COMPACTION_TEMP_DIRECTORY=C:\LMgateway\iedb\data\compaction"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
 Filename: "sc"; Parameters: "description iedb ""IotEdgeDB - High-performance time-series database service"""; WorkingDir: "{app}"; StatusMsg: "Setting iedb service description..."; Tasks: installservice
 Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
 
@@ -79,10 +79,10 @@ Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Start
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\front"
-; Remove the data directories created under C:\LMgateway by the installer
-Type: filesandordirs; Name: "C:\LMgateway\.tmp"
-Type: filesandordirs; Name: "C:\LMgateway\data"
-Type: filesandordirs; Name: "C:\LMgateway"
+; Remove the iedb data directories created under C:\LMgateway\iedb by the installer
+Type: filesandordirs; Name: "C:\LMgateway\iedb\.tmp"
+Type: filesandordirs; Name: "C:\LMgateway\iedb\data"
+Type: filesandordirs; Name: "C:\LMgateway\iedb"
 
 [Code]
 procedure CreateDataDir;
@@ -90,7 +90,7 @@ var
   BaseDir: String;
   ResultCode: Integer;
 begin
-  BaseDir := 'C:\LMgateway';
+  BaseDir := 'C:\LMgateway\iedb';
   // Create base + subdirectories if they don't exist
   if not DirExists(BaseDir) then
     CreateDir(BaseDir);
