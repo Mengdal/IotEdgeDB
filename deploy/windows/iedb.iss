@@ -66,9 +66,8 @@ Filename: "sc"; Parameters: "config iedb env= ""IEDB_STORAGE_LOCAL_PATH=C:\Progr
 Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
 
 [UninstallRun]
-; Stop and remove the service on uninstall (only if it exists).
-Filename: "sc"; Parameters: "stop iedb"; RunOnceId: "stopiedbsvc"; StatusMsg: "Stopping iedb service..."; Tasks: installservice
-Filename: "sc"; Parameters: "delete iedb"; RunOnceId: "deliedbsvc"; StatusMsg: "Removing iedb service..."; Tasks: installservice
+; (service cleanup is handled in [Code] below, unconditionally — so a service
+;  registered manually after install is also removed on uninstall)
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\front"
@@ -91,4 +90,28 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
     CreateDataDir;
+end;
+
+// Returns true if the "iedb" Windows service exists in SCM.
+function ServiceExists: Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := (ShellExec('open', 'sc', 'query iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0));
+end;
+
+// Unconditional service stop+delete on uninstall. This catches services that
+// were registered manually after install (not via the install task) too.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    if ServiceExists then
+    begin
+      ShellExec('open', 'sc', 'stop iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      ShellExec('open', 'sc', 'delete iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+  end;
 end;
