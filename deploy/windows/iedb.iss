@@ -62,7 +62,7 @@ Name: "{group}\Uninstall IotEdgeDB"; Filename: "{uninstallexe}"
 ; binPath points at the exe; WorkingDir makes it start in {app} so that
 ; ./front (served by s.app.Static("/", "./front")) resolves correctly.
 Filename: "sc"; Parameters: "create iedb binPath= ""{app}\{#MyAppExeName}"" start= auto DisplayName= ""IotEdgeDB"" obj= ""LocalSystem"""; WorkingDir: "{app}"; StatusMsg: "Registering iedb service..."; Tasks: installservice
-Filename: "sc"; Parameters: "config iedb env= ""IEDB_STORAGE_LOCAL_PATH=C:\ProgramData\iedb\data"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
+Filename: "sc"; Parameters: "config iedb env= ""IEDB_DATABASE_TEMP_DIRECTORY=C:\ProgramData\iedb\.tmp"" env= ""IEDB_STORAGE_LOCAL_PATH=C:\ProgramData\iedb\data"" env= ""IEDB_COMPACTION_TEMP_DIRECTORY=C:\ProgramData\iedb\data\compaction"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
 Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
 
 [UninstallRun]
@@ -75,16 +75,22 @@ Type: filesandordirs; Name: "{app}\front"
 [Code]
 procedure CreateDataDir;
 var
-  DataDir: String;
+  BaseDir: String;
   ResultCode: Integer;
 begin
-  DataDir := 'C:\ProgramData\iedb\data';
-  // Create the directory if it doesn't exist
-  if not DirExists(DataDir) then
-    CreateDir(DataDir);
+  BaseDir := 'C:\ProgramData\iedb';
+  // Create base + subdirectories if they don't exist
+  if not DirExists(BaseDir) then
+    CreateDir(BaseDir);
+  if not DirExists(BaseDir + '\.tmp') then
+    CreateDir(BaseDir + '\.tmp');
+  if not DirExists(BaseDir + '\data') then
+    CreateDir(BaseDir + '\data');
+  if not DirExists(BaseDir + '\data\compaction') then
+    CreateDir(BaseDir + '\data\compaction');
   // Grant Users group modify access so iedb can write when run manually
   // (the LocalSystem service can already write anywhere)
-  Exec(ExpandConstant('{cmd}'), '/c icacls "' + DataDir + '" /grant BUILTIN\Users:(OI)(CI)M /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/c icacls "' + BaseDir + '" /grant BUILTIN\Users:(OI)(CI)M /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
