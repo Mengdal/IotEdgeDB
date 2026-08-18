@@ -218,11 +218,20 @@ jobs:
           unzip -o "${FRONT_ZIP}" -d "${STAGING}"
           rm -f "${FRONT_ZIP}"
 
+      - name: Compute Windows version info (4-part, no leading zeros)
+        id: winver
+        shell: bash
+        run: |
+          # Inno Setup requires a.b.c.d with no octal-leading-zero parts.
+          VER="${{ needs.prepare.outputs.version }}"
+          WINVER=$(echo "${VER}" | awk -F. '{printf "%d.%d.%d.0", $1+0, $2+0, $3+0}')
+          echo "WINVER=${WINVER}" >> "$GITHUB_ENV"
+
       - name: Compile Inno Setup installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.9
         with:
           path: deploy/windows/iedb.iss
-          options: /DMyAppVersion=${{ needs.prepare.outputs.version }} /O"${{ github.workspace }}"
+          options: /DMyAppVersion=${{ needs.prepare.outputs.version }} /DMyAppVersionInfo=${{ env.WINVER }} /O"${{ github.workspace }}"
 
       - name: Create checksum
         shell: bash
