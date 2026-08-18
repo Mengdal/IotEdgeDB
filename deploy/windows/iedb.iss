@@ -31,9 +31,10 @@ OutputBaseFilename=iedb-{#MyAppVersion}-amd64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-; Default to Chinese UI, no language selection dialog
-ShowLanguageDialog=no
-LanguageDetectionMethod=uilanguage
+; Installer window/taskbar/uninstall-list icon (from frontend favicon)
+SetupIconFile=build\front\favicon.ico
+; Let the user pick the UI language (Chinese simplified offered first)
+ShowLanguageDialog=yes
 ; Uninstall previous version silently on upgrade
 CloseApplications=yes
 RestartApplications=no
@@ -43,7 +44,13 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "installservice"; Description: "Register iedb as a Windows service (auto-start on boot)"; GroupDescription: "Service"; Flags: unchecked
+Name: "installservice"; Description: "{cm:TaskInstallService}"; GroupDescription: "{cm:TaskServiceGroup}"; Flags: unchecked
+
+[CustomMessages]
+en.TaskInstallService=Register iedb as a Windows service (auto-start on boot)
+en.TaskServiceGroup=Service
+chs.TaskInstallService=注册 iedb 为 Windows 服务（开机自启）
+chs.TaskServiceGroup=服务
 
 [Files]
 ; Main binary
@@ -54,7 +61,7 @@ Source: "build/iedb.toml"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntex
 Source: "build/front/*"; DestDir: "{app}\front"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\IotEdgeDB"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+Name: "{group}\IotEdgeDB"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\front\favicon.ico"
 Name: "{group}\Uninstall IotEdgeDB"; Filename: "{uninstallexe}"
 
 [Run]
@@ -63,6 +70,7 @@ Name: "{group}\Uninstall IotEdgeDB"; Filename: "{uninstallexe}"
 ; ./front (served by s.app.Static("/", "./front")) resolves correctly.
 Filename: "sc"; Parameters: "create iedb binPath= ""{app}\{#MyAppExeName}"" start= auto DisplayName= ""IotEdgeDB"" obj= ""LocalSystem"""; WorkingDir: "{app}"; StatusMsg: "Registering iedb service..."; Tasks: installservice
 Filename: "sc"; Parameters: "config iedb env= ""IEDB_DATABASE_TEMP_DIRECTORY=C:\LMgateway\.tmp"" env= ""IEDB_STORAGE_LOCAL_PATH=C:\LMgateway\data"" env= ""IEDB_COMPACTION_TEMP_DIRECTORY=C:\LMgateway\data\compaction"""; WorkingDir: "{app}"; StatusMsg: "Configuring iedb service env..."; Tasks: installservice
+Filename: "sc"; Parameters: "description iedb ""IotEdgeDB - High-performance time-series database service"""; WorkingDir: "{app}"; StatusMsg: "Setting iedb service description..."; Tasks: installservice
 Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
 
 [UninstallRun]
@@ -71,6 +79,10 @@ Filename: "sc"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Start
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\front"
+; Remove the data directories created under C:\LMgateway by the installer
+Type: filesandordirs; Name: "C:\LMgateway\.tmp"
+Type: filesandordirs; Name: "C:\LMgateway\data"
+Type: filesandordirs; Name: "C:\LMgateway"
 
 [Code]
 procedure CreateDataDir;
