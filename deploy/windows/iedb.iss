@@ -92,8 +92,9 @@ Filename: "{app}\nssm.exe"; Parameters: "set iedb AppRotateBytes 10485760"; Work
 ; Start the service
 Filename: "{app}\nssm.exe"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
 ; "Open IotEdgeDB in browser" checkbox on the Finish page.
-; shellexec opens the URL in the user's default browser.
-Filename: "https://localhost:8000"; Description: "{cm:OpenWebUI}"; Flags: postinstall shellexec skipifsilent runasoriginaluser; Check: ServiceRunning
+; shellexec opens the URL in the user's default browser when the user
+; clicks Finish with this checkbox ticked.
+Filename: "http://localhost:8000"; Description: "{cm:OpenWebUI}"; Flags: postinstall shellexec skipifsilent
 
 [UninstallRun]
 ; (service cleanup is handled in [Code] below, unconditionally — so a service
@@ -131,17 +132,6 @@ begin
     until not FindNext(FindRec);
     FindClose(FindRec);
   end;
-end;
-
-// Returns true if the "iedb" service is currently RUNNING.
-// Used by the [Run] postinstall "open browser" entry so the checkbox only
-// appears when the service actually started.
-function ServiceRunning: Boolean;
-var
-  ResultCode: Integer;
-begin
-  // sc query in a terse format; state is on the 4th line as "STATE : X RUNNING"
-  Result := Exec(ExpandConstant('{cmd}'), '/c sc query iedb | findstr RUNNING', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
 end;
 
 procedure CreateDataDir;
