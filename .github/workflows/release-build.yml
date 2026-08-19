@@ -62,7 +62,8 @@ jobs:
       matrix:
         platform:
           - linux/amd64
-          - linux/arm64
+          # 测试时注释掉 arm64，CI 太慢；正式发布前再恢复
+          # - linux/arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
