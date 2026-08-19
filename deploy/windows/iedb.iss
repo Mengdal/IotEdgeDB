@@ -189,6 +189,14 @@ begin
     OpenWebBtn.Visible := False;
 end;
 
+// Returns true if the "iedb" Windows service exists in SCM.
+function ServiceExists: Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{cmd}'), '/c sc query iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
 // Stop the iedb service and wait for the process to exit before overwriting
 // files. This prevents "DeleteFile failed; error code 5: Access denied" when
 // reinstalling over an existing installation where the service is still running.
@@ -255,14 +263,6 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
     CreateDataDir;
-end;
-
-// Returns true if the "iedb" Windows service exists in SCM.
-function ServiceExists: Boolean;
-var
-  ResultCode: Integer;
-begin
-  Result := Exec(ExpandConstant('{cmd}'), '/c sc query iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
 end;
 
 // Unconditional service stop+remove on uninstall. This catches services that
