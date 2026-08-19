@@ -33,18 +33,22 @@ SolidCompression=yes
 WizardStyle=modern
 ; Installer window/taskbar/uninstall-list icon (from frontend favicon)
 SetupIconFile=build\front\favicon.ico
-; Let the user pick the UI language (Chinese simplified offered first)
+; Let the user pick the UI language (English dialog, Chinese offered in list)
 ShowLanguageDialog=yes
-; Do not auto-detect language from system locale — always show the dialog
-; and respect the user's choice for all UI strings.
-LanguageDetectionMethod=none
+; Auto-detect system locale to pre-select the matching language in the dialog,
+; but the dialog chrome (title/hint/buttons) uses the first listed language
+; (English) so it is never a mixed-language experience.
+; (LanguageDetectionMethod omitted = default uilanguage detection)
 ; Uninstall previous version silently on upgrade
 CloseApplications=yes
 RestartApplications=no
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; English first so the language-selection dialog itself (title, hint, OK/Cancel
+; buttons) renders in English. Users can still pick Chinese from the list and
+; the rest of the wizard switches to Chinese.
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "installservice"; Description: "{cm:TaskInstallService}"; GroupDescription: "{cm:TaskServiceGroup}"
@@ -274,6 +278,8 @@ var
   ResultCode: Integer;
   NssmPath: String;
   AppDir: String;
+  I: Integer;
+  Stopped: Boolean;
 begin
   if CurUninstallStep = usUninstall then
   begin
@@ -285,18 +291,52 @@ begin
         Exec(NssmPath, 'stop iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
       else
         Exec(ExpandConstant('{cmd}'), '/c sc stop iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+      // Wait up to ~10s for the iedb process to actually exit so its file
+      // handles are released before Inno Setup tries to delete iedb.exe.
+      Stopped := False;
+      for I := 1 to 20 do
+      begin
+        if not ServiceRunning then
+        begin
+          Stopped := True;
+          Break;
+        end;
+        Sleep(500);
+      end;
+
+      if not Stopped then
+        // Force-kill if it hasn't stopped gracefully
+        Exec(ExpandConstant('{cmd}'), '/c taskkill /F /IM iedb.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+      // Give Windows a moment to release file handles
+      Sleep(500);
+
       // Remove the service entry from SCM
       if FileExists(NssmPath) then
         Exec(NssmPath, 'remove iedb confirm', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
       else
         Exec(ExpandConstant('{cmd}'), '/c sc delete iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
-
-    // Remove the install dir itself if it is now empty.
-    // [UninstallDelete] already removed subdirs (front/.tmp/data/logs) and
-    // the standard uninstall removed iedb.exe/nssm.exe/iedb.toml. If anything
-    // else remains (user dropped their own files in), we leave the folder alone.
+  end
+  else if CurUninstallStep = usPostUninstall then
+  begin
+    // After standard file removal + [UninstallDelete], force-delete anything
+    // that might remain (iedb.exe/nssm.exe/data) due to late handle release.
     AppDir := ExpandConstant('{app}');
+    // Kill nssm.exe too (it may linger after remove)
+    Exec(ExpandConstant('{cmd}'), '/c taskkill /F /IM nssm.exe 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(300);
+    // Force-delete the main binaries if still present
+    if FileExists(AppDir + '\iedb.exe') then
+      DeleteFile(AppDir + '\iedb.exe');
+    if FileExists(AppDir + '\nssm.exe') then
+      DeleteFile(AppDir + '\nssm.exe');
+    // Force-delete data and logs dirs if [UninstallDelete] couldn't
+    Exec(ExpandConstant('{cmd}'), '/c rd /s /q "' + AppDir + '\data" 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{cmd}'), '/c rd /s /q "' + AppDir + '\logs" 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{cmd}'), '/c rd /s /q "' + AppDir + '\.tmp" 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // Remove the install dir itself if it is now empty.
     if DirExists(AppDir) and IsDirEmpty(AppDir) then
       RemoveDir(AppDir);
   end;
