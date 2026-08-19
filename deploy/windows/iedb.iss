@@ -49,10 +49,10 @@ Name: "installservice"; Description: "{cm:TaskInstallService}"; GroupDescription
 [CustomMessages]
 TaskInstallService=Register iedb as a Windows service (auto-start on boot)
 TaskServiceGroup=Service
-OpenWebUI=Open IotEdgeDB web UI in browser
+OpenWebUI=Open IotEdgeDB web UI
 chinesesimplified.TaskInstallService=注册 iedb 为 Windows 服务（开机自启）
 chinesesimplified.TaskServiceGroup=服务
-chinesesimplified.OpenWebUI=在浏览器中打开 IotEdgeDB 管理界面
+chinesesimplified.OpenWebUI=打开 IotEdgeDB 管理界面
 
 [Files]
 ; Main binary
@@ -91,10 +91,6 @@ Filename: "{app}\nssm.exe"; Parameters: "set iedb AppRotateFiles 1"; WorkingDir:
 Filename: "{app}\nssm.exe"; Parameters: "set iedb AppRotateBytes 10485760"; WorkingDir: "{app}"; StatusMsg: "Configuring service logging..."; Tasks: installservice
 ; Start the service
 Filename: "{app}\nssm.exe"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
-; "Open IotEdgeDB in browser" checkbox on the Finish page.
-; shellexec opens the URL in the user's default browser when the user
-; clicks Finish with this checkbox ticked.
-Filename: "http://localhost:8000"; Description: "{cm:OpenWebUI}"; Flags: postinstall shellexec skipifsilent
 
 [UninstallRun]
 ; (service cleanup is handled in [Code] below, unconditionally — so a service
@@ -112,6 +108,9 @@ Type: filesandordirs; Name: "{app}\logs"
 ; still cleaning up the default C:\LMgateway\iedb folder.
 
 [Code]
+
+var
+  OpenWebBtn: TNewButton;
 
 // Returns true if the given directory has no files or subdirectories inside.
 // Inno Setup's Pascal Script does not provide IsDirEmpty, so we check by
@@ -132,6 +131,57 @@ begin
     until not FindNext(FindRec);
     FindClose(FindRec);
   end;
+end;
+
+// Returns true if the "iedb" service is currently RUNNING.
+function ServiceRunning: Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{cmd}'), '/c sc query iedb | findstr RUNNING', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+// Click handler for the "Open" button: launches the browser, then closes
+// the wizard as if Finish was clicked.
+procedure OpenWebBtnClick(Sender: TObject);
+var
+  ResultCode: Integer;
+begin
+  ShellExec('open', 'http://localhost:8000', '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
+  WizardForm.Close;
+end;
+
+// Create the "Open" button on the Finish page, positioned to the left of
+// the Finish button. It is hidden by default and shown only when the
+// Finish page becomes active AND the service is running.
+procedure InitializeWizard;
+begin
+  OpenWebBtn := TNewButton.Create(WizardForm);
+  OpenWebBtn.Parent := WizardForm;
+  OpenWebBtn.Caption := ExpandConstant('{cm:OpenWebUI}');
+  OpenWebBtn.Width := ScaleX(90);
+  OpenWebBtn.Height := WizardForm.NextButton.Height;
+  OpenWebBtn.OnClick := @OpenWebBtnClick;
+  OpenWebBtn.Visible := False;
+end;
+
+// Show/hide the Open button when the Finish page is entered.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpFinished then
+  begin
+    // Position the Open button to the left of the Finish button
+    OpenWebBtn.SetBounds(
+      WizardForm.NextButton.Left - ScaleX(100),
+      WizardForm.NextButton.Top,
+      ScaleX(90),
+      WizardForm.NextButton.Height
+    );
+    // Only show if the service actually started
+    OpenWebBtn.Visible := ServiceRunning;
+  end
+  else
+    OpenWebBtn.Visible := False;
 end;
 
 procedure CreateDataDir;
