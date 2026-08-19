@@ -49,10 +49,10 @@ Name: "installservice"; Description: "{cm:TaskInstallService}"; GroupDescription
 [CustomMessages]
 TaskInstallService=Register iedb as a Windows service (auto-start on boot)
 TaskServiceGroup=Service
-OpenWebUI=Open IotEdgeDB web UI
+OpenWebUI=Open
 chinesesimplified.TaskInstallService=注册 iedb 为 Windows 服务（开机自启）
 chinesesimplified.TaskServiceGroup=服务
-chinesesimplified.OpenWebUI=打开 IotEdgeDB 管理界面
+chinesesimplified.OpenWebUI=打开
 
 [Files]
 ; Main binary
@@ -170,11 +170,11 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpFinished then
   begin
-    // Position the Open button to the left of the Finish button
+    // Position the Open button to the RIGHT of the Finish button
     OpenWebBtn.SetBounds(
-      WizardForm.NextButton.Left - ScaleX(100),
+      WizardForm.NextButton.Left + WizardForm.NextButton.Width + ScaleX(10),
       WizardForm.NextButton.Top,
-      ScaleX(90),
+      ScaleX(75),
       WizardForm.NextButton.Height
     );
     // Only show if the service actually started
