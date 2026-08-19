@@ -44,11 +44,9 @@ CloseApplications=yes
 RestartApplications=no
 
 [Languages]
-; English first so the language-selection dialog itself (title, hint, OK/Cancel
-; buttons) renders in English. Users can still pick Chinese from the list and
-; the rest of the wizard switches to Chinese.
-Name: "english"; MessagesFile: "compiler:Default.isl"
+; Chinese first so it is pre-selected by default on the language dialog.
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "installservice"; Description: "{cm:TaskInstallService}"; GroupDescription: "{cm:TaskServiceGroup}"
