@@ -35,6 +35,9 @@ WizardStyle=modern
 SetupIconFile=build\front\favicon.ico
 ; Let the user pick the UI language (Chinese simplified offered first)
 ShowLanguageDialog=yes
+; Do not auto-detect language from system locale — always show the dialog
+; and respect the user's choice for all UI strings.
+LanguageDetectionMethod=none
 ; Uninstall previous version silently on upgrade
 CloseApplications=yes
 RestartApplications=no
@@ -142,13 +145,15 @@ begin
 end;
 
 // Click handler for the "Open" button: launches the browser, then closes
-// the wizard as if Finish was clicked.
+// the wizard by programmatically clicking the Finish button.
 procedure OpenWebBtnClick(Sender: TObject);
 var
   ResultCode: Integer;
 begin
   ShellExec('open', 'http://localhost:8000', '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
-  WizardForm.Close;
+  // On the Finish page, WizardForm.Close does not terminate the wizard.
+  // Programmatically clicking the Finish button works reliably.
+  WizardForm.NextButton.OnClick(WizardForm.NextButton);
 end;
 
 // Create the "Open" button on the Finish page, positioned to the left of
@@ -182,6 +187,44 @@ begin
   end
   else
     OpenWebBtn.Visible := False;
+end;
+
+// Stop the iedb service and wait for the process to exit before overwriting
+// files. This prevents "DeleteFile failed; error code 5: Access denied" when
+// reinstalling over an existing installation where the service is still running.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+  I: Integer;
+  Stopped: Boolean;
+begin
+  Result := '';
+  if not ServiceExists then
+    exit;
+
+  // Stop the service (use sc.exe since it's always available; nssm.exe may not
+  // be installed yet or may be in {app} which we're about to overwrite).
+  Exec(ExpandConstant('{cmd}'), '/c sc stop iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Wait up to ~10s for the iedb process to actually exit so its exe handle
+  // is released and the installer can overwrite iedb.exe.
+  Stopped := False;
+  for I := 1 to 20 do
+  begin
+    if not ServiceRunning then
+    begin
+      Stopped := True;
+      Break;
+    end;
+    Sleep(500);
+  end;
+
+  if not Stopped then
+    // If it still hasn't stopped, kill the process tree as a last resort.
+    Exec(ExpandConstant('{cmd}'), '/c taskkill /F /IM iedb.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Give Windows a moment to release the file handle after process exit.
+  Sleep(500);
 end;
 
 procedure CreateDataDir;
