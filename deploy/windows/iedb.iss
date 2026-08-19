@@ -49,8 +49,10 @@ Name: "installservice"; Description: "{cm:TaskInstallService}"; GroupDescription
 [CustomMessages]
 TaskInstallService=Register iedb as a Windows service (auto-start on boot)
 TaskServiceGroup=Service
+OpenWebUI=Open IotEdgeDB web UI in browser
 chinesesimplified.TaskInstallService=注册 iedb 为 Windows 服务（开机自启）
 chinesesimplified.TaskServiceGroup=服务
+chinesesimplified.OpenWebUI=在浏览器中打开 IotEdgeDB 管理界面
 
 [Files]
 ; Main binary
@@ -89,6 +91,9 @@ Filename: "{app}\nssm.exe"; Parameters: "set iedb AppRotateFiles 1"; WorkingDir:
 Filename: "{app}\nssm.exe"; Parameters: "set iedb AppRotateBytes 10485760"; WorkingDir: "{app}"; StatusMsg: "Configuring service logging..."; Tasks: installservice
 ; Start the service
 Filename: "{app}\nssm.exe"; Parameters: "start iedb"; WorkingDir: "{app}"; StatusMsg: "Starting iedb service..."; Tasks: installservice
+; "Open IotEdgeDB in browser" checkbox on the Finish page.
+; shellexec opens the URL in the user's default browser.
+Filename: "https://localhost:8000"; Description: "{cm:OpenWebUI}"; Flags: postinstall shellexec skipifsilent runasoriginaluser; Check: ServiceRunning
 
 [UninstallRun]
 ; (service cleanup is handled in [Code] below, unconditionally — so a service
@@ -100,12 +105,45 @@ Type: filesandordirs; Name: "{app}\front"
 Type: filesandordirs; Name: "{app}\.tmp"
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\logs"
-; NOTE: do NOT delete {app} itself here — the user may have selected a folder
-; that contains other files (e.g. C:\LMgateway). Only remove iedb-specific
-; subdirs. The binary/config/front under {app} are removed by the standard
-; uninstall logic.
+; NOTE: {app} itself is removed in [Code] CurUninstallStepChanged, but ONLY if
+; it is empty after the above subdirs and the standard file removal are done.
+; This avoids nuking a user-selected parent folder (e.g. C:\LMgateway) while
+; still cleaning up the default C:\LMgateway\iedb folder.
 
 [Code]
+
+// Returns true if the given directory has no files or subdirectories inside.
+// Inno Setup's Pascal Script does not provide IsDirEmpty, so we check by
+// looking for any first entry via FindFirst.
+function IsDirEmpty(const Dir: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := True;
+  if FindFirst(AddBackslash(Dir) + '*', FindRec) then
+  begin
+    repeat
+      if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+      begin
+        Result := False;
+        Break;
+      end;
+    until not FindNext(FindRec);
+    FindClose(FindRec);
+  end;
+end;
+
+// Returns true if the "iedb" service is currently RUNNING.
+// Used by the [Run] postinstall "open browser" entry so the checkbox only
+// appears when the service actually started.
+function ServiceRunning: Boolean;
+var
+  ResultCode: Integer;
+begin
+  // sc query in a terse format; state is on the 4th line as "STATE : X RUNNING"
+  Result := Exec(ExpandConstant('{cmd}'), '/c sc query iedb | findstr RUNNING', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
 procedure CreateDataDir;
 var
   BaseDir: String;
@@ -152,6 +190,7 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ResultCode: Integer;
   NssmPath: String;
+  AppDir: String;
 begin
   if CurUninstallStep = usUninstall then
   begin
@@ -169,5 +208,13 @@ begin
       else
         Exec(ExpandConstant('{cmd}'), '/c sc delete iedb', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
+
+    // Remove the install dir itself if it is now empty.
+    // [UninstallDelete] already removed subdirs (front/.tmp/data/logs) and
+    // the standard uninstall removed iedb.exe/nssm.exe/iedb.toml. If anything
+    // else remains (user dropped their own files in), we leave the folder alone.
+    AppDir := ExpandConstant('{app}');
+    if DirExists(AppDir) and IsDirEmpty(AppDir) then
+      RemoveDir(AppDir);
   end;
 end;
