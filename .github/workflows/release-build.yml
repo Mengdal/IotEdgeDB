@@ -161,6 +161,114 @@ jobs:
           path: iedb-${{ matrix.suffix }}
           retention-days: 7
 
+  # Build Windows installer (Inno Setup) on a Windows runner.
+  # Compiles the binary natively with MinGW-w64 GCC 13 (CGO) — DuckDB's
+  # windows-amd64 static lib links cleanly with GCC 13, unlike GCC 16 on
+  # the default runner image. Then packages exe + toml + front into an installer.
+  windows-package:
+    name: Build Windows Installer
+    runs-on: windows-latest
+    needs: prepare
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Install MinGW-w64 (GCC 13) for CGO
+        shell: pwsh
+        run: |
+          choco install mingw --version=13.2.0 --no-progress -y
+          # Put MinGW 13 bin on PATH (choco installs to C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin)
+          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -Append -FilePath $env:GITHUB_PATH
+
+      - name: Build Windows binary (CGO, native MinGW)
+        shell: pwsh
+        env:
+          CGO_ENABLED: '1'
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          # Ensure the choco-installed GCC 13 takes priority over any other MinGW on PATH
+          $env:PATH = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin;" + $env:PATH
+          $VERSION = "${{ needs.prepare.outputs.version }}"
+          gcc --version | Select-Object -First 1
+          go build -tags=duckdb_arrow -trimpath "-ldflags=-s -w -X main.Version=$VERSION" -o iedb.exe ./cmd/iedb
+          if (-not (Test-Path iedb.exe)) { exit 1 }
+
+      - name: Prepare package staging directory
+        shell: bash
+        run: |
+          STAGING="deploy/windows/build"
+          mkdir -p "${STAGING}"
+
+          # Binary
+          cp iedb.exe "${STAGING}/iedb.exe"
+
+          # Config
+          cp iedb.toml "${STAGING}/iedb.toml"
+
+          # Frontend (zip contains a front/ directory)
+          FRONT_ZIP="${RUNNER_TEMP}/front.zip"
+          curl -fsSL -o "${FRONT_ZIP}" -L "https://github.com/Mengdal/iedb-ui/releases/latest/download/front.zip"
+          unzip -o "${FRONT_ZIP}" -d "${STAGING}"
+          rm -f "${FRONT_ZIP}"
+
+          # NSSM (Non-Sucking Service Manager) — wraps iedb.exe as a proper
+          # Windows service. iedb.exe is a console app and cannot talk to SCM
+          # directly, so sc create/start fails with error 1053.
+          curl -fsSL -o "${RUNNER_TEMP}/nssm.zip" -L "https://nssm.cc/release/nssm-2.24.zip"
+          unzip -o "${RUNNER_TEMP}/nssm.zip" -d "${RUNNER_TEMP}/nssm-extract"
+          cp "${RUNNER_TEMP}/nssm-extract/nssm-2.24/win64/nssm.exe" "${STAGING}/nssm.exe"
+          rm -rf "${RUNNER_TEMP}/nssm.zip" "${RUNNER_TEMP}/nssm-extract"
+
+      - name: Compute Windows version info (4-part, no leading zeros)
+        id: winver
+        shell: bash
+        run: |
+          # Inno Setup requires a.b.c.d with no octal-leading-zero parts.
+          VER="${{ needs.prepare.outputs.version }}"
+          WINVER=$(echo "${VER}" | awk -F. '{printf "%d.%d.%d.0", $1+0, $2+0, $3+0}')
+          echo "WINVER=${WINVER}" >> "$GITHUB_ENV"
+          echo "Computed WINVER=${WINVER}"
+
+      - name: Install Simplified Chinese language for Inno Setup
+        shell: pwsh
+        run: |
+          $langDir = "C:\Program Files (x86)\Inno Setup 6\Languages"
+          if (-not (Test-Path $langDir)) { New-Item -ItemType Directory -Path $langDir | Out-Null }
+          $isl = Join-Path $langDir "ChineseSimplified.isl"
+          if (-not (Test-Path $isl)) {
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl" -OutFile $isl
+          }
+          Test-Path $isl
+
+      - name: Compile Inno Setup installer
+        shell: cmd
+        env:
+          MYAPP_VERSION: ${{ needs.prepare.outputs.version }}
+          MYAPP_VERSION_INFO: ${{ env.WINVER }}
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DMyAppVersion=%MYAPP_VERSION% /DMyAppVersionInfo=%MYAPP_VERSION_INFO% /O"%GITHUB_WORKSPACE%" deploy\windows\iedb.iss
+
+      - name: Create checksum
+        shell: bash
+        run: |
+          sha256sum iedb-${{ needs.prepare.outputs.version }}-amd64.exe > iedb-${{ needs.prepare.outputs.version }}-amd64.exe.sha256
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: iedb-windows-installer-${{ needs.prepare.outputs.version }}
+          path: |
+            iedb-${{ needs.prepare.outputs.version }}-amd64.exe
+            iedb-${{ needs.prepare.outputs.version }}-amd64.exe.sha256
+          retention-days: 7
+
   # Build Debian packages
   debian-build:
     name: Build Debian Package
@@ -716,7 +824,7 @@ jobs:
   create-draft-release:
     name: Create Draft Release
     runs-on: ubuntu-latest
-    needs: [prepare, docker-merge, test-docker, test-binary, helm-package, test-helm, debian-build, rpm-build]
+    needs: [prepare, docker-merge, test-docker, test-binary, helm-package, test-helm, debian-build, rpm-build, windows-package]
     permissions:
       contents: write
     steps:
@@ -817,6 +925,7 @@ jobs:
           | Debian/Ubuntu | arm64 | `iedb_${{ needs.prepare.outputs.version }}_arm64.deb` |
           | RHEL/Fedora | x86_64 | `iedb-${{ needs.prepare.outputs.version }}-1.x86_64.rpm` |
           | RHEL/Fedora | aarch64 | `iedb-${{ needs.prepare.outputs.version }}-1.aarch64.rpm` |
+          | Windows | amd64 | `iedb-${{ needs.prepare.outputs.version }}-amd64.exe` |
           | Kubernetes | - | `iedb-${{ needs.prepare.outputs.version }}.tgz` (Helm) |
 
           ## Documentation
@@ -846,6 +955,8 @@ jobs:
             release-artifacts/**/*.deb.sha256
             release-artifacts/**/*.rpm
             release-artifacts/**/*.rpm.sha256
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.exe.sha256
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

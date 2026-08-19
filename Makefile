@@ -9,7 +9,20 @@ GO=go
 GOFLAGS=-v -tags=duckdb_arrow -trimpath
 MAIN_PATH=./cmd/iedb
 
-# windows go build -v -tags=duckdb_arrow -o iedb.exe ./cmd/iedb
+# Windows cross-compile (run on macOS/Linux):
+#   requires MinGW-w64 cross compiler (brew install mingw-w64 on macOS)
+#   produces iedb-windows-amd64.exe targeting windows/amd64
+#   usage: make build-windows VERSION=26.08.30
+#   Debian/Ubuntu apt may default to the win32 threads variant, which Go's
+#   cgo runtime cannot link; pass the -posix variant explicitly:
+#     make build-windows CC_WINDOWS=x86_64-w64-mingw32-gcc-posix CXX_WINDOWS=x86_64-w64-mingw32-g++-posix
+CC_WINDOWS ?= x86_64-w64-mingw32-gcc
+CXX_WINDOWS ?= x86_64-w64-mingw32-g++
+
+# Derive version from git tag if not provided (bare SHA for untagged builds
+# would be useless as a version, so fall back to main.go's "dev")
+VERSION ?= $(shell git describe --tags 2>/dev/null || echo dev)
+LDFLAGS_VERSION=-X main.Version=$(VERSION)
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -32,6 +45,10 @@ build-linux-arm64: ## Build for Linux ARM64 (requires aarch64-linux-gnu-gcc) 放
 
 run: ## Run iedb directly (without building)
 	$(GO) run $(GOFLAGS) $(MAIN_PATH)
+
+build-windows: ## Cross-compile iedb-windows-amd64.exe for Windows/amd64 (requires mingw-w64)
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=$(CC_WINDOWS) CXX=$(CXX_WINDOWS) \
+		$(GO) build $(GOFLAGS) -ldflags="-s -w $(LDFLAGS_VERSION)" -o $(BINARY_NAME)-windows-amd64.exe $(MAIN_PATH)
 
 test: ## Run all tests
 	$(GO) test $(GOFLAGS) -race -coverprofile=coverage.out ./...
